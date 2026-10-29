@@ -18,7 +18,9 @@ import { chromium } from "@playwright/test";
 //   - a refused save says why and keeps the card; viewers never see the button;
 //   - on any track page a spoken problem becomes an action on that track
 //     (POST /track-actions), or opens a filled-in FixTrack report;
-//   - words Safari heard but never finalised are kept when listening stops.
+//   - words Safari heard but never finalised are kept when listening stops;
+//   - on a track page, what was said opens that track's own form filled in
+//     (pool test, GreenTrack machine), going to the track's page if needed.
 // VOICE_LOG_SCREENSHOTS=<dir> saves screenshots.
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const freePort = async () => {
@@ -354,6 +356,55 @@ async function checkActions() {
   await context.close();
 }
 
+async function checkForms() {
+  const context = await browser.newContext({ locale: "en-GB", viewport: { width: 390, height: 844 } });
+  const api = apiFixture({ services: ["kitchentrack", "aquatrack", "greentrack", "fixtrack"] });
+  await context.route("**/api/**", api.handler);
+  await context.addInitScript(installFakeRecognition);
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", error => pageErrors.push(error.message));
+  await page.goto(`${baseUrl}/tests/voice-log-harness.html`, { waitUntil: "domcontentloaded" });
+  await page.getByTestId("say-it-button").waitFor();
+  const filled = async () => JSON.parse(await page.getByTestId("say-it-fill").textContent());
+
+  // On AquaTrack, readings open AquaTrack's water test form filled in.
+  await page.evaluate(() => window.history.replaceState(null, "", "/aqua-track"));
+  let dialog = await openSayIt(page);
+  await sayAndWaitForCard(page, dialog, "pH 7.4, free chlorine 1.5, combined 0.2, water 29 degrees");
+  const card = dialog.getByTestId("voice-log-card");
+  await card.getByText("AquaTrack (water tests) · water test").waitFor();
+  const fields = await card.getByTestId("voice-log-form-fields").textContent();
+  for (const field of ["7.4", "1.5", "0.2", "29"]) assert.ok(fields.includes(field), `${field} in ${fields}`);
+  await shot(page, "6-pool-test-form");
+  const save = dialog.getByTestId("voice-log-save");
+  assert.equal(await save.textContent(), "Fill in the form");
+  await save.click();
+  await dialog.waitFor({ state: "detached" });
+  assert.equal(new URL(page.url()).pathname, "/aqua-track", "already on the page");
+  assert.deepEqual(await filled(), {
+    form: "pool-test", values: { ph: 7.4, combinedChlorine: 0.2, freeChlorine: 1.5, waterTemp: 29 }, siteId: 1,
+    text: "pH 7.4, free chlorine 1.5, combined 0.2, water 29 degrees",
+  });
+
+  // From a page with no track, the words choose the track and Say it goes there.
+  await page.evaluate(() => window.history.replaceState(null, "", "/tests/voice-log-harness.html"));
+  dialog = await openSayIt(page);
+  await sayAndWaitForCard(page, dialog, "greens mower 2 filled 20 litres of diesel");
+  await dialog.getByTestId("voice-log-card").getByText("GreenTrack · fuel log").waitFor();
+  await dialog.getByTestId("voice-log-save").click();
+  await dialog.waitFor({ state: "detached" });
+  assert.equal(new URL(page.url()).pathname, "/green-track");
+  assert.deepEqual(await filled(), {
+    form: "machine", item: "greens mower 2", values: { intent: "fuel", litres: 20 }, siteId: 1,
+    text: "greens mower 2 filled 20 litres of diesel",
+  });
+
+  assert.equal(api.posts.length, 0, "the track's own form saves, not Say it");
+  assert.deepEqual(pageErrors, []);
+  await context.close();
+}
+
 async function checkViewer() {
   const context = await browser.newContext({ locale: "en-GB" });
   const api = apiFixture({ role: "client_viewer" });
@@ -372,6 +423,7 @@ try {
   await checkSayIt();
   await checkRefusedSave();
   await checkActions();
+  await checkForms();
   await checkViewer();
   console.log("voice-log browser tests passed");
 } finally {

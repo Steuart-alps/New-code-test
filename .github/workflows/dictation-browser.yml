@@ -17,6 +17,9 @@ on:
       - "artifacts/compliance-tracker/src/lib/voice-log.ts"
       - "artifacts/compliance-tracker/src/lib/voice-actions.ts"
       - "artifacts/compliance-tracker/tests/voice-actions*"
+      - "artifacts/compliance-tracker/src/lib/voice-forms.ts"
+      - "artifacts/compliance-tracker/src/lib/say-it-fill.ts"
+      - "artifacts/compliance-tracker/tests/voice-forms*"
       - "artifacts/compliance-tracker/src/components/layout.tsx"
       - "artifacts/compliance-tracker/src/components/voice-log-dialog.tsx"
       - "artifacts/compliance-tracker/src/components/say-it-button.tsx"
@@ -42,6 +45,9 @@ on:
       - "artifacts/compliance-tracker/src/lib/voice-log.ts"
       - "artifacts/compliance-tracker/src/lib/voice-actions.ts"
       - "artifacts/compliance-tracker/tests/voice-actions*"
+      - "artifacts/compliance-tracker/src/lib/voice-forms.ts"
+      - "artifacts/compliance-tracker/src/lib/say-it-fill.ts"
+      - "artifacts/compliance-tracker/tests/voice-forms*"
       - "artifacts/compliance-tracker/src/components/layout.tsx"
       - "artifacts/compliance-tracker/src/components/voice-log-dialog.tsx"
       - "artifacts/compliance-tracker/src/components/say-it-button.tsx"
@@ -91,6 +97,9 @@ jobs:
 
       - name: Say it action reader
         run: pnpm --filter @workspace/compliance-tracker run test:voice-actions
+
+      - name: Say it track form reader
+        run: pnpm --filter @workspace/compliance-tracker run test:voice-forms
 
       - name: Say it browser checks
         run: pnpm --filter @workspace/compliance-tracker run test:voice-log-browser

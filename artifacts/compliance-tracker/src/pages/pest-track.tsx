@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSayItFill, withSpokenNote, type SayItFill } from "@/lib/say-it-fill";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
@@ -297,12 +298,14 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
 
 // ─── ActivityDialog ───────────────────────────────────────────────────────────
 
-function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
+function ActivityDialog({ open, activity, onClose, onSaved, sites, spoken }: {
   open: boolean;
   activity: PestActivity | null;
   onClose: () => void;
   onSaved: () => void;
   sites: { id: number; name: string }[];
+  /** A sighting said to Say it, filled in when the dialog opens. */
+  spoken?: SayItFill | null;
 }) {
   const { toast } = useToast();
   const isEdit = !!activity;
@@ -327,6 +330,23 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }));
+
+  useEffect(() => {
+    if (!open || activity || !spoken) return;
+    const v = spoken.values;
+    const option = (value: unknown, options: string[], fallback: string) => (typeof value === "string" && options.includes(value) ? value : fallback);
+    setForm(f => ({
+      ...f,
+      recordedDate: new Date().toISOString().slice(0, 10),
+      pestType: option(v.pestType, pestTypeOpts, pestTypeOpts.includes("rodent") ? "rodent" : pestTypeOpts[0] ?? f.pestType),
+      evidenceType: option(v.evidenceType, evidenceTypeOpts, evidenceTypeOpts[0] ?? f.evidenceType),
+      location: typeof v.location === "string" ? v.location : "",
+      severity: typeof v.severity === "string" ? v.severity : "low",
+      actionTaken: "", resolved: false,
+      notes: withSpokenNote("", spoken.text),
+      siteId: spoken.siteId ? String(spoken.siteId) : f.siteId,
+    }));
+  }, [open, spoken]);
 
   const handleSave = async () => {
     if (!form.recordedDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
@@ -526,6 +546,14 @@ export default function PestTrackPage() {
   const [configDialog, setConfigDialog]     = useState(false);
   const [editVisit, setEditVisit]           = useState<PestVisit | null>(null);
   const [editActivity, setEditActivity]     = useState<PestActivity | null>(null);
+  // A sighting said to Say it ("mouse droppings in the dry store").
+  const [spokenActivity, setSpokenActivity] = useState<SayItFill | null>(null);
+  useSayItFill(["pest-activity"], fill => {
+    setActiveTab("activity");
+    setEditActivity(null);
+    setSpokenActivity(fill);
+    setActivityDialog(true);
+  });
   const [deleteVisitId, setDeleteVisitId]   = useState<number | null>(null);
   const [deleteActivityId, setDeleteActivityId] = useState<number | null>(null);
   const [downloading, setDownloading] = useState(false);
@@ -970,8 +998,9 @@ export default function PestTrackPage() {
         open={activityDialog}
         activity={editActivity}
         sites={sites}
+        spoken={spokenActivity}
         onSaved={refetchAll}
-        onClose={() => { setActivityDialog(false); setEditActivity(null); }}
+        onClose={() => { setActivityDialog(false); setEditActivity(null); setSpokenActivity(null); }}
       />
       {canAdmin && (
         <ConfigDialog

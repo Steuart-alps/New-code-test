@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { CheckCircle2, ClipboardList, Flame, Loader2, Mic, Snowflake, Square, Thermometer, Droplets, Wrench, XCircle } from "lucide-react";
+import { CheckCircle2, ClipboardList, FileInput, Flame, Loader2, Mic, Snowflake, Square, Thermometer, Droplets, Wrench, XCircle } from "lucide-react";
 import {
   assessKitchenTemperatures, kitchenFailureValue, kitchenHoldRequirement, parseKitchenTemperatureRules,
   temperatureRangeLabel, useListSites, type KitchenTemperatureRules,
@@ -23,8 +23,10 @@ import {
   type CallPointOption, type KitchenCoreSection, type OutletOption, type VoiceCatalogue, type VoiceReading,
 } from "@/lib/voice-log";
 import {
-  actionTracks, guessTrack, looksLikeProblem, readSpokenAction, sayItTrack, type ActionSeverity, type SayItTrack,
+  SAY_IT_TRACKS, actionTracks, guessTrack, looksLikeProblem, readSpokenAction, sayItTrack, trackForPath, type ActionSeverity, type SayItTrack,
 } from "@/lib/voice-actions";
+import { FORM_EXAMPLES, FORM_TRACKS, OPEN_FORM_TRACKS, readSayItForm, type SayItFormReading } from "@/lib/voice-forms";
+import { sendSayItFill } from "@/lib/say-it-fill";
 import { cn } from "@/lib/utils";
 
 type Outlet = OutletOption & { siteId: number | null; checkTypeForOutlet: string };
@@ -43,6 +45,7 @@ type Draft =
   | { kind: "fire_alarm"; callPointId: number | null; result: "pass" | "fail" | null; notes: string }
   | { kind: "water_outlet"; outletId: number | null; temperature: string; notes: string }
   | { kind: "track_action"; module: string; title: string; severity: ActionSeverity }
+  | { kind: "track_form"; form: SayItFormReading }
   | { kind: "unknown"; reason: string };
 
 const SEVERITY_LABEL: Record<ActionSeverity, string> = { monitor: "Monitor", action_required: "Action required", urgent: "Urgent" };
@@ -108,6 +111,22 @@ function soundsLikeAction(reading: VoiceReading, heard: string): boolean {
   return (reading.kind === "cold_unit" || reading.kind === "water_outlet" || reading.kind === "kitchen_core") && reading.temperature === null;
 }
 
+/**
+ * A phrase for a track's own form: on that track's page ("pH 7.4 chlorine
+ * 1.5" on AquaTrack), or, on a page with no track, a phrase whose words name
+ * the track ("mouse droppings in the dry store"). Forms that take any words
+ * (incidents, inspections, repairs) come after the readings Say it saves.
+ */
+function formFor(heard: string, reading: VoiceReading, pageTrack: string | null | undefined, formTracks: SayItTrack[], openFormsFirst: boolean): SayItFormReading | null {
+  const onPage = formTracks.find((track) => track.key === pageTrack)?.key;
+  if (onPage) {
+    if (OPEN_FORM_TRACKS.has(onPage) && !openFormsFirst && reading.kind !== "unknown") return null;
+    return readSayItForm(heard, onPage);
+  }
+  if (pageTrack) return null;
+  return readSayItForm(heard, guessTrack(heard, formTracks));
+}
+
 const isNumber = (value: string) => /^-?\d+(?:\.\d+)?$/.test(value.trim());
 const outletLabel = (o: { name: string; location?: string | null }) => o.name + (o.location ? ` — ${o.location}` : "");
 
@@ -125,7 +144,7 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId, pageTrack }: {
   pageTrack?: string | null;
 }) {
   const { user, hasService } = useAuth();
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { data: sites = [] } = useListSites();
@@ -133,6 +152,9 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId, pageTrack }: {
   const hasFire = hasService("firetrack");
   const hasWater = hasService("legionellatrack");
   const tracks = useMemo(() => actionTracks(hasService, user?.role), [hasService, user?.role]);
+  const formTracks = useMemo(() => user && user.role !== "client_viewer"
+    ? SAY_IT_TRACKS.filter((track) => FORM_TRACKS.includes(track.key) && track.services.some(hasService)) : [],
+  [hasService, user]);
   const hasFixTrack = hasService("fixtrack") && user?.role !== "client_viewer";
 
   const [siteId, setSiteId] = useState<number | null>(null);
@@ -195,12 +217,16 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId, pageTrack }: {
     if (!catalogue || !heard.trim()) { setReading(null); setDraft(null); return; }
     const next = readSpokenReading(heard, catalogue);
     setReading(next);
-    setDraft(tracks.length && soundsLikeAction(next, heard) ? actionDraft(heard, tracks, pageTrack) : draftFrom(next));
+    const form = formFor(heard, next, pageTrack, formTracks, soundsLikeAction(next, heard) || next.kind === "unknown");
+    setDraft(form ? { kind: "track_form", form }
+      : tracks.length && soundsLikeAction(next, heard) ? actionDraft(heard, tracks, pageTrack) : draftFrom(next));
   }, [heard, catalogue]);
   const raiseAsAction = () => { if (heard.trim()) setDraft(actionDraft(heard, tracks, pageTrack)); };
   const reportInFixTrack = () => {
     const title = draft?.kind === "track_action" ? draft.title : readSpokenAction(heard).title;
     const params = new URLSearchParams({ report: "1", title: title.slice(0, 200) });
+    const place = draft?.kind === "track_form" && draft.form.form === "fix-report" ? draft.form.values.location : undefined;
+    if (typeof place === "string") params.set("location", place.slice(0, 300));
     if (siteId !== null) params.set("siteId", String(siteId));
     stop();
     onClose();
@@ -292,8 +318,18 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId, pageTrack }: {
     return null;
   })();
 
+  // A track's form opens filled in, on its own page, to check and save there.
+  const fillForm = (form: SayItFormReading) => {
+    if (form.form === "fix-report") { reportInFixTrack(); return; }
+    stop();
+    sendSayItFill({ form: form.form, item: form.item, values: form.values, siteId, text: heard.trim() });
+    onClose();
+    if (trackForPath(location) !== form.track && !location.startsWith(form.path)) setLocation(form.path);
+  };
+
   async function save() {
     if (!draft || missing || !catalogue) return;
+    if (draft.kind === "track_form") { fillForm(draft.form); return; }
     stop();
     setSaving(true);
     const spoken = heard.trim().slice(0, 500);
@@ -381,7 +417,10 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId, pageTrack }: {
   }
 
   const noTracks = !hasKitchen && !hasFire && !hasWater && !tracks.length;
-  const examples = sayItExamples({ hasKitchen, hasFire, hasWater, pageTrack, actionTrack: tracks.find((t) => t.key === pageTrack) ?? (tracks.length ? tracks[0] : undefined) });
+  const examples = sayItExamples({
+    hasKitchen, hasFire, hasWater, pageTrack, actionTrack: tracks.find((t) => t.key === pageTrack) ?? (tracks.length ? tracks[0] : undefined),
+    formExample: formTracks.some((t) => t.key === pageTrack) ? FORM_EXAMPLES[pageTrack!] : undefined,
+  });
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next && !saving) { stop(); onClose(); } }}>
@@ -423,7 +462,7 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId, pageTrack }: {
               <Label htmlFor="voice-log-heard">What was heard</Label>
               <Input id="voice-log-heard" value={heard} disabled={needsSite} maxLength={500}
                 onChange={(event) => setHeard(event.target.value)}
-                placeholder={needsSite ? "Choose the site first" : examples.split(", ")[0].replace(/"/g, "")} />
+                placeholder={needsSite ? "Choose the site first" : /"([^"]+)"/.exec(examples)?.[1] ?? ""} />
               {listening && <p aria-live="polite" className="text-xs italic text-muted-foreground">{interim || "Listening…"}</p>}
               {heard && <p className="text-xs text-muted-foreground">Misheard? Fix the words here, or change the card below.</p>}
             </div>
@@ -458,7 +497,7 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId, pageTrack }: {
           <Button type="button" variant="outline" disabled={saving} onClick={() => { stop(); onClose(); }}>Done</Button>
           {!noTracks && (
             <Button type="button" disabled={!!missing || saving} onClick={save} title={missing ?? undefined} data-testid="voice-log-save">
-              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{draft?.kind === "track_form" ? "Fill in the form" : "Save"}
             </Button>
           )}
         </DialogFooter>
@@ -472,9 +511,12 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId, pageTrack }: {
 
 /** What to suggest saying: readings for the page's track, or for every
  *  reading track on pages without one, then something to raise as an action. */
-function sayItExamples({ hasKitchen, hasFire, hasWater, pageTrack, actionTrack }: {
-  hasKitchen: boolean; hasFire: boolean; hasWater: boolean; pageTrack?: string | null; actionTrack?: SayItTrack;
+function sayItExamples({ hasKitchen, hasFire, hasWater, pageTrack, actionTrack, formExample }: {
+  hasKitchen: boolean; hasFire: boolean; hasWater: boolean; pageTrack?: string | null; actionTrack?: SayItTrack; formExample?: string;
 }): string {
+  if (formExample) {
+    return OPEN_FORM_TRACKS.has(pageTrack ?? "") || !actionTrack ? `"${formExample}"` : `"${formExample}" or "${actionTrack.example}"`;
+  }
   const readings: string[] = [];
   const all = !pageTrack;
   if (hasKitchen && (all || pageTrack === "kitchen")) readings.push("\"fridge 1 is 4 degrees\"", "\"chicken core temp 78\"");
@@ -518,6 +560,28 @@ function ReadingCard({ draft, reading, catalogue, check, update, tracks, onRaise
               </Button>
             )}
           </div>
+        )}
+      </div>
+    );
+  }
+  if (draft.kind === "track_form") {
+    const { form } = draft;
+    return (
+      <div className="space-y-3 rounded-lg border bg-muted/30 p-3" data-testid="voice-log-card">
+        <p className="flex items-center gap-2 text-sm font-semibold"><FileInput className="h-4 w-4" />
+          {sayItTrack(form.track)?.label ?? "Track"} · {form.label}
+        </p>
+        <ul className="space-y-1 text-sm" data-testid="voice-log-form-fields">
+          {form.summary.map((line) => <li key={line} className="flex items-start gap-1.5"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />{line}</li>)}
+        </ul>
+        <p className="text-xs text-muted-foreground">
+          {form.form === "fix-report" ? "FixTrack's report form opens with this filled in." : `The ${form.label} form opens with this filled in.`} Check it there, add anything else, then save.
+        </p>
+        {onRaiseAction && form.form !== "fix-report" && (
+          <button type="button" className="text-xs font-medium text-muted-foreground underline underline-offset-2" onClick={onRaiseAction}
+            data-testid="voice-log-raise-action">
+            Not right? Raise it as an action instead
+          </button>
         )}
       </div>
     );

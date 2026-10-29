@@ -39,6 +39,7 @@ import {
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { StringListEditor } from "@/components/string-list-editor";
+import { useSayItFill } from "@/lib/say-it-fill";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -417,7 +418,7 @@ export default function IncidentsPage() {
   const [form, setForm] = useState(emptyForm());
   const [formSection, setFormSection] = useState<"details" | "actions">("details");
 
-  const { data: incidentConfig } = useGetIncidentConfig();
+  const { data: incidentConfig, isFetched: incidentConfigFetched } = useGetIncidentConfig();
   const { data: formOptions } = useFormOptions();
   const incidentTypeOptions = pickOptions(formOptions, "incident_types");
   const severityOptions: readonly string[] = SEVERITIES;
@@ -573,16 +574,26 @@ ${rows.map(r => `<tr>
 
   // ── Dialog ─────────────────────────────────────────────────────────────────
 
-  function openAdd() {
+  function openAdd(spoken?: Partial<ReturnType<typeof emptyForm>>) {
     setEditItem(null);
     const f = emptyForm();
     f.incidentType = incidentTypeOptions[0] ?? "";
     f.severity = severityOptions[0] ?? "";
     if (incidentConfig?.incident_default_reporter) f.reportedBy = incidentConfig.incident_default_reporter;
-    setForm(f);
+    setForm({ ...f, ...spoken });
     setFormSection("details");
     setShowDialog(true);
   }
+
+  // Say it: what happened and where opens a new incident with them filled in.
+  useSayItFill(["incident"], fill => {
+    const said = (key: string) => (typeof fill.values[key] === "string" ? fill.values[key] as string : "");
+    openAdd({
+      description: said("description") || fill.text.trim(),
+      location: said("location"),
+      ...(fill.siteId ? { siteId: String(fill.siteId) } : {}),
+    });
+  }, incidentConfigFetched);
 
   function openEdit(r: Incident) {
     setEditItem(r);
@@ -801,7 +812,7 @@ ${rows.map(r => `<tr>
             triggerLabel="Customise types"
             labelFor={typeLabel}
           />
-          <Button onClick={openAdd} className="gap-2 rounded-sm">
+          <Button onClick={() => openAdd()} className="gap-2 rounded-sm">
             <Plus className="w-4 h-4" /> Log Incident
           </Button>
         </div>
@@ -935,7 +946,7 @@ ${rows.map(r => `<tr>
               : "No records match the current filters."}
           </p>
           {incidents.length === 0 && (
-            <Button onClick={openAdd} variant="outline" size="sm" className="mt-4 rounded-sm gap-2">
+            <Button onClick={() => openAdd()} variant="outline" size="sm" className="mt-4 rounded-sm gap-2">
               <Plus className="w-4 h-4" /> Log Incident
             </Button>
           )}
