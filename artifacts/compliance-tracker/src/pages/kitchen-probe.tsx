@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ── Method guide ──────────────────────────────────────────────────────────────
 
@@ -256,7 +257,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
 
   async function save(submit = false) {
     if (submit && !signature.trim()) {
-      toast({ title: "Signature required to submit", variant: "destructive" });
+      toast({ title: "Name required to submit", variant: "destructive" });
       return;
     }
     setSaving(true);
@@ -444,8 +445,8 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
                   <StaffPerformerSelect label="Checked by" value={checkedBy} onChange={setCheckedBy} onRosterIdChange={setCheckedByRosterId} className={isSubmitted ? "pointer-events-none opacity-60" : undefined} />
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Signature (type name)</Label>
-                  <Input value={signature} onChange={e => setSignature(e.target.value)} placeholder="Type name to sign" disabled={isSubmitted} />
+                  <Label>Name of person signing</Label>
+                  <Input value={signature} onChange={e => setSignature(e.target.value)} placeholder="Your name (you sign when you submit)" disabled={isSubmitted} />
                 </div>
               </div>
 
@@ -453,6 +454,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
                 <div className="flex items-center gap-2 text-sm text-emerald-700">
                   <CheckCircle2 className="w-4 h-4" />
                   Submitted on {format(new Date(record!.submitted_at!), "dd/MM/yyyy 'at' HH:mm")} by {record!.signature ?? record!.checked_by}
+                  <RecordSignedBy recordType="kitchen_probe_check" recordId={record!.id} compact className="ml-2" />
                 </div>
               ) : (
                 <div className="flex items-center gap-3">

@@ -51,6 +51,8 @@ type MachineType =
   | 'pedestrian'
   | 'walk_behind'
   | 'ride_on_rotary'
+  | 'greens_mower_ride_on'
+  | 'greens_mower_hand'
   | 'hedge_trimmer'
   | 'sprayer_spreader'
   | 'edger_strimmer'
@@ -124,6 +126,8 @@ const MACHINE_LABELS: Record<MachineType, string> = {
   pedestrian: 'Pedestrian equipment',
   walk_behind: 'Walk-behind mower',
   ride_on_rotary: 'Ride-on rotary mower',
+  greens_mower_ride_on: 'Greens mower – ride-on',
+  greens_mower_hand: 'Greens mower – hand',
   hedge_trimmer: 'Hedge trimmer',
   sprayer_spreader: 'Sprayer / spreader',
   edger_strimmer: 'Edger / strimmer',
@@ -209,6 +213,20 @@ const DEFINITIONS: Record<MachineType, ChecklistDefinition[]> = {
     { key: 'brakes', label: 'Brakes and parking brake operate correctly', section: 'Controls' },
     { key: 'controls', label: 'Controls and emergency stop operate correctly', section: 'Controls' },
     { key: 'leaks', label: 'No fuel, oil or hydraulic leaks visible', section: 'Condition' },
+  ],
+  greens_mower_ride_on: [
+    { key: 'units', label: 'Cutting units, cylinders and bedknives are secure and set', section: 'Working parts' },
+    { key: 'guards', label: 'Guards and grass boxes are fitted and secure', section: 'Protective equipment' },
+    { key: 'brakes', label: 'Brakes and parking brake operate correctly', section: 'Controls' },
+    { key: 'controls', label: 'Seat switch, lift controls and emergency stop operate correctly', section: 'Controls' },
+    { key: 'leaks', label: 'No fuel, oil or hydraulic leaks visible (a leak burns the green)', section: 'Condition' },
+  ],
+  greens_mower_hand: [
+    { key: 'cylinder', label: 'Cylinder and bedknife are secure and set', section: 'Working parts' },
+    { key: 'guards', label: 'Guards and grass box are fitted and secure', section: 'Protective equipment' },
+    { key: 'controls', label: 'Bail (dead-man) control, clutch and stop switch operate correctly', section: 'Controls' },
+    { key: 'rollers', label: 'Rollers, transport wheels and handles are secure', section: 'Condition' },
+    { key: 'leaks', label: 'No fuel or oil leaks visible (a leak burns the green)', section: 'Condition' },
   ],
   hedge_trimmer: [
     { key: 'blades', label: 'Blades are sharp, secure and undamaged', section: 'Working parts' },
@@ -330,7 +348,7 @@ function normalizeChecks(response: unknown): GreenCheck[] {
 }
 
 function createChecklist(machineType: MachineType): ChecklistItem[] {
-  return DEFINITIONS[machineType].map((item) => ({ ...item, status: null }));
+  return (DEFINITIONS[machineType] ?? DEFINITIONS.other).map((item) => ({ ...item, status: null }));
 }
 
 function formatDate(dateString: string): string {
@@ -657,7 +675,7 @@ export default function GreenTrackScreen() {
             <View style={styles.machineBody}>
               <Text style={[styles.machineName, { color: colors.foreground }]}>{selectedMachine.name}</Text>
               <Text style={[styles.machineMeta, { color: colors.mutedForeground }]}>
-                {MACHINE_LABELS[selectedMachine.machineType]}
+                {MACHINE_LABELS[selectedMachine.machineType] ?? MACHINE_LABELS.other}
                 {selectedMachine.assetTag ? ` · ${selectedMachine.assetTag}` : ''}
                 {selectedMachine.location ? ` · ${selectedMachine.location}` : ''}
               </Text>
@@ -680,7 +698,7 @@ export default function GreenTrackScreen() {
                 <View style={styles.machineBody}>
                   <Text style={[styles.machineName, { color: colors.foreground }]}>{machine.name}</Text>
                   <Text style={[styles.machineMeta, { color: colors.mutedForeground }]}>
-                    {MACHINE_LABELS[machine.machineType]}
+                    {MACHINE_LABELS[machine.machineType] ?? MACHINE_LABELS.other}
                     {machine.assetTag ? ` · ${machine.assetTag}` : ''}
                     {machine.location ? ` · ${machine.location}` : ''}
                   </Text>

@@ -170,6 +170,8 @@ async function routeApi(route) {
       case "/api/fix-track/calendar-cancellations": return json(route, []);
       case "/api/managed-by": return json(route, null);
       // Setup is finished, so the "Add your team first" gate stays out of the way.
+      // History rows ask who signed each record; none are signed here.
+      case "/api/record-signatures": return json(route, []);
       case "/api/setup/state": return json(route, { needsSetup: false, canManage: true, team: { recorders: 2, aloneAt: null, ready: true } });
       case "/api/sites": return json(route, []);
       case "/api/staff-roster": return json(route, []);
@@ -239,6 +241,8 @@ async function routeApi(route) {
     return write(200, { ok: true });
   }
   if (method === "POST" && path === "/api/analytics/events") return route.fulfill({ status: 204 });
+  // Each inspection row and the edit dialog show the record's photos and videos.
+  if (method === "GET" && path === "/api/photos") return json(route, []);
   // The Contractors page's "Contractor visits" card (#155).
   if (method === "GET" && path === "/api/contractor-visits") return json(route, { types: [], visits: [] });
   // The Contractors page's "Certificates outstanding" card and the red check badge.

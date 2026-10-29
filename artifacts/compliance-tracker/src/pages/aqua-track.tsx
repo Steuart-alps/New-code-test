@@ -41,6 +41,7 @@ import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { useSayItFill, withSpokenNote, type SayItFill } from "@/lib/say-it-fill";
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 import { sortedEntries } from "@/lib/sort-options";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ── API helpers ────────────────────────────────────────────────────────────────
 
@@ -1138,6 +1139,7 @@ export default function AquaTrackPage() {
                               )}
                               {check.actions_taken && <div className="text-xs text-muted-foreground"><span className="font-medium">Actions:</span> {check.actions_taken}</div>}
                               {check.notes && <div className="text-xs text-muted-foreground"><span className="font-medium">Notes:</span> {check.notes}</div>}
+                              <RecordSignedBy recordType="pool_check" recordId={check.id} />
                               <CheckPhotoUploader entityType="pool_check" entityId={check.id} compact />
                             </div>
                             <div className="flex items-center gap-1 flex-shrink-0">
@@ -1193,7 +1195,7 @@ export default function AquaTrackPage() {
                         <td className="py-2 pr-4 text-right tabular-nums hidden md:table-cell">{s.batherCountPeak != null ? <>{s.batherCountPeak}{s.maxBathers ? <span className="text-muted-foreground">/{s.maxBathers}</span> : null}</> : <span className="text-muted-foreground">—</span>}</td>
                         <td className="py-2 pr-4"><span className={`text-xs px-1.5 py-0.5 rounded-full ${s.preSessionResult === "pass" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{s.preSessionResult === "pass" ? "Pass" : "Fail"}</span></td>
                         <td className="py-2 pr-4">{s.poolClosed ? <span className="text-xs text-destructive font-medium flex items-center gap-1"><XCircle className="w-3 h-3" />Closed</span> : <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Open</span>}</td>
-                        <td className="py-2 px-2"><CheckPhotoUploader entityType="swim_session" entityId={s.id} compact /></td>
+                        <td className="py-2 px-2"><RecordSignedBy recordType="swim_session" recordId={s.id} compact className="mb-1" /><CheckPhotoUploader entityType="swim_session" entityId={s.id} compact /></td>
                         <td className="py-2 text-right">
                           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setEditSession(s); setSessionDialog(true); }}><Pencil className="w-3.5 h-3.5" /></Button>
                           {canAdmin && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => setDeleteId({ type: "sessions", id: s.id })}><Trash2 className="w-3.5 h-3.5" /></Button>}

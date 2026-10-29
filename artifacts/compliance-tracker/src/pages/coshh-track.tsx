@@ -24,6 +24,7 @@ import {
 import { sortByLabel } from "@/lib/sort-options";
 import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // COSHHTrack (API: /api/coshh-track/*). Substances come from the COSHH
 // register (/api/registers/coshh), which COSHHTrack shows as its Substances
@@ -726,6 +727,7 @@ export default function CoshhTrackPage() {
                       </p>
                       {c.result === "fail" && c.actionRequired && <p className="text-xs text-red-700">Action: {c.actionRequired}</p>}
                       <CheckPhotoUploader entityType="coshh_check" entityId={c.id} compact readOnly={!canEdit} />
+                      <RecordSignedBy recordType="coshh_check" recordId={c.id} className="pt-1" />
                     </div>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <Badge variant="outline" className={cn("text-[11px]", c.result === "pass" ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-red-300 bg-red-50 text-red-700")}>

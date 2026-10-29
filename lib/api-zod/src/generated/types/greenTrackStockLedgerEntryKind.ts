@@ -13,5 +13,6 @@ export const GreenTrackStockLedgerEntryKind = {
   delivery: 'delivery',
   count: 'count',
   write_off: 'write_off',
+  use: 'use',
   application: 'application',
 } as const;

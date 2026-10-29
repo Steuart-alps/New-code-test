@@ -55,7 +55,9 @@ export type EquipmentItem = typeof equipmentItemsTable.$inferSelect;
 /**
  * The kinds of record a QR label can point at. `target_ref` is the record's id,
  * except for kitchen cold units, which live in the KitchenTrack settings and
- * use "<siteId or 0>:<unit id>".
+ * use "<siteId or 0>:<unit id>", and track points (a track's checks at one
+ * site, such as the opening checklist or the fire log), which use
+ * "<point>:<siteId or 0>".
  */
 export const EQUIPMENT_LABEL_KINDS = [
   "green_machine",
@@ -67,6 +69,7 @@ export const EQUIPMENT_LABEL_KINDS = [
   "room",
   "cold_unit",
   "equipment",
+  "track_point",
 ] as const;
 
 export type EquipmentLabelKind = (typeof EQUIPMENT_LABEL_KINDS)[number];

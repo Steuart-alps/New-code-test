@@ -831,6 +831,8 @@ export interface GreenTrackProductInput {
   reorderLevel?: number | null;
   notes?: string | null;
   active?: boolean;
+  /** Only when adding a product. The amount in stock now, saved as a stock count dated today. */
+  openingStock?: number | null;
 }
 
 export type GreenTrackStockLedgerEntryKind = typeof GreenTrackStockLedgerEntryKind[keyof typeof GreenTrackStockLedgerEntryKind];
@@ -840,6 +842,7 @@ export const GreenTrackStockLedgerEntryKind = {
   delivery: 'delivery',
   count: 'count',
   write_off: 'write_off',
+  use: 'use',
   application: 'application',
 } as const;
 
@@ -869,6 +872,7 @@ export const GreenTrackStockMovementKind = {
   delivery: 'delivery',
   count: 'count',
   write_off: 'write_off',
+  use: 'use',
 } as const;
 
 export interface GreenTrackStockMovement {
@@ -878,7 +882,7 @@ export interface GreenTrackStockMovement {
   unit: string;
   movementDate: string;
   kind: GreenTrackStockMovementKind;
-  /** Signed change (a write-off is negative; a count is 0) */
+  /** Signed change (a write-off or use is negative; a count is 0) */
   quantity: number;
   countedQuantity?: number | null;
   supplier?: string | null;
@@ -896,13 +900,14 @@ export const GreenTrackStockMovementInputKind = {
   delivery: 'delivery',
   count: 'count',
   write_off: 'write_off',
+  use: 'use',
 } as const;
 
 export interface GreenTrackStockMovementInput {
   productId: number;
   movementDate: string;
   kind: GreenTrackStockMovementInputKind;
-  /** Delivered or written-off quantity (above 0) */
+  /** Delivered, written-off or used quantity (above 0). "use" is refused for pesticides, whose use goes in a spraying record. */
   quantity?: number;
   /** The quantity counted, for a stock count */
   countedQuantity?: number;
@@ -1660,6 +1665,25 @@ export interface CertificateReading {
   defects: CertificateReadingDefect[];
   /** Things that could not be read with confidence. */
   unclear: string[];
+}
+
+export interface CreateRecordSignatureRequest {
+  /** Each stroke is [x, y, x, y, ...] in whole numbers inside a 600 x 200 box */
+  strokes: number[][];
+}
+
+export interface RecordSignatureToken {
+  token: string;
+  expiresInMinutes: number;
+}
+
+export interface RecordSignature {
+  recordType: string;
+  recordId: number;
+  /** The name of the login that signed */
+  signerName: string;
+  signedAt: string;
+  strokes: number[][];
 }
 
 export type ContractorSignInSiteAsbestosStatus = typeof ContractorSignInSiteAsbestosStatus[keyof typeof ContractorSignInSiteAsbestosStatus];
@@ -3510,6 +3534,8 @@ export interface BikeTrackConfig {
 export interface GreenTrackConfig {
   green_show_fuel?: string;
   green_default_operators?: string;
+  /** The site new machines and the Daily checks tab start on ("" for none) */
+  green_default_site_id?: string;
 }
 
 export interface IncidentConfig {
@@ -4609,6 +4635,7 @@ export const EquipmentLabelKind = {
   room: 'room',
   cold_unit: 'cold_unit',
   equipment: 'equipment',
+  track_point: 'track_point',
 } as const;
 
 export interface EquipmentLinkedCheck {
@@ -4663,7 +4690,7 @@ export interface UpdateEquipmentItemRequest {
 
 export interface EquipmentLabelRef {
   kind: EquipmentLabelKind;
-  /** The record's id, or "<siteId or 0>:<unit id>" for a kitchen fridge or freezer. */
+  /** The record's id, "<siteId or 0>:<unit id>" for a kitchen fridge or freezer, or "<point>:<siteId or 0>" for a track's checks at a site. */
   ref: string;
 }
 
@@ -5112,6 +5139,14 @@ export const ListPublicLinkAccessActionType = {
 
 export type ListAssigneesParams = {
 siteId?: number;
+};
+
+export type ListRecordSignaturesParams = {
+recordType: string;
+/**
+ * Up to 200 record ids, comma separated
+ */
+ids: string;
 };
 
 export type ListContractorSignInsParams = {

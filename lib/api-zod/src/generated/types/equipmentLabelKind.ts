@@ -19,4 +19,5 @@ export const EquipmentLabelKind = {
   room: 'room',
   cold_unit: 'cold_unit',
   equipment: 'equipment',
+  track_point: 'track_point',
 } as const;

@@ -12,6 +12,7 @@ import { sessionMiddleware } from "./lib/session";
 import { loadUser, enforceClientAccess, enforceTwoFactorEnrollment } from "./middleware/requireAuth";
 import { enforceTrialLock } from "./middleware/trialLock";
 import { enforceDailyEntryCutoff } from "./middleware/dailyEntryCutoff";
+import { requireRecordSignature } from "./middleware/recordSignatureGate";
 import { WebhookHandlers } from "./lib/webhookHandlers";
 import {
   certificateInboxDomain, inboundWebhookSecret, processInboundEmail, recordInboundEmail, verifyInboundWebhook,
@@ -287,6 +288,8 @@ app.use(csrfProtection);
 app.use(loadUser);
 app.use(enforceTwoFactorEnrollment);
 app.use(enforceClientAccess);
+// Before the late-edit reason, so a reason is asked (and audited) only once.
+app.use("/api", requireRecordSignature);
 app.use("/api", enforceDailyEntryCutoff);
 app.use("/api", enforceTrialLock);
 

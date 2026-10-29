@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { kitchenWeeklyAttentionAnswer, kitchenWeeklyNeedsAttention } from "@workspace/api-client-react";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ── Data shape ────────────────────────────────────────────────────────────────
 
@@ -169,7 +170,7 @@ export default function WeeklyReviewTab() {
 
   async function save(submit = false) {
     if (submit && !managerSig.trim()) {
-      toast({ title: "Manager signature required", variant: "destructive" });
+      toast({ title: "Manager name required", variant: "destructive" });
       return;
     }
     setSaving(true);
@@ -393,11 +394,11 @@ export default function WeeklyReviewTab() {
             </CardHeader>
             <CardContent className="p-4 space-y-4">
               <div className="space-y-1.5">
-                <Label>Manager / Proprietor name (signature)</Label>
+                <Label>Manager / Proprietor name</Label>
                 <Input
                   value={managerSig}
                   onChange={e => setManagerSig(e.target.value)}
-                  placeholder="Type your name to sign"
+                  placeholder="Your name (you sign when you submit)"
                   disabled={isSubmitted}
                   className="max-w-sm"
                 />
@@ -406,6 +407,7 @@ export default function WeeklyReviewTab() {
                 <div className="flex items-center gap-2 text-sm text-emerald-700">
                   <CheckCircle2 className="w-4 h-4" />
                   Submitted on {format(new Date(record!.submitted_at!), "dd/MM/yyyy 'at' HH:mm")} by {record!.manager_signature}
+                  <RecordSignedBy recordType="kitchen_weekly_review" recordId={record!.id} compact className="ml-2" />
                 </div>
               ) : (
                 <div className="flex items-center gap-3">
