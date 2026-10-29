@@ -20,6 +20,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
 import { localToday } from "@/lib/onboarding";
 import { cn } from "@/lib/utils";
+import { sortByLabel } from "@/lib/sort-options";
 
 const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 /** Largest file ComplyTrack's AI reads (the server's limit too). */
@@ -418,7 +419,7 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null, inb
                 <>
                   <select id="reader-check" className={selectClass} value={draft.check} onChange={(e) => chooseCheck(e.target.value)}>
                     <option value="" disabled>Choose the check it is for</option>
-                    {items.map((item) => (
+                    {sortByLabel(items, (item) => item.title).map((item) => (
                       <option key={item.id} value={item.id}>
                         {item.title}{item.siteName ? ` · ${item.siteName}` : ""}{item.categoryName ? ` (${item.categoryName})` : ""}
                       </option>

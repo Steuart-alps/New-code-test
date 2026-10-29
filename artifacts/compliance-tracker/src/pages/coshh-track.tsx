@@ -21,6 +21,7 @@ import {
   ConfirmDelete, DocumentField, SiteFilter, SiteSelect, addMonthsIso, downloadCsv, downloadRegisterDocument,
   ensureOk, fmtDate, todayIso, useRegisterList, useRegisterSites, type DocumentValue,
 } from "@/components/register-shared";
+import { sortByLabel } from "@/lib/sort-options";
 
 // COSHHTrack (API: /api/coshh-track/*). Substances come from the COSHH
 // register (/api/registers/coshh), which COSHHTrack shows as its Substances
@@ -529,7 +530,7 @@ export default function CoshhTrackPage() {
                   <SelectValue placeholder="Record a check…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {CHECK_TYPES.map((type) => <SelectItem key={type.key} value={type.key}>{type.label}</SelectItem>)}
+                  {sortByLabel(CHECK_TYPES, (type) => type.label).map((type) => <SelectItem key={type.key} value={type.key}>{type.label}</SelectItem>)}
                 </SelectContent>
               </Select>
             )}
@@ -698,7 +699,7 @@ export default function CoshhTrackPage() {
                 <SelectTrigger className="h-8 text-xs rounded-sm w-48" aria-label="Filter by type"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All checks</SelectItem>
-                  {CHECK_TYPES.map((type) => <SelectItem key={type.key} value={type.key}>{type.short}</SelectItem>)}
+                  {sortByLabel(CHECK_TYPES, (type) => type.short).map((type) => <SelectItem key={type.key} value={type.key}>{type.short}</SelectItem>)}
                 </SelectContent>
               </Select>
               <Button variant="outline" size="sm" className="rounded-sm h-8 text-xs gap-1.5" onClick={exportChecks} disabled={visibleChecks.length === 0}>
@@ -772,7 +773,7 @@ export default function CoshhTrackPage() {
                       <SelectTrigger id="coshh-assessment-substance"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value={NONE}>None (a task or process)</SelectItem>
-                        {siteSubstances.map((s) => <SelectItem key={s.id} value={String(s.id)}>{s.productName}</SelectItem>)}
+                        {sortByLabel(siteSubstances, (s) => s.productName).map((s) => <SelectItem key={s.id} value={String(s.id)}>{s.productName}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -916,7 +917,7 @@ export default function CoshhTrackPage() {
                     }}>
                       <SelectTrigger id="coshh-check-type"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {CHECK_TYPES.map((type) => <SelectItem key={type.key} value={type.key}>{type.label}</SelectItem>)}
+                        {sortByLabel(CHECK_TYPES, (type) => type.label).map((type) => <SelectItem key={type.key} value={type.key}>{type.label}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -928,7 +929,7 @@ export default function CoshhTrackPage() {
                     <SelectTrigger id="coshh-check-assessment"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value={NONE}>Not linked</SelectItem>
-                      {siteAssessments.map((a) => <SelectItem key={a.id} value={String(a.id)}>{a.task}</SelectItem>)}
+                      {sortByLabel(siteAssessments, (a) => a.task).map((a) => <SelectItem key={a.id} value={String(a.id)}>{a.task}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>

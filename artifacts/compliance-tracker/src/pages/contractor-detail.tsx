@@ -34,6 +34,7 @@ import {
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import { sortByLabel } from "@/lib/sort-options";
 
 // ── Certificate presets ────────────────────────────────────────────────────
 const CERT_PRESETS = [
@@ -524,7 +525,7 @@ export default function ContractorDetailPage() {
                 })}>
                 <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
                 <SelectContent>
-                  {CERT_PRESETS.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                  {sortByLabel(CERT_PRESETS, p => p).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                 </SelectContent>
               </Select>
               {certForm.certificateName === "Other" && (
