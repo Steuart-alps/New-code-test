@@ -3672,6 +3672,11 @@ export const ListFireSafetyChecksQueryParams = zod.object({
   "siteId": zod.coerce.number().optional()
 })
 
+export const listFireSafetyChecksResponseDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const listFireSafetyChecksResponseEvacuationSecondsMax = 86400;
+
+
+
 export const ListFireSafetyChecksResponseItem = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
@@ -3685,6 +3690,12 @@ export const ListFireSafetyChecksResponseItem = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "drillTime": zod.string().regex(listFireSafetyChecksResponseDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
+  "evacuationSeconds": zod.number().min(1).max(listFireSafetyChecksResponseEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
+  "staffPresent": zod.array(zod.object({
+  "staffRosterId": zod.number().nullable().describe('Null when the roster entry has since been deleted.'),
+  "name": zod.string()
+})).optional().describe('Fire drills. Roster staff ticked as present (names as recorded). Empty for other checks.'),
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
@@ -3697,6 +3708,13 @@ export const ListFireSafetyChecksResponse = zod.array(ListFireSafetyChecksRespon
 /**
  * @summary Record a fire safety check
  */
+export const createFireSafetyCheckBodyDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createFireSafetyCheckBodyEvacuationSecondsMax = 86400;
+
+export const createFireSafetyCheckBodyStaffPresentIdsMax = 2000;
+
+
+
 export const CreateFireSafetyCheckBody = zod.object({
   "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
   "checkDate": zod.string(),
@@ -3708,10 +3726,18 @@ export const CreateFireSafetyCheckBody = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "drillTime": zod.string().regex(createFireSafetyCheckBodyDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
+  "evacuationSeconds": zod.number().min(1).max(createFireSafetyCheckBodyEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
+  "staffPresentIds": zod.array(zod.number()).max(createFireSafetyCheckBodyStaffPresentIdsMax).optional().describe('Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.'),
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).')
 })
+
+export const createFireSafetyCheckResponseDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createFireSafetyCheckResponseEvacuationSecondsMax = 86400;
+
+
 
 export const CreateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
@@ -3726,6 +3752,12 @@ export const CreateFireSafetyCheckResponse = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "drillTime": zod.string().regex(createFireSafetyCheckResponseDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
+  "evacuationSeconds": zod.number().min(1).max(createFireSafetyCheckResponseEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
+  "staffPresent": zod.array(zod.object({
+  "staffRosterId": zod.number().nullable().describe('Null when the roster entry has since been deleted.'),
+  "name": zod.string()
+})).optional().describe('Fire drills. Roster staff ticked as present (names as recorded). Empty for other checks.'),
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
@@ -3754,6 +3786,26 @@ export const GetFireSafetyStatusResponseItem = zod.object({
   "sitesAffected": zod.number().optional().describe('How many of those sites are overdue or have never recorded the check.')
 })
 export const GetFireSafetyStatusResponse = zod.array(GetFireSafetyStatusResponseItem)
+
+
+/**
+ * @summary Active roster staff with the latest fire drill each took part in
+ */
+export const GetFireDrillAttendanceQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Staff at this site and staff with no site. Omit for every visible member.')
+})
+
+export const GetFireDrillAttendanceResponse = zod.object({
+  "periodMonths": zod.number().describe('Everyone should take part in a drill at least once in this many months.'),
+  "staff": zod.array(zod.object({
+  "staffRosterId": zod.number(),
+  "name": zod.string(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "lastDrillDate": zod.string().nullable().describe('The latest fire drill they were ticked present at.'),
+  "due": zod.boolean().describe('True when they have not taken part in a fire drill within periodMonths.')
+}))
+})
 
 
 /**
@@ -4113,6 +4165,13 @@ export const UpdateFireSafetyCheckParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const updateFireSafetyCheckBodyDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const updateFireSafetyCheckBodyEvacuationSecondsMax = 86400;
+
+export const updateFireSafetyCheckBodyStaffPresentIdsMax = 2000;
+
+
+
 export const UpdateFireSafetyCheckBody = zod.object({
   "checkDate": zod.string().optional(),
   "result": zod.enum(['pass', 'fail']).optional(),
@@ -4123,10 +4182,18 @@ export const UpdateFireSafetyCheckBody = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "drillTime": zod.string().regex(updateFireSafetyCheckBodyDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
+  "evacuationSeconds": zod.number().min(1).max(updateFireSafetyCheckBodyEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
+  "staffPresentIds": zod.array(zod.number()).max(updateFireSafetyCheckBodyStaffPresentIdsMax).optional().describe('Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.'),
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).')
 })
+
+export const updateFireSafetyCheckResponseDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const updateFireSafetyCheckResponseEvacuationSecondsMax = 86400;
+
+
 
 export const UpdateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
@@ -4141,6 +4208,12 @@ export const UpdateFireSafetyCheckResponse = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "drillTime": zod.string().regex(updateFireSafetyCheckResponseDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
+  "evacuationSeconds": zod.number().min(1).max(updateFireSafetyCheckResponseEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
+  "staffPresent": zod.array(zod.object({
+  "staffRosterId": zod.number().nullable().describe('Null when the roster entry has since been deleted.'),
+  "name": zod.string()
+})).optional().describe('Fire drills. Roster staff ticked as present (names as recorded). Empty for other checks.'),
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
@@ -4845,6 +4918,251 @@ export const DeleteGreenTrackHourReadingParams = zod.object({
 export const DeleteGreenTrackHourReadingResponse = zod.object({
   "ok": zod.boolean()
 })
+
+
+/**
+ * @summary List greenkeeping shed opening and closing checklists
+ */
+export const ListGreenTrackShedChecksQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional(),
+  "date": zod.coerce.string().optional(),
+  "type": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']).optional()
+})
+
+export const ListGreenTrackShedChecksResponseItem = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "checklistType": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']),
+  "checkDate": zod.string(),
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish()
+})
+export const ListGreenTrackShedChecksResponse = zod.array(ListGreenTrackShedChecksResponseItem)
+
+
+/**
+ * @summary Save the day's shed checklist for a site (creates it, or updates its draft)
+ */
+export const SaveGreenTrackShedCheckBody = zod.object({
+  "siteId": zod.number().nullish(),
+  "checklistType": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']),
+  "checkDate": zod.string(),
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})).optional(),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish().describe('Set to submit; every item must be answered and failed items need a note')
+})
+
+export const SaveGreenTrackShedCheckResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "checklistType": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']),
+  "checkDate": zod.string(),
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish()
+})
+
+
+/**
+ * @summary One shed checklist
+ */
+export const GetGreenTrackShedCheckParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetGreenTrackShedCheckResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "checklistType": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']),
+  "checkDate": zod.string(),
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish()
+})
+
+
+/**
+ * @summary Edit or submit a draft shed checklist
+ */
+export const UpdateGreenTrackShedCheckParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateGreenTrackShedCheckBody = zod.object({
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})).optional(),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish()
+})
+
+export const UpdateGreenTrackShedCheckResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "checklistType": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']),
+  "checkDate": zod.string(),
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish()
+})
+
+
+/**
+ * @summary Delete a draft shed checklist
+ */
+export const DeleteGreenTrackShedCheckParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteGreenTrackShedCheckResponse = zod.void()
+
+
+/**
+ * @summary The department that does a site's shed checks, and the departments that could
+ */
+export const GetGreenTrackShedTeamQueryParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const GetGreenTrackShedTeamResponse = zod.object({
+  "siteId": zod.number(),
+  "departmentId": zod.number().nullable(),
+  "departmentName": zod.string().nullable(),
+  "chosen": zod.boolean().describe('False when the department was matched by \"green\" in its name'),
+  "departments": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+}))
+})
+
+
+/**
+ * @summary Choose the department that does a site's shed checks (Owners); null matches by name again
+ */
+export const SetGreenTrackShedTeamBody = zod.object({
+  "siteId": zod.number(),
+  "departmentId": zod.number().nullable()
+})
+
+export const SetGreenTrackShedTeamResponse = zod.object({
+  "siteId": zod.number(),
+  "departmentId": zod.number().nullable(),
+  "departmentName": zod.string().nullable(),
+  "chosen": zod.boolean().describe('False when the department was matched by \"green\" in its name'),
+  "departments": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+}))
+})
+
+
+/**
+ * @summary Every active machine's pre-start check for a day, or its "not in use" mark
+ */
+export const GetGreenTrackPreStartDayQueryParams = zod.object({
+  "date": zod.coerce.string().optional().describe('Defaults to the business\'s today'),
+  "siteId": zod.coerce.number().optional().describe('Machines at this site and machines with no site')
+})
+
+export const GetGreenTrackPreStartDayResponse = zod.object({
+  "date": zod.string(),
+  "machines": zod.array(zod.object({
+  "machineId": zod.number(),
+  "name": zod.string(),
+  "type": zod.string().nullable(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "status": zod.enum(['checked', 'failed', 'not_in_use', 'todo']),
+  "checkId": zod.number().nullable(),
+  "checkedBy": zod.string().nullable(),
+  "notInUseId": zod.number().nullable(),
+  "notInUseReason": zod.string().nullable(),
+  "markedBy": zod.string().nullable()
+})),
+  "total": zod.number(),
+  "checked": zod.number(),
+  "failed": zod.number(),
+  "notInUse": zod.number(),
+  "todo": zod.number()
+})
+
+
+/**
+ * @summary Mark a machine as not in use for a day, so it needs no pre-start check
+ */
+export const MarkGreenTrackMachineNotInUseBody = zod.object({
+  "machineId": zod.number(),
+  "checkDate": zod.string(),
+  "reason": zod.string().nullish()
+})
+
+export const MarkGreenTrackMachineNotInUseResponse = zod.object({
+  "id": zod.number().optional(),
+  "machine_id": zod.number().optional(),
+  "check_date": zod.string().optional(),
+  "reason": zod.string().nullish()
+}).describe('The stored mark (database column names)')
+
+
+/**
+ * @summary Remove a "not in use" mark
+ */
+export const DeleteGreenTrackMachineNotInUseParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteGreenTrackMachineNotInUseResponse = zod.void()
 
 
 /**

@@ -92,6 +92,8 @@ async function testFireSafety(req, siteId) {
       checkType,
       callPoint: "CP1 – Reception",
       nightStaff: "included",
+      drillTime: "10:30",
+      evacuationSeconds: 150,
       checkDate: isoDate(-1), // yesterday → always "ok" or "due_soon", never "overdue" for daily checks
       result: "pass",
       notes: `Test record for ${checkType}`,

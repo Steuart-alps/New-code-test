@@ -14,6 +14,9 @@ import { FIRE_CHECK_TYPES, FIRE_FREQUENCY_DAYS, effectiveFireFrequencies, getFir
 import { getAccountToday } from "../lib/accountClock";
 import { callPointLabel, callPointRotation } from "../lib/fireCallPointRotation";
 import { SOUND_LEVEL_METHODS } from "../lib/fireSoundLevel";
+import {
+  DRILL_ATTENDANCE_MONTHS, listDrillAttendees, resolveDrillAttendees, saveDrillAttendees, staffDrillStatuses,
+} from "../lib/fireDrillAttendance";
 
 const router = Router();
 
@@ -53,8 +56,12 @@ const createSchema = z.object({
   // in when the site has no list yet.
   callPointId: z.number().int().positive().nullable().optional(),
   callPoint: z.string().trim().max(200).nullable().optional(),
-  // Fire drills only.
+  // Fire drills only: night staff, the time of the drill ("HH:MM"), how long
+  // the evacuation took in seconds, and the roster ids of the staff present.
   nightStaff: z.enum(NIGHT_STAFF_VALUES).nullable().optional(),
+  drillTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullable().optional(),
+  evacuationSeconds: z.number().int().min(1).max(24 * 60 * 60).nullable().optional(),
+  staffPresentIds: z.array(z.number().int().positive()).max(2000).optional(),
   // Weekly alarm tests, optional: the sound level heard (lib/fireSoundLevel).
   soundLevelDb: z.number().min(20).max(140).nullable().optional(),
   soundLevelMethod: z.enum(SOUND_LEVEL_METHODS).nullable().optional(),
@@ -64,25 +71,29 @@ const createSchema = z.object({
 const updateSchema = createSchema.partial().omit({ checkType: true });
 
 type FireDetails = Pick<FireSafetyCheck,
-  "callPointId" | "callPoint" | "nightStaff" | "soundLevelDb" | "soundLevelMethod" | "soundLevelBedhead">;
+  "callPointId" | "callPoint" | "nightStaff" | "drillTime" | "evacuationSeconds"
+  | "soundLevelDb" | "soundLevelMethod" | "soundLevelBedhead">;
 type FireDetailInput = {
   callPointId?: number | null; callPoint?: string | null; nightStaff?: FireDetails["nightStaff"];
+  drillTime?: string | null; evacuationSeconds?: number | null; notes?: string | null;
   soundLevelDb?: number | null; soundLevelMethod?: FireDetails["soundLevelMethod"]; soundLevelBedhead?: boolean | null;
 };
 
 /**
- * The call point and night-staff fields a check stores. A weekly alarm test
- * must say which call point was used, and a drill whether night staff took
- * part. Other check types store neither. On an edit, `existing` is the stored
- * record: older records saved before these fields existed may stay blank, but
- * a recorded answer cannot be removed.
+ * The call point and drill fields a check stores. A weekly alarm test must say
+ * which call point was used. A drill must say whether night staff took part,
+ * the time of the drill, how long the evacuation took, and the improvements
+ * required (the notes). Other check types store none of these. On an edit,
+ * `existing` is the stored record: older records saved before these fields
+ * existed may stay blank, but a recorded answer cannot be removed.
  */
 async function resolveFireDetails(
   clientId: number, checkType: string, siteId: number | null, input: FireDetailInput,
   existing?: FireSafetyCheck,
 ): Promise<FireDetails | { error: string }> {
   const details: FireDetails = {
-    callPointId: null, callPoint: null, nightStaff: null, soundLevelDb: null, soundLevelMethod: null, soundLevelBedhead: null,
+    callPointId: null, callPoint: null, nightStaff: null, drillTime: null, evacuationSeconds: null,
+    soundLevelDb: null, soundLevelMethod: null, soundLevelBedhead: null,
   };
   if (checkType === "alarm") {
     let callPointId = existing?.callPointId ?? null;
@@ -117,6 +128,18 @@ async function resolveFireDetails(
     const nightStaff = input.nightStaff !== undefined ? input.nightStaff : existing?.nightStaff ?? null;
     if (!nightStaff && (!existing || existing.nightStaff)) return { error: "Say whether night staff took part in the drill" };
     details.nightStaff = nightStaff;
+    const drillTime = input.drillTime !== undefined ? input.drillTime : existing?.drillTime ?? null;
+    if (!drillTime && (!existing || existing.drillTime)) return { error: "Give the time of the drill" };
+    details.drillTime = drillTime;
+    const evacuationSeconds = input.evacuationSeconds !== undefined ? input.evacuationSeconds : existing?.evacuationSeconds ?? null;
+    if (evacuationSeconds == null && (!existing || existing.evacuationSeconds != null)) {
+      return { error: "Give the time taken to evacuate" };
+    }
+    details.evacuationSeconds = evacuationSeconds;
+    const notes = input.notes !== undefined ? input.notes : existing?.notes ?? null;
+    if (!notes?.trim() && (!existing || existing.notes?.trim())) {
+      return { error: "Write the improvements required, or notes, for the drill" };
+    }
   }
   return details;
 }
@@ -193,7 +216,27 @@ router.get("/", requireAuth, async (req, res) => {
     .where(and(...conditions))
     .orderBy(desc(fireSafetyChecksTable.checkDate), desc(fireSafetyChecksTable.id));
 
-  res.json(rows);
+  const attendees = await listDrillAttendees(clientId, rows.filter(row => row.checkType === "fire_drill").map(row => row.id));
+  res.json(rows.map(row => ({ ...row, staffPresent: attendees.get(row.id) ?? [] })));
+});
+
+// GET /api/fire-safety/drill-attendance?siteId=
+// Each active roster member with the latest fire drill they were ticked
+// present at, so FireTrack and TrainTrack can show who has not taken part in
+// one in the last 12 months. Viewers see only their own training, so not this.
+router.get("/drill-attendance", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (req.currentUser!.role === "client_viewer") return res.status(403).json({ error: "Forbidden" });
+  const selectedSiteId = parseSiteId(req.query.siteId);
+  if (selectedSiteId === undefined) return res.status(400).json({ error: "Invalid site" });
+  const deptId = getActiveDepartmentId(req);
+  const siteAccess = await checkSiteAccess(selectedSiteId, clientId, deptId);
+  if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  const today = await getAccountToday(clientId);
+  const staff = await staffDrillStatuses(clientId, deptId, selectedSiteId, today);
+  res.json({ periodMonths: DRILL_ATTENDANCE_MONTHS, staff });
 });
 
 // GET /api/fire-safety/status?siteId=
@@ -246,6 +289,9 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
 
   const details = await resolveFireDetails(clientId, data.checkType, data.siteId ?? null, data);
   if ("error" in details) return res.status(400).json({ error: details.error });
+  const isDrill = data.checkType === "fire_drill";
+  const present = isDrill ? await resolveDrillAttendees(clientId, deptId, data.staffPresentIds ?? []) : { attendees: [] };
+  if ("error" in present) return res.status(400).json({ error: present.error });
 
   const userId = req.currentUser!.id;
   const entry = clientEntryFrom(data);
@@ -257,24 +303,28 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
 
   let inserted;
   try {
-    [inserted] = await db
-      .insert(fireSafetyChecksTable)
-      .values({
-        clientId,
-        checkType: data.checkType,
-        checkDate: data.checkDate,
-        result: data.result,
-        siteId: data.siteId ?? null,
-        location: data.location ?? null,
-        notes: data.notes ?? null,
-        performedBy: performer.performedBy,
-        staffRosterId: performer.staffRosterId,
-        ...details,
-        createdBy: userId,
-        clientEntryId: entry?.id ?? null,
-        clientEntryHash: entry?.hash ?? null,
-      })
-      .returning();
+    inserted = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(fireSafetyChecksTable)
+        .values({
+          clientId,
+          checkType: data.checkType,
+          checkDate: data.checkDate,
+          result: data.result,
+          siteId: data.siteId ?? null,
+          location: data.location ?? null,
+          notes: data.notes ?? null,
+          performedBy: performer.performedBy,
+          staffRosterId: performer.staffRosterId,
+          ...details,
+          createdBy: userId,
+          clientEntryId: entry?.id ?? null,
+          clientEntryHash: entry?.hash ?? null,
+        })
+        .returning();
+      if (isDrill) await saveDrillAttendees(tx, clientId, row.id, present.attendees);
+      return row;
+    });
   } catch (err) {
     // A concurrent replay of the same device entry won the insert.
     const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
@@ -282,11 +332,12 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     throw err;
   }
 
-  await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: inserted.id, action: "created", after: inserted });
+  const staffPresent = isDrill ? (await listDrillAttendees(clientId, [inserted.id])).get(inserted.id) ?? [] : [];
+  await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: inserted.id, action: "created", after: { ...inserted, staffPresent } });
   // A passed annual discharge test or alarm/extinguisher service also
   // completes its ComplyTrack task.
   await completeLinkedTasksFromCheck(req, "fire", inserted);
-  res.status(201).json(inserted);
+  res.status(201).json({ ...inserted, staffPresent });
 });
 
 // PUT /api/fire-safety/:id
@@ -324,22 +375,41 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   const performer = await resolveStaffPerformerUpdate(clientId, parsed.data.staffRosterId, parsed.data.performedBy,
     existing.staffRosterId, existing.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
-  const { callPointId, callPoint, nightStaff, soundLevelDb, soundLevelMethod, soundLevelBedhead, ...changes } = parsed.data;
+  const {
+    callPointId, callPoint, nightStaff, drillTime, evacuationSeconds, staffPresentIds,
+    soundLevelDb, soundLevelMethod, soundLevelBedhead, ...changes
+  } = parsed.data;
   const siteId = "siteId" in parsed.data ? parsed.data.siteId ?? null : existing.siteId;
-  const details = await resolveFireDetails(clientId, existing.checkType, siteId,
-    { callPointId, callPoint, nightStaff, soundLevelDb, soundLevelMethod, soundLevelBedhead }, existing);
+  const details = await resolveFireDetails(clientId, existing.checkType, siteId, {
+    callPointId, callPoint, nightStaff, drillTime, evacuationSeconds, notes: changes.notes,
+    soundLevelDb, soundLevelMethod, soundLevelBedhead,
+  }, existing);
   if ("error" in details) return res.status(400).json({ error: details.error });
+  const isDrill = existing.checkType === "fire_drill";
+  // Leaving the list out keeps who was present as recorded.
+  const present = isDrill && staffPresentIds !== undefined
+    ? await resolveDrillAttendees(clientId, deptId, staffPresentIds, id) : null;
+  if (present && "error" in present) return res.status(400).json({ error: present.error });
 
-  const [updated] = await db
-    .update(fireSafetyChecksTable)
-    .set({ ...changes, ...(performer ?? {}), ...details, updatedAt: new Date() })
-    .where(and(eq(fireSafetyChecksTable.id, id), eq(fireSafetyChecksTable.clientId, clientId)))
-    .returning();
+  const before = isDrill ? (await listDrillAttendees(clientId, [id])).get(id) ?? [] : [];
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(fireSafetyChecksTable)
+      .set({ ...changes, ...(performer ?? {}), ...details, updatedAt: new Date() })
+      .where(and(eq(fireSafetyChecksTable.id, id), eq(fireSafetyChecksTable.clientId, clientId)))
+      .returning();
+    if (row && present) await saveDrillAttendees(tx, clientId, id, present.attendees);
+    return row;
+  });
 
   if (!updated) return res.status(404).json({ error: "Not found" });
-  await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: id, action: "updated", before: existing, after: updated });
+  const staffPresent = isDrill ? (await listDrillAttendees(clientId, [id])).get(id) ?? [] : [];
+  await appendAuditEvent(req, {
+    clientId, entityType: "fire_safety_check", entityId: id, action: "updated",
+    before: { ...existing, staffPresent: before }, after: { ...updated, staffPresent },
+  });
   await completeLinkedTasksFromCheck(req, "fire", updated);
-  res.json(updated);
+  res.json({ ...updated, staffPresent });
 });
 
 // DELETE /api/fire-safety/:id
