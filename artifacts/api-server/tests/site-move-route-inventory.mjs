@@ -76,6 +76,8 @@ const INVENTORY = {
   "departments.ts PUT /departments/:id": adminOnly("moves a department under another site"),
   "food-safety.ts PUT /config": adminOnly("diary template settings"),
   "green-track.ts PUT /machines/:id": adminOnly("machine register"),
+  "green-track-daily.ts PUT /shed-checks/:id": notAMove("the shed checklist keeps its site; siteId is not editable"),
+  "green-track-daily.ts PUT /shed-team": adminOnly("chooses the department that does a site's shed checks"),
   "hot-tub.ts PUT /:id": covered("scoped staff cannot move HotTub check"),
   "hot-tub.ts PUT /config": adminOnly("HotTub settings"),
   "hot-tub.ts PUT /tubs/:id": covered("scoped staff cannot move HotTub asset"),

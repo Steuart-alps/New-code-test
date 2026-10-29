@@ -16,6 +16,10 @@
  *   11:00  today's AM (opening) checklist not submitted, per site.
  *   21:00  today's PM (closing) checklist and today's KitchenTrack diary not
  *          submitted, per site.
+ * GreenTrack's greenkeeping shed opening (11:00) and closing (21:00)
+ * checklists are chased on their own at the sites that do them, to the site's
+ * greenkeeping team's Managers, else GreenTrack's owner
+ * (lib/greenkeepingChecks.ts).
  * Daily checklists and the kitchen diary are only chased at sites that have
  * used them in the last 30 days, or once an owner has been set for the track,
  * so a business trialling every module is not reminded about tracks it does
@@ -32,7 +36,10 @@ import { sendPushToUsers } from "./pushNotifications";
 import { getEntitledServices, isEntitled, type Entitlements } from "./services";
 import { getTrackModule, isTrackModuleKey } from "./trackModules";
 import { isClientBillingLocked } from "./trialLock";
-import { hasExplicitOwner, loadOwnerContext, resolveOwnersFromContext, type OwnerContext } from "./trackOwners";
+import { candidateCanSeeSite, hasExplicitOwner, loadOwnerContext, resolveOwnersFromContext, type OwnerContext } from "./trackOwners";
+import {
+  GREENKEEPING_CHECKLIST_NAMES, getGreenkeepingShedDay, greenDailyChecksPath, greenkeepingShedSites, loadGreenkeepingTeams,
+} from "./greenkeepingChecks";
 import { createUserNotifications, purgeOldUserNotifications, type NewUserNotification } from "./userNotifications";
 
 export const TRACK_REMINDER_HOURS = { overdue: 9, am: 11, pm: 21 } as const;
@@ -87,10 +94,11 @@ class ReminderBatch {
   readonly items: NewUserNotification[] = [];
   constructor(private ctx: OwnerContext, private today: string) {}
 
-  /** Queue one notification per resolved owner of the module at the site. */
-  add(input: { module: string; siteId: number | null; kind: string; title: string; body: string; linkPath: string }) {
+  /** Queue one notification per resolved owner of the module at the site, or per given recipient. */
+  add(input: { module: string; siteId: number | null; kind: string; title: string; body: string; linkPath: string; userIds?: number[] }) {
     const scope = input.siteId != null ? `site:${input.siteId}` : `client:${this.ctx.clientId}`;
-    for (const userId of resolveOwnersFromContext(this.ctx, input.module, input.siteId)) {
+    const userIds = input.userIds?.length ? input.userIds : resolveOwnersFromContext(this.ctx, input.module, input.siteId);
+    for (const userId of userIds) {
       this.items.push({
         clientId: this.ctx.clientId,
         userId,
@@ -135,6 +143,43 @@ async function dailyChecklistReminders(
       title: `${label} checklist not done — ${site.name}`,
       body: `Today's ${description} checklist for ${site.name} hasn't been submitted yet.`,
       linkPath: getTrackModule(module)!.path,
+    });
+  }
+}
+
+/**
+ * The Managers who look after a department at a site: client_manager users
+ * whose own or extra departments include it and who can see the site. A
+ * Manager over every department is left to the track owner.
+ */
+function teamManagers(ctx: OwnerContext, departmentId: number, siteId: number): number[] {
+  return [...ctx.eligible.values()]
+    .filter((candidate) => candidate.role === "client_manager" && candidate.allDepartments !== true)
+    .filter((candidate) => candidate.departmentId === departmentId || (candidate.extraDepartmentIds ?? []).includes(departmentId))
+    .filter((candidate) => candidateCanSeeSite(candidate, ctx.siteDepartments.get(siteId), siteId))
+    .map((candidate) => candidate.id);
+}
+
+async function greenkeepingShedReminders(
+  batch: ReminderBatch, ctx: OwnerContext, clientId: number, sites: Site[], today: string, period: "am" | "pm",
+): Promise<void> {
+  if (sites.length === 0) return;
+  const siteIds = sites.map((site) => site.id);
+  const teams = await loadGreenkeepingTeams(clientId, siteIds);
+  const expected = await greenkeepingShedSites(clientId, today, siteIds, teams);
+  const candidates = sites.filter((site) => expected.has(site.id));
+  if (candidates.length === 0) return;
+  const days = await getGreenkeepingShedDay(clientId, today, candidates.map((site) => site.id));
+  const type = period === "am" ? "greenkeeping_opening" : "greenkeeping_closing";
+  for (const site of candidates) {
+    if (days.get(site.id)?.[type].submitted) continue;
+    const team = teams.get(site.id);
+    batch.add({
+      module: "green", siteId: site.id, kind: `green_${type}`,
+      title: `${GREENKEEPING_CHECKLIST_NAMES[type]} not done — ${site.name}`,
+      body: `Today's greenkeeping shed ${period === "am" ? "opening" : "closing"} checklist for ${site.name}${team ? ` (${team.departmentName})` : ""} hasn't been submitted yet.`,
+      linkPath: greenDailyChecksPath(site.id),
+      userIds: team ? teamManagers(ctx, team.departmentId, site.id) : undefined,
     });
   }
 }
@@ -347,9 +392,11 @@ export async function collectTrackReminders(clientId: number, now: Date): Promis
   if (phases.am && entitledTo(services, "daily_am")) {
     await dailyChecklistReminders(batch, ctx, clientId, sites, today, "am");
   }
+  if (phases.am && entitledTo(services, "green")) await greenkeepingShedReminders(batch, ctx, clientId, sites, today, "am");
   if (phases.pm) {
     if (entitledTo(services, "daily_pm")) await dailyChecklistReminders(batch, ctx, clientId, sites, today, "pm");
     if (entitledTo(services, "kitchen")) await kitchenDiaryReminders(batch, ctx, clientId, sites, businessName, today);
+    if (entitledTo(services, "green")) await greenkeepingShedReminders(batch, ctx, clientId, sites, today, "pm");
   }
   return batch.items;
 }

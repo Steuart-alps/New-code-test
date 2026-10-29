@@ -823,7 +823,9 @@ paths:
       description: >
         Each visit type the business's tracks cover, at each site the user can
         see: when the track says it is next due, and the compliance check
-        (with its contractor) that drives the contractor reminder.
+        (with its contractor) that drives the contractor reminder. Also the
+        compliance check register's other checks. Each row says whether it
+        has been marked "No contractor needed".
       responses:
         "200":
           description: Visit types and per-site rows
@@ -841,6 +843,30 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/SetContractorVisitRequest"
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
+  /contractor-visits/checks/{checkId}:
+    put:
+      operationId: setContractorRegisterCheck
+      tags: [contractors]
+      summary: Choose the contractor reminded about a compliance check, or mark it as needing none
+      parameters:
+        - name: checkId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetContractorRegisterCheckRequest"
       responses:
         "200":
           description: Saved
@@ -2454,6 +2480,29 @@ paths:
         "403":
           description: The site belongs to a department the caller cannot see
 
+  /fire-safety/drill-attendance:
+    get:
+      operationId: getFireDrillAttendance
+      tags: [fire-safety]
+      summary: Active roster staff with the latest fire drill each took part in
+      parameters:
+        - in: query
+          name: siteId
+          description: Staff at this site and staff with no site. Omit for every visible member.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Staff fire drill attendance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireDrillAttendance"
+        "400":
+          description: The site is not one of this client's sites
+        "403":
+          description: The caller is a viewer, or the site belongs to a department the caller cannot see
+
   /fire-safety/call-points:
     get:
       operationId: listFireCallPoints
@@ -3228,6 +3277,271 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OkResponse"
+
+  /green-track/shed-checks:
+    get:
+      operationId: listGreenTrackShedChecks
+      tags: [green-track]
+      summary: List greenkeeping shed opening and closing checklists
+      parameters:
+        - name: siteId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: type
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/GreenShedChecklistType"
+      responses:
+        "200":
+          description: Shed checklists, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GreenShedChecklist"
+    post:
+      operationId: saveGreenTrackShedCheck
+      tags: [green-track]
+      summary: Save the day's shed checklist for a site (creates it, or updates its draft)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenShedChecklistInput"
+      responses:
+        "200":
+          description: Draft updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenShedChecklist"
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenShedChecklist"
+        "400":
+          description: Invalid, or not every item answered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Already submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/shed-checks/{id}:
+    get:
+      operationId: getGreenTrackShedCheck
+      tags: [green-track]
+      summary: One shed checklist
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The checklist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenShedChecklist"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateGreenTrackShedCheck
+      tags: [green-track]
+      summary: Edit or submit a draft shed checklist
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenShedChecklistUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenShedChecklist"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Already submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteGreenTrackShedCheck
+      tags: [green-track]
+      summary: Delete a draft shed checklist
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "409":
+          description: A submitted checklist cannot be deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/shed-team:
+    get:
+      operationId: getGreenTrackShedTeam
+      tags: [green-track]
+      summary: The department that does a site's shed checks, and the departments that could
+      parameters:
+        - name: siteId
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The site's team
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenShedTeam"
+    put:
+      operationId: setGreenTrackShedTeam
+      tags: [green-track]
+      summary: Choose the department that does a site's shed checks (Owners); null matches by name again
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenShedTeamInput"
+      responses:
+        "200":
+          description: The site's team
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenShedTeam"
+        "400":
+          description: That department does not work at the site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/pre-start:
+    get:
+      operationId: getGreenTrackPreStartDay
+      tags: [green-track]
+      summary: Every active machine's pre-start check for a day, or its "not in use" mark
+      parameters:
+        - name: date
+          in: query
+          required: false
+          description: Defaults to the business's today
+          schema:
+            type: string
+        - name: siteId
+          in: query
+          required: false
+          description: Machines at this site and machines with no site
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The day's machines
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenPreStartDay"
+
+  /green-track/pre-start/not-in-use:
+    post:
+      operationId: markGreenTrackMachineNotInUse
+      tags: [green-track]
+      summary: Mark a machine as not in use for a day, so it needs no pre-start check
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenMachineNotInUseInput"
+      responses:
+        "200":
+          description: Already marked for that day
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenMachineNotInUseRow"
+        "201":
+          description: Marked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenMachineNotInUseRow"
+        "409":
+          description: The machine already has a pre-start check that day
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/pre-start/not-in-use/{id}:
+    delete:
+      operationId: deleteGreenTrackMachineNotInUse
+      tags: [green-track]
+      summary: Remove a "not in use" mark
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Removed
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /green-track/products:
     get:
@@ -6990,6 +7304,220 @@ components:
           type: string
           nullable: true
 
+    GreenShedChecklistType:
+      type: string
+      enum: [greenkeeping_opening, greenkeeping_closing]
+    GreenShedChecklistItem:
+      type: object
+      required: [label, checked]
+      properties:
+        label:
+          type: string
+        checked:
+          type: boolean
+        notes:
+          type: string
+        section:
+          type: string
+        result:
+          type: string
+          enum: [pass, fail, na]
+    GreenShedChecklist:
+      type: object
+      additionalProperties: true
+      required: [id, clientId, checklistType, checkDate, items]
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        checklistType:
+          $ref: "#/components/schemas/GreenShedChecklistType"
+        checkDate:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GreenShedChecklistItem"
+        completedBy:
+          type: string
+          nullable: true
+        staffRosterId:
+          type: integer
+          nullable: true
+        managerNote:
+          type: string
+          nullable: true
+        submittedAt:
+          type: string
+          nullable: true
+    GreenShedChecklistInput:
+      type: object
+      required: [checklistType, checkDate]
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        checklistType:
+          $ref: "#/components/schemas/GreenShedChecklistType"
+        checkDate:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GreenShedChecklistItem"
+        completedBy:
+          type: string
+          nullable: true
+        staffRosterId:
+          type: integer
+          nullable: true
+        managerNote:
+          type: string
+          nullable: true
+        submittedAt:
+          type: string
+          nullable: true
+          description: Set to submit; every item must be answered and failed items need a note
+    GreenShedChecklistUpdate:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GreenShedChecklistItem"
+        completedBy:
+          type: string
+          nullable: true
+        staffRosterId:
+          type: integer
+          nullable: true
+        managerNote:
+          type: string
+          nullable: true
+        submittedAt:
+          type: string
+          nullable: true
+    GreenShedTeamDepartment:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+    GreenShedTeam:
+      type: object
+      required: [siteId, departmentId, departmentName, chosen, departments]
+      properties:
+        siteId:
+          type: integer
+        departmentId:
+          type: integer
+          nullable: true
+        departmentName:
+          type: string
+          nullable: true
+        chosen:
+          type: boolean
+          description: False when the department was matched by "green" in its name
+        departments:
+          type: array
+          items:
+            $ref: "#/components/schemas/GreenShedTeamDepartment"
+    GreenShedTeamInput:
+      type: object
+      required: [siteId, departmentId]
+      properties:
+        siteId:
+          type: integer
+        departmentId:
+          type: integer
+          nullable: true
+    GreenPreStartMachine:
+      type: object
+      required: [machineId, name, type, siteId, siteName, status, checkId, checkedBy, notInUseId, notInUseReason, markedBy]
+      properties:
+        machineId:
+          type: integer
+        name:
+          type: string
+        type:
+          type: string
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [checked, failed, not_in_use, todo]
+        checkId:
+          type: integer
+          nullable: true
+        checkedBy:
+          type: string
+          nullable: true
+        notInUseId:
+          type: integer
+          nullable: true
+        notInUseReason:
+          type: string
+          nullable: true
+        markedBy:
+          type: string
+          nullable: true
+    GreenPreStartDay:
+      type: object
+      required: [date, machines, total, checked, failed, notInUse, todo]
+      properties:
+        date:
+          type: string
+        machines:
+          type: array
+          items:
+            $ref: "#/components/schemas/GreenPreStartMachine"
+        total:
+          type: integer
+        checked:
+          type: integer
+        failed:
+          type: integer
+        notInUse:
+          type: integer
+        todo:
+          type: integer
+    GreenMachineNotInUseInput:
+      type: object
+      required: [machineId, checkDate]
+      properties:
+        machineId:
+          type: integer
+        checkDate:
+          type: string
+        reason:
+          type: string
+          nullable: true
+    GreenMachineNotInUseRow:
+      type: object
+      description: The stored mark (database column names)
+      additionalProperties: true
+      properties:
+        id:
+          type: integer
+        machine_id:
+          type: integer
+        check_date:
+          type: string
+        reason:
+          type: string
+          nullable: true
+
     ErrorResponse:
       type: object
       properties:
@@ -7119,7 +7647,7 @@ components:
         dueFrom: { type: string, enum: [track, later, check] }
     ContractorVisit:
       type: object
-      required: [visitKey, siteId, siteName, trackDueDate, checkId, checkSiteId, dueDate, status, contractorId, contractorName, reminderSentAt]
+      required: [visitKey, siteId, siteName, trackDueDate, checkId, checkSiteId, dueDate, status, contractorId, contractorName, reminderSentAt, notNeeded]
       properties:
         visitKey: { type: string }
         siteId: { type: integer }
@@ -7132,9 +7660,24 @@ components:
         contractorId: { type: integer, nullable: true }
         contractorName: { type: string, nullable: true }
         reminderSentAt: { type: string, format: date-time, nullable: true }
+        notNeeded: { type: boolean, description: Marked "No contractor needed" (never true while a contractor is chosen) }
+    ContractorRegisterCheck:
+      type: object
+      required: [checkId, title, siteId, siteName, dueDate, status, contractorId, contractorName, reminderSentAt, notNeeded]
+      properties:
+        checkId: { type: integer }
+        title: { type: string }
+        siteId: { type: integer, nullable: true, description: Null for a business-wide check }
+        siteName: { type: string, nullable: true }
+        dueDate: { type: string, format: date, nullable: true }
+        status: { type: string }
+        contractorId: { type: integer, nullable: true }
+        contractorName: { type: string, nullable: true }
+        reminderSentAt: { type: string, format: date-time, nullable: true }
+        notNeeded: { type: boolean, description: Marked "No contractor needed" (never true while a contractor is chosen) }
     ContractorVisitsResponse:
       type: object
-      required: [types, visits]
+      required: [types, visits, checks]
       properties:
         types:
           type: array
@@ -7142,6 +7685,20 @@ components:
         visits:
           type: array
           items: { $ref: "#/components/schemas/ContractorVisit" }
+        checks:
+          type: array
+          description: >
+            The compliance check register's other checks (gas safety, EICR...),
+            not finished one-offs, business-wide or at a site the user can see
+          items: { $ref: "#/components/schemas/ContractorRegisterCheck" }
+    SetContractorRegisterCheckRequest:
+      type: object
+      required: [contractorId]
+      properties:
+        contractorId: { type: integer, nullable: true }
+        notNeeded:
+          type: boolean
+          description: True marks the check as needing no contractor (contractorId must be null); false clears that. Choosing a contractor clears it too.
     CertificateOutstanding:
       type: object
       required: [itemId, title, siteId, siteName, visitDate, daysSinceVisit, contractorName, chasing]
@@ -7177,6 +7734,9 @@ components:
           format: date
           nullable: true
           description: Only for a visit its track gives no date for (water sampling, or a site with nothing recorded on the track yet)
+        notNeeded:
+          type: boolean
+          description: True marks the visit as needing no contractor (contractorId must be null); false clears that. Choosing a contractor clears it too.
     Contractor:
       type: object
       properties:
@@ -9034,6 +9594,22 @@ components:
           nullable: true
           enum: [included, not_included, no_night_staff]
           description: Fire drills. Whether night staff took part.
+        drillTime:
+          type: string
+          nullable: true
+          pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          description: Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
+        evacuationSeconds:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 86400
+          description: Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.
+        staffPresent:
+          type: array
+          description: Fire drills. Roster staff ticked as present (names as recorded). Empty for other checks.
+          items:
+            $ref: "#/components/schemas/FireDrillAttendee"
         soundLevelDb:
           type: number
           nullable: true
@@ -9097,6 +9673,23 @@ components:
           nullable: true
           enum: [included, not_included, no_night_staff]
           description: Fire drills. Whether night staff took part.
+        drillTime:
+          type: string
+          nullable: true
+          pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          description: Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
+        evacuationSeconds:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 86400
+          description: Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.
+        staffPresentIds:
+          type: array
+          description: Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.
+          maxItems: 2000
+          items:
+            type: integer
         soundLevelDb:
           type: number
           nullable: true
@@ -9148,6 +9741,23 @@ components:
           nullable: true
           enum: [included, not_included, no_night_staff]
           description: Fire drills. Whether night staff took part.
+        drillTime:
+          type: string
+          nullable: true
+          pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          description: Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
+        evacuationSeconds:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 86400
+          description: Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.
+        staffPresentIds:
+          type: array
+          description: Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.
+          maxItems: 2000
+          items:
+            type: integer
         soundLevelDb:
           type: number
           nullable: true
@@ -9161,6 +9771,61 @@ components:
           type: boolean
           nullable: true
           description: Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).
+
+    FireDrillAttendee:
+      type: object
+      properties:
+        staffRosterId:
+          type: integer
+          nullable: true
+          description: Null when the roster entry has since been deleted.
+        name:
+          type: string
+      required:
+        - staffRosterId
+        - name
+
+    FireDrillStaffStatus:
+      type: object
+      properties:
+        staffRosterId:
+          type: integer
+        name:
+          type: string
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
+        lastDrillDate:
+          type: string
+          nullable: true
+          description: The latest fire drill they were ticked present at.
+        due:
+          type: boolean
+          description: True when they have not taken part in a fire drill within periodMonths.
+      required:
+        - staffRosterId
+        - name
+        - siteId
+        - siteName
+        - lastDrillDate
+        - due
+
+    FireDrillAttendance:
+      type: object
+      properties:
+        periodMonths:
+          type: integer
+          description: Everyone should take part in a drill at least once in this many months.
+        staff:
+          type: array
+          items:
+            $ref: "#/components/schemas/FireDrillStaffStatus"
+      required:
+        - periodMonths
+        - staff
 
     FireCallPoint:
       type: object

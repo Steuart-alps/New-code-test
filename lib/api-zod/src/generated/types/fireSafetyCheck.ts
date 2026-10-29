@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.2.0
  */
 import type { FireCheckType } from './fireCheckType';
+import type { FireDrillAttendee } from './fireDrillAttendee';
 import type { FireSafetyCheckNightStaff } from './fireSafetyCheckNightStaff';
 import type { FireSafetyCheckResult } from './fireSafetyCheckResult';
 import type { FireSafetyCheckSoundLevelMethod } from './fireSafetyCheckSoundLevelMethod';
@@ -26,6 +27,19 @@ export interface FireSafetyCheck {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: FireSafetyCheckNightStaff;
+  /**
+     * Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
+     * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
+     */
+  drillTime?: string | null;
+  /**
+     * Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.
+     * @minimum 1
+     * @maximum 86400
+     */
+  evacuationSeconds?: number | null;
+  /** Fire drills. Roster staff ticked as present (names as recorded). Empty for other checks. */
+  staffPresent?: FireDrillAttendee[];
   /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
   soundLevelDb?: number | null;
   /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */

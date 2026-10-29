@@ -82,10 +82,10 @@ before(async () => {
   browser = await chromium.launch({ headless: true, executablePath });
 
   owner = await createTenant("induction-owner", { browserPolicy: true });
-  // Only the owner records here, so setup's "add your team first" step (#237)
-  // must not hold the page back.
-  const alone = await owner.request("POST", "/setup/team-alone");
-  assert.equal(alone.status, 200, JSON.stringify(alone.data));
+  // An established business: with setup unfinished and no team, record pages
+  // show "Add your team first" instead of the form.
+  assert.equal((await owner.request("POST", "/setup/team-alone", {})).status, 200);
+  assert.equal((await owner.request("POST", "/setup/complete", {})).status, 200);
   const context = await browser.newContext({ viewport: { width: 1280, height: 1000 }, locale: "en-GB" });
   // One origin for the browser, as in production; the proxy only rewrites the
   // app origin to the API's so the real CSRF same-origin check still applies.

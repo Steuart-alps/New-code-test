@@ -215,6 +215,8 @@ export const STORED_DATE_LOOKUPS: Array<{ path: RegExp; table: string; date: str
   { path: /^\/green-track\/hour-readings\/\d+$/, table: "green_hour_readings", date: "reading_date" },
   { path: /^\/green-track\/applications\/\d+$/, table: "green_applications", date: "application_date" },
   { path: /^\/green-track\/stock-movements\/\d+$/, table: "green_stock_movements", date: "movement_date" },
+  { path: /^\/green-track\/shed-checks\/\d+$/, table: "daily_checklists", date: "check_date", site: RECORD_SITE },
+  { path: /^\/green-track\/pre-start\/not-in-use\/\d+$/, table: "green_machine_not_in_use", date: "check_date" },
   // PAT tests keep the department recorded with them; the others follow the
   // site recorded with the replacement, or the failure's certificate.
   { path: /^\/pat-track\/tests\/\d+$/, table: "pat_tests", date: "test_date",
@@ -254,6 +256,7 @@ export const NO_FUTURE_CHECK_DATE_ROUTES: Array<{ method: "POST" | "PUT"; path: 
   { method: "PUT", path: /^\/tree-track\/\d+$/, field: "checkDate" },
   { method: "POST", path: /^\/coshh-track\/checks\/?$/, field: "checkDate" },
   { method: "PUT", path: /^\/coshh-track\/checks\/\d+$/, field: "checkDate" },
+  { method: "POST", path: /^\/green-track\/pre-start\/not-in-use\/?$/, field: "checkDate" },
 ];
 
 /**
