@@ -642,7 +642,7 @@ async function runRuntimeMigrationsOnce() {
     `);
     // Separate from CREATE TABLE so a drizzle-pushed table (production) gets them too.
     await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" DROP CONSTRAINT IF EXISTS "CHK_client_deletion_outcome_reason"`);
-    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" ADD CONSTRAINT "CHK_client_deletion_outcome_reason" CHECK ("reason" IN ('approved_request','retention_schedule'))`);
+    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" ADD CONSTRAINT "CHK_client_deletion_outcome_reason" CHECK ("reason" IN ('approved_request','retention_schedule','test_business'))`);
     await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" DROP CONSTRAINT IF EXISTS "CHK_client_deletion_outcome"`);
     await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" ADD CONSTRAINT "CHK_client_deletion_outcome" CHECK ("outcome" IN ('completed','failed'))`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_client_data_deletion_outcomes_client" ON "client_data_deletion_outcomes" ("client_id", "finished_at")`);

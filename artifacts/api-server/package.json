@@ -60,6 +60,7 @@
     "test:export-parts": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/export-parts.mjs",
     "test:deletion-reminder": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/deletion-reminder.mjs",
     "test:approved-account-deletion": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/approved-account-deletion.mjs",
+    "test:delete-test-business": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/delete-test-business.mjs",
     "test:password-reset-fresh-schema": "bash tests/run-fresh-schema.sh tests/password-reset-fresh-schema.mjs",
     "test:security-hardening": "bash tests/run-fresh-schema.sh tests/security-hardening.mjs",
     "test:password-reset-rate-limit-postgres": "bash tests/run-fresh-schema.sh tests/password-reset-rate-limit-postgres.mjs",

@@ -5,6 +5,21 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+export interface TestBusinessDeletionRequest {
+  /**
+     * The business's name, typed to confirm
+     * @minLength 1
+     * @maxLength 200
+     */
+  confirmName: string;
+}
+
+export interface TestBusinessDeletionResult {
+  ok: boolean;
+  rowsDeleted: number;
+  filesDeleted: number;
+}
+
 export interface BusinessDashboardChange {
   businessName: string;
   summary: string;

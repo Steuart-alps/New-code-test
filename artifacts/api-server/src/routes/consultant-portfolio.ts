@@ -76,7 +76,7 @@ router.get("/portfolio", requireAuth, requireConsultant, async (req, res) => {
   const [clients, sites, overdueChecks, actions, activity] = await Promise.all([
     db.execute(sql`
       SELECT id, name, active, trial_ends_at, stripe_customer_id, cancelled_at
-      FROM clients WHERE id IN (${idList}) ORDER BY lower(name), id
+      FROM clients WHERE id IN (${idList}) AND data_deleted_at IS NULL ORDER BY lower(name), id
     `),
     db.execute(sql`SELECT id, client_id, name FROM sites WHERE client_id IN (${idList}) ORDER BY lower(name), id`),
     // Same rule as the dashboard stats: past due and not completed counts as overdue.

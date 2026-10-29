@@ -1121,11 +1121,88 @@ export async function runDataDeletionJob(deps: DataDeletionDependencies = {}): P
   return { clientsDeleted };
 }
 
+/**
+ * A test business that never paid. Platform operators clear out the
+ * businesses they made to try ComplyTrack (Steuart, 2026-10-29), so none of
+ * the customer protections that slow a real erasure (cancellation first, an
+ * Owner's request, a second reviewer, 30 days) apply. Anything that has been
+ * paid for, or that is under a legal hold, is refused.
+ */
+export const NEVER_PAID_TEST_BUSINESS = sql.raw(`
+  c.data_deleted_at IS NULL
+  AND c.stripe_subscription_id IS NULL
+  AND NOT EXISTS (SELECT 1 FROM stripe.subscriptions s WHERE s.customer = c.stripe_customer_id)
+  AND NOT EXISTS (SELECT 1 FROM stripe.invoices i WHERE i.customer = c.stripe_customer_id AND i.amount_paid > 0)
+  AND NOT EXISTS (SELECT 1 FROM ai_top_ups t WHERE t.client_id = c.id)
+  AND NOT EXISTS (SELECT 1 FROM privacy_retention_schedules h
+    WHERE h.client_id = c.id AND h.active = true
+      AND (h.legal_hold_active = true OR h.deletion_exception = true))
+`);
+
+export type TestBusinessDeletion =
+  | { status: "deleted"; rowsDeleted: number; objectsDeleted: number }
+  | { status: "not_found" }
+  | { status: "refused" };
+
+/**
+ * Deletes a never-paid test business at once: the same erasure as the
+ * scheduled job (stored files, then every client row; the clients row, the
+ * audit trail and the deletion record stay), recorded in
+ * client_data_deletion_outcomes as "test_business" with the operator who
+ * approved it. The business is also switched off.
+ */
+export async function deleteTestBusiness(
+  clientId: number,
+  operatorId: number,
+  eraseStorage: ClientStorageEraser = refuseStoredFiles,
+): Promise<TestBusinessDeletion> {
+  let attempt = null as DeletionAttempt | null;
+  try {
+    return await db.transaction(async tx => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(106, ${clientId})`);
+      const found = await tx.execute(sql`
+        SELECT c.id, clock_timestamp() AS started_at, (${NEVER_PAID_TEST_BUSINESS}) AS allowed
+        FROM clients c WHERE c.id = ${clientId}
+      `);
+      const row = found.rows[0] as { started_at: string | Date; allowed: boolean } | undefined;
+      if (!row) return { status: "not_found" as const };
+      if (!row.allowed) return { status: "refused" as const };
+      attempt = { startedAt: new Date(row.started_at), requestId: null, reviewedBy: operatorId, reason: "test_business" };
+      logger.info({ clientId, operatorId }, "Deleting a never-paid test business");
+      const storage = await eraseStorage(clientId, tx);
+      const rows = await deleteAllClientData(clientId, tx);
+      await tx.execute(sql`
+        UPDATE clients SET data_deleted_at = now(), active = false, updated_at = now()
+        WHERE id = ${clientId}
+      `);
+      await recordDeletionOutcome(tx, clientId, attempt, {
+        outcome: "completed",
+        rowsDeleted: rows.rowsDeleted,
+        objectsDeleted: storage.objectsDeleted,
+        objectsSkipped: storage.objectsSkipped ?? 0,
+      });
+      return { status: "deleted" as const, rowsDeleted: rows.rowsDeleted, objectsDeleted: storage.objectsDeleted };
+    });
+  } catch (err) {
+    logger.error({ err, clientId }, "Test business deletion failed and was rolled back");
+    if (attempt) {
+      await recordDeletionOutcome(db, clientId, attempt, {
+        outcome: "failed",
+        rowsDeleted: 0,
+        objectsDeleted: err instanceof ClientStorageErasureError ? err.objectsDeleted : 0,
+        objectsSkipped: 0,
+        error: err instanceof Error ? err.message : String(err),
+      }).catch((recordErr) => logger.error({ err: recordErr, clientId }, "Could not record the failed deletion outcome"));
+    }
+    throw err;
+  }
+}
+
 type DeletionAttempt = {
   startedAt: Date;
   requestId: number | null;
   reviewedBy: number | null;
-  reason: "approved_request" | "retention_schedule";
+  reason: "approved_request" | "retention_schedule" | "test_business";
 };
 
 /** Appends the durable outcome of one deletion attempt (the table is insert-only). */
