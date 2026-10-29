@@ -381,6 +381,10 @@ export default function SetupPage() {
             onRequestAssist={requestAssist}
             onStart={startSetup}
             started={(state.sites?.length ?? 0) > 0}
+            infoContext={{
+              modules: state.modules?.picked.length ? state.modules.picked : state.modules?.available,
+              sites: state.sites?.map((s) => s.name),
+            }}
           />
         )}
 

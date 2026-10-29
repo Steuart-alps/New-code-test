@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { INFO_SHEETS, readMeRows } from "../src/lib/setup-info-sheets.ts";
+import { INFO_SHEETS, infoSheetForBusiness, readMeRows, siteCountsTab } from "../src/lib/setup-info-sheets.ts";
 
 // The setup wizard's "What we need from you" workbooks (src/lib/setup-info-sheets.ts):
 // a tab that says it can be uploaded must carry exactly the headers of that
@@ -68,5 +68,26 @@ for (const label of visitLabels) assert.ok(services.some((row) => row[1] === lab
 const normalise = (value) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 const tradeCodes = new Set([...source("../src/lib/contractor-trades.ts").matchAll(/value: "([a-z_]+)"/g)].map((m) => normalise(m[1])));
 for (const row of services) assert.ok(tradeCodes.has(normalise(row[2])), `trade "${row[2]}" for "${row[1]}" is a known trade`);
+
+// Counts per site: only the business's tracks, one column per site.
+{
+  const all = siteCountsTab();
+  assert.deepEqual(all.headers, ["Track", "Item", "Site 1", "Site 2", "Site 3", "Notes"], "three site columns when no sites are known");
+  const items = (tab) => tab.rows.map((row) => row[1]);
+  for (const item of ["Fridges", "Freezers", "Showers", "Fire alarm call points", "Hot tubs"]) assert.ok(items(all).includes(item), `${item} counted`);
+  const tub = siteCountsTab({ modules: ["hottubtrack"], sites: ["Lodges", "Clubhouse"] });
+  assert.deepEqual(tub.headers, ["Track", "Item", "Lodges", "Clubhouse", "Notes"], "the business's own sites");
+  assert.ok(items(tub).includes("Hot tubs") && !items(tub).includes("Fridges") && items(tub).includes("Staff (approximate)"),
+    "only the picked tracks, plus what every business has");
+  const moduleKeys = new Set([...source("../src/lib/onboarding.ts").matchAll(/^  ([a-z_]+): \{ label:/gm)].map((m) => m[1]));
+  const counted = new Set(all.rows.map((row) => row[0]));
+  assert.ok(moduleKeys.has("hottubtrack") && moduleKeys.has("dailytrack_am"), "track keys read from MODULE_INFO");
+  const sheetSource = source("../src/lib/setup-info-sheets.ts");
+  for (const [, key] of sheetSource.matchAll(/\{ module: "([a-z_]+)", track:/g)) assert.ok(moduleKeys.has(key), `counts row module "${key}" is a track`);
+  assert.ok(counted.has("Every business"));
+  const fitted = infoSheetForBusiness(INFO_SHEETS.find((sheet) => sheet.key === "getting-started"), { modules: ["kitchentrack"], sites: ["Main"] });
+  const countsTab = fitted.tabs.find((tab) => tab.name === "Counts per site");
+  assert.ok(items(countsTab).includes("Fridges") && !items(countsTab).includes("Showers"), "the Getting started workbook carries the fitted counts tab");
+}
 
 console.log(`setup info sheets: ${INFO_SHEETS.length} workbooks, ${importable.length} uploadable tabs match their imports`);

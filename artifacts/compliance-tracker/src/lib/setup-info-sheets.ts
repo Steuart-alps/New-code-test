@@ -35,9 +35,9 @@ const CONTRACTOR_SERVICES: [track: string, service: string, trade: string][] = [
   ["Compliance Checks", "Kitchen gas appliance service", "Gas Kitchen"],
   ["Compliance Checks", "Boiler service", "Gas Heating"],
   ["Compliance Checks", "Electrical installation (EICR)", "Electrical"],
-  ["Compliance Checks", "Lift thorough examination (LOLER)", "Loler Puwer Inspection"],
+  ["Compliance Checks", "Lift thorough examination (LOLER)", "LOLER PUWER Inspection"],
   ["Compliance Checks", "Asbestos management survey", "Asbestos"],
-  ["Compliance Checks", "Air conditioning service", "Hvac"],
+  ["Compliance Checks", "Air conditioning service", "HVAC"],
   ["Compliance Checks", "Waste collection", "Waste Collection"],
   ["FireTrack", "Fire alarm service (6-monthly)", "Fire Alarm"],
   ["FireTrack", "Fire extinguisher service (annual)", "Fire Extinguishers"],
@@ -46,14 +46,14 @@ const CONTRACTOR_SERVICES: [track: string, service: string, trade: string][] = [
   ["FireTrack", "Kitchen fire suppression service (6-monthly)", "Kitchen Fire Suppression"],
   ["FireTrack", "Kitchen extract (duct) cleaning", "Kitchen Extract Cleaning"],
   ["FireTrack", "Sprinkler system service (quarterly)", "Sprinkler Systems"],
-  ["FireTrack", "AOV / smoke vent service (annual)", "Aov Smoke Vents"],
+  ["FireTrack", "AOV / smoke vent service (annual)", "AOV Smoke Vents"],
   ["FireTrack", "Dry / wet riser inspection (6-monthly)", "Dry Wet Risers"],
   ["FireTrack", "Fire door inspection (6-monthly)", "Fire Doors"],
   ["FireTrack", "Fire shutter / curtain service (annual)", "Fire Shutters Curtains"],
   ["FireTrack", "Fire damper drop test (annual)", "Fire Dampers"],
   ["FireTrack", "Fire stopping survey (annual)", "Fire Stopping"],
   ["FireTrack", "Intruder alarm service (annual)", "Intruder Alarm"],
-  ["FireTrack", "CCTV service (annual)", "Cctv"],
+  ["FireTrack", "CCTV service (annual)", "CCTV"],
   ["FireTrack", "Access control / door entry service (annual)", "Access Control"],
   ["LegionellaTrack", "Legionella risk assessment review", "Legionella Water Hygiene"],
   ["LegionellaTrack", "Legionella water sampling (laboratory)", "Legionella Water Hygiene"],
@@ -62,18 +62,84 @@ const CONTRACTOR_SERVICES: [track: string, service: string, trade: string][] = [
   ["LegionellaTrack", "Calorifier clean and disinfect", "Legionella Water Hygiene"],
   ["LegionellaTrack", "Thermostatic mixing valve (TMV) service", "Plumbing"],
   ["PestTrack", "Routine pest control visit", "Pest Control"],
-  ["PATtrack", "PAT testing visit", "Pat Testing"],
+  ["PATtrack", "PAT testing visit", "PAT Testing"],
   ["GreenTrack", "Machine servicing", "Equipment"],
-  ["GreenTrack", "PUWER inspection", "Loler Puwer Inspection"],
-  ["GreenTrack", "LOLER thorough examination, 6-monthly (e.g. vehicle lift)", "Loler Puwer Inspection"],
-  ["GreenTrack", "LOLER thorough examination, annual (e.g. axle stands)", "Loler Puwer Inspection"],
+  ["GreenTrack", "PUWER inspection", "LOLER PUWER Inspection"],
+  ["GreenTrack", "LOLER thorough examination, 6-monthly (e.g. vehicle lift)", "LOLER PUWER Inspection"],
+  ["GreenTrack", "LOLER thorough examination, annual (e.g. axle stands)", "LOLER PUWER Inspection"],
   ["GreenTrack", "NSTS sprayer test", "Equipment"],
-  ["GreenTrack", "Other statutory inspections (annual, periodic and other)", "Loler Puwer Inspection"],
-  ["COSHHTrack", "Local exhaust ventilation (LEV) thorough examination", "Lev Testing"],
+  ["GreenTrack", "Other statutory inspections (annual, periodic and other)", "LOLER PUWER Inspection"],
+  ["COSHHTrack", "Local exhaust ventilation (LEV) thorough examination", "LEV Testing"],
   ["TreeTrack", "Annual tree survey (arborist)", "Tree Surgeon Arborist"],
   ["TubTrack", "Spa microbiological test (laboratory)", "Pool Spa Maintenance"],
   ["BikeTrack", "Bike servicing", "Equipment"],
 ];
+
+/**
+ * "Counts per site": how many of each thing there is at each site, so ALPS
+ * (or the business) can set up every track in one go. `module` is the track's
+ * service key; null rows apply to every business.
+ */
+const SITE_COUNT_ITEMS: { module: string | null; track: string; item: string }[] = [
+  { module: null, track: "Every business", item: "Staff (approximate)" },
+  { module: null, track: "Compliance Checks", item: "Boilers" },
+  { module: null, track: "Compliance Checks", item: "Passenger or goods lifts" },
+  { module: "firetrack", track: "FireTrack", item: "Fire alarm call points" },
+  { module: "firetrack", track: "FireTrack", item: "Fire alarm panels" },
+  { module: "firetrack", track: "FireTrack", item: "Fire extinguishers" },
+  { module: "firetrack", track: "FireTrack", item: "Fire blankets" },
+  { module: "firetrack", track: "FireTrack", item: "Emergency light fittings" },
+  { module: "firetrack", track: "FireTrack", item: "Fire doors" },
+  { module: "kitchentrack", track: "KitchenTrack", item: "Kitchens" },
+  { module: "kitchentrack", track: "KitchenTrack", item: "Fridges" },
+  { module: "kitchentrack", track: "KitchenTrack", item: "Freezers" },
+  { module: "kitchentrack", track: "KitchenTrack", item: "Display fridges or chillers" },
+  { module: "kitchentrack", track: "KitchenTrack", item: "Hot holding units" },
+  { module: "kitchentrack", track: "KitchenTrack", item: "Temperature probes" },
+  { module: "legionellatrack", track: "LegionellaTrack", item: "Showers" },
+  { module: "legionellatrack", track: "LegionellaTrack", item: "Sentinel taps (nearest and furthest from each tank or heater)" },
+  { module: "legionellatrack", track: "LegionellaTrack", item: "Little-used outlets" },
+  { module: "legionellatrack", track: "LegionellaTrack", item: "Calorifiers or hot water cylinders" },
+  { module: "legionellatrack", track: "LegionellaTrack", item: "Cold water tanks" },
+  { module: "legionellatrack", track: "LegionellaTrack", item: "Thermostatic mixing valves (TMVs)" },
+  { module: "pattrack", track: "PATtrack", item: "Portable appliances (approximate)" },
+  { module: "roomtrack", track: "RoomTrack", item: "Rooms to check" },
+  { module: "greentrack", track: "GreenTrack", item: "Greens mowers, ride-on" },
+  { module: "greentrack", track: "GreenTrack", item: "Greens mowers, hand" },
+  { module: "greentrack", track: "GreenTrack", item: "Other ride-on mowers" },
+  { module: "greentrack", track: "GreenTrack", item: "Other pedestrian machines" },
+  { module: "greentrack", track: "GreenTrack", item: "Tractors and utility vehicles" },
+  { module: "greentrack", track: "GreenTrack", item: "Sprayers" },
+  { module: "coshhtrack", track: "COSHHTrack", item: "Hazardous products" },
+  { module: "coshhtrack", track: "COSHHTrack", item: "Local exhaust ventilation (LEV) systems" },
+  { module: "hottubtrack", track: "TubTrack", item: "Hot tubs" },
+  { module: "aquatrack", track: "AquaTrack", item: "Swimming pools" },
+  { module: "aquatrack", track: "AquaTrack", item: "Spa pools" },
+  { module: "treetrack", track: "TreeTrack", item: "Trees or tree areas to inspect" },
+  { module: "biketrack", track: "BikeTrack", item: "Hire bikes" },
+  { module: "pesttrack", track: "PestTrack", item: "Bait points and fly killers" },
+  { module: "premisestrack", track: "PremisesTrack", item: "Areas to inspect" },
+  { module: "incidenttrack", track: "IncidentTrack", item: "First aid kits" },
+  { module: "incidenttrack", track: "IncidentTrack", item: "First aiders" },
+  { module: "dailytrack_am", track: "DailyTrack", item: "Teams doing opening checks" },
+  { module: "dailytrack_pm", track: "DailyTrack", item: "Teams doing closing checks" },
+];
+
+/** What the business has so far, to fit the counts tab to it. */
+export type InfoSheetContext = { modules?: string[]; sites?: string[] };
+
+/** One line per item on the business's tracks (every track when none are known), one column per site. */
+export function siteCountsTab(context: InfoSheetContext = {}): InfoSheetTab {
+  const modules = context.modules?.length ? new Set(context.modules) : null;
+  const sites = context.sites?.length ? context.sites : ["Site 1", "Site 2", "Site 3"];
+  return {
+    name: "Counts per site",
+    about: "How many of each there is at each site, so every track can be set up in one go. Put 0 where there are none. Add a column for each extra site.",
+    headers: ["Track", "Item", ...sites, "Notes"],
+    rows: SITE_COUNT_ITEMS.filter((row) => !row.module || !modules || modules.has(row.module))
+      .map((row) => [row.track, row.item, ...sites.map(() => ""), ""]),
+  };
+}
 
 const serviceDates = (items: string[]): string[][] => items.map((item) => [item, "", "", "", "", ""]);
 const SERVICE_DATE_HEADERS = ["Check", "Site", "Last done (dd/mm/yyyy)", "Done by (contractor or person)", "Certificate or report held? (Yes/No)", "Notes"];
@@ -89,6 +155,7 @@ export const INFO_SHEETS: InfoSheet[] = [
         headers: ["Site name", "Address", "Postcode", "Main contact", "Phone"],
         rows: [["Main building", "1 High Street, Anytown", "AB1 2CD", "Jane Smith", "01234 567890"]],
       },
+      siteCountsTab(),
       {
         name: "Departments", about: "The teams at each site, for example Kitchen, Housekeeping, Greenkeeping, Maintenance.",
         headers: ["Site", "Department"],
@@ -97,7 +164,7 @@ export const INFO_SHEETS: InfoSheet[] = [
       {
         name: "Logins", about: "Everyone who will sign in. Owners see billing; Managers look after one or more departments; Staff record checks for their own department; Viewers only sign their own training.",
         headers: ["Name", "Email", "Role (Owner, Manager, Staff or Viewer)", "Site", "Department(s)"],
-        rows: [["Jane Smith", "jane.smith@example.com", "Manager", "Main building", "Kitchen, Housekeeping"]],
+        rows: [["Alex Brown", "alex.brown@example.com", "Manager", "Main building", "Kitchen, Housekeeping"]],
       },
       {
         name: "Staff roster", about: "All other staff, for training records and sign-offs. They don't need a login.",
@@ -119,9 +186,9 @@ export const INFO_SHEETS: InfoSheet[] = [
         rows: [["Sam Patel", "Patel Electrical Ltd", "sam@example.co.uk", "01234 567890", "", "Electrical", "", "31/03/2027", ""]],
       },
       {
-        name: "Services by track", about: "Every contractor service ComplyTrack tracks. Put the company that does it, or N/A if you don't need it. Delete the tracks you don't use.",
-        headers: ["Track", "Contractor service", "Trade", "Contractor company (or N/A)", "Last visit (dd/mm/yyyy)"],
-        rows: CONTRACTOR_SERVICES.map(([track, service, trade]) => [track, service, trade, "", ""]),
+        name: "Services by track", about: "Every contractor service ComplyTrack tracks. Put the company that does it, or N/A if you don't need it. Delete the tracks you don't use. When each was last done goes on the Compliance Checks spreadsheet.",
+        headers: ["Track", "Contractor service", "Trade", "Contractor company (or N/A)"],
+        rows: CONTRACTOR_SERVICES.map(([track, service, trade]) => [track, service, trade, ""]),
       },
     ],
   },
@@ -136,7 +203,8 @@ export const INFO_SHEETS: InfoSheet[] = [
         rows: serviceDates([
           "Fire risk assessment", "Fire alarm service", "Emergency lighting service", "Fire extinguisher service",
           "Electrical installation (EICR)", "Portable appliance testing (PAT)", "Gas safety certificate", "Boiler service",
-          "Oil boiler / tank service", "Legionella risk assessment", "Asbestos management survey", "Lift thorough examination (LOLER)",
+          "Oil boiler / tank service", "Legionella risk assessment", "Legionella water sampling", "Cold water tank inspection / clean",
+          "Calorifier inspection", "TMV service", "Asbestos management survey", "Lift thorough examination (LOLER)",
           "Kitchen extraction / ductwork clean", "Air conditioning inspection", "Lightning protection test",
           "Employers' liability insurance", "Public liability insurance", "Waste transfer note", "Waste carrier registration",
         ]),
@@ -151,7 +219,7 @@ export const INFO_SHEETS: InfoSheet[] = [
   {
     key: "firetrack",
     label: "FireTrack",
-    about: "Fire alarm call points, fire equipment and fire safety service dates.",
+    about: "Fire alarm call points, fire equipment and fire drills.",
     tabs: [
       {
         name: "Call points", about: "Every manual call point, in the order you test them.",
@@ -161,13 +229,13 @@ export const INFO_SHEETS: InfoSheet[] = [
       },
       {
         name: "Fire equipment", about: "Extinguishers, fire blankets, emergency lights, fire doors and alarm panels.",
-        headers: ["Item (extinguisher, blanket, emergency light, fire door, alarm panel)", "Reference", "Type (e.g. CO2, foam)", "Location", "Site", "Last serviced (dd/mm/yyyy)"],
-        rows: [["Extinguisher", "EX1", "CO2 2kg", "Kitchen door", "Main building", ""]],
+        headers: ["Item (extinguisher, blanket, emergency light, fire door, alarm panel)", "Reference", "Type (e.g. CO2, foam)", "Location", "Site"],
+        rows: [["Extinguisher", "EX1", "CO2 2kg", "Kitchen door", "Main building"]],
       },
       {
-        name: "Service dates", about: "When each was last done and by whom.",
-        headers: SERVICE_DATE_HEADERS,
-        rows: serviceDates(["Fire risk assessment", "Fire alarm service", "Emergency lighting service", "Fire extinguisher service", "Last fire drill"]),
+        name: "Fire drills", about: "Your most recent fire drill at each site. Servicing dates go on the Compliance Checks spreadsheet.",
+        headers: ["Site", "Last fire drill (dd/mm/yyyy)", "Evacuation time (minutes)", "Notes"],
+        rows: [["Main building", "", "", ""]],
       },
     ],
   },
@@ -214,14 +282,9 @@ export const INFO_SHEETS: InfoSheet[] = [
     about: "The water outlets you test and flush, from your legionella risk assessment.",
     tabs: [
       {
-        name: "Outlets", about: "Sentinel outlets (nearest and furthest from the tank or heater), little-used outlets, showers and calorifiers.",
-        headers: ["Outlet name", "Type (sentinel hot, sentinel cold, little-used, shower, calorifier, cold tank)", "Location", "Site"],
-        rows: [["Room 12 basin hot", "Sentinel hot", "First floor, room 12", "Main building"]],
-      },
-      {
-        name: "Service dates", about: "Your risk assessment and any water treatment visits.",
-        headers: SERVICE_DATE_HEADERS,
-        rows: serviceDates(["Legionella risk assessment", "Water tank inspection / clean", "Shower head descale", "Water treatment contractor visit"]),
+        name: "Outlets", about: "Sentinel outlets (nearest and furthest from each tank or heater), little-used outlets (including showers not used every week), calorifiers and TMVs. Servicing dates go on the Compliance Checks spreadsheet.",
+        headers: ["Outlet name", "Type (hot, cold, calorifier, TMV, little-used)", "Location", "Site"],
+        rows: [["Room 12 basin hot", "Hot", "First floor, room 12", "Main building"]],
       },
     ],
   },
@@ -235,11 +298,6 @@ export const INFO_SHEETS: InfoSheet[] = [
         importsInto: "PATtrack > Import spreadsheet",
         headers: ["Appliance name", "Asset tag", "Appliance type", "Site", "Location", "Notes"],
         rows: [["Kettle", "PAT-0001", "Kitchen Appliance", "Main building", "Staff kitchen", ""]],
-      },
-      {
-        name: "Last test", about: "Your most recent PAT test, from the certificate.",
-        headers: SERVICE_DATE_HEADERS,
-        rows: serviceDates(["Portable appliance testing (PAT)"]),
       },
     ],
   },
@@ -277,7 +335,7 @@ export const INFO_SHEETS: InfoSheet[] = [
       },
       {
         name: "Operators", about: "Who sprays and their certificates.",
-        headers: ["Name", "Certificate (PA1, PA2, PA6)", "Certificate number", "Expiry (dd/mm/yyyy)"],
+        headers: ["Name", "Certificate (PA1, PA2, PA6)", "Certificate number", "Date gained (dd/mm/yyyy)"],
         rows: [["Alex Brown", "PA1, PA2", "", ""]],
       },
     ],
@@ -302,7 +360,7 @@ export const INFO_SHEETS: InfoSheet[] = [
       {
         name: "Training records", about: "One line per person per course. Names should match the staff roster.",
         headers: ["Staff name", "Training", "Provider", "Completed (dd/mm/yyyy)", "Expires (dd/mm/yyyy)", "Notes"],
-        rows: [["Jane Smith", "Level 2 Food Hygiene", "Highfield", "", "", ""]],
+        rows: [["Jane Smith", "Level 2 Food Hygiene", "Highfield", "", "", ""], ["Alex Brown", "Emergency First Aid at Work", "St John Ambulance", "", "", "First aider"]],
       },
       {
         name: "Training needed", about: "Which training each job needs and how often.",
@@ -338,13 +396,8 @@ export const INFO_SHEETS: InfoSheet[] = [
   {
     key: "incidenttrack",
     label: "IncidentTrack",
-    about: "First aiders and recent incidents.",
+    about: "Recent incidents. First aiders' certificates go on the TrainTrack spreadsheet.",
     tabs: [
-      {
-        name: "First aiders", about: "Who is trained and when it runs out.",
-        headers: ["Name", "Site", "Certificate (e.g. First Aid at Work)", "Expires (dd/mm/yyyy)"],
-        rows: [["Jane Smith", "Main building", "Emergency First Aid at Work", ""]],
-      },
       {
         name: "Recent incidents", about: "Accidents in the last 12 months, if you want them on record.",
         headers: ["Date (dd/mm/yyyy)", "Site", "What happened", "Person (staff, guest, contractor)", "Reported to HSE under RIDDOR? (Yes/No)"],
@@ -401,7 +454,7 @@ export const INFO_SHEETS: InfoSheet[] = [
       {
         name: "Pools", about: "One line per pool or spa.",
         headers: ["Name", "Site", "Type (pool, spa, splash pad)", "Volume (litres)", "Disinfectant", "Target free chlorine (mg/l)", "Target pH"],
-        rows: [["Main pool", "Main building", "Pool", "250000", "Chlorine", "1.0 - 2.0", "7.2 - 7.4"]],
+        rows: [["Main pool", "Main building", "Pool", "250000", "Chlorine", "0.5 - 1.5", "7.2 - 7.4"]],
       },
     ],
   },
@@ -452,15 +505,21 @@ export function readMeRows(sheet: InfoSheet): string[][] {
     ["Tab", "What to fill in", "How it gets into ComplyTrack"],
     ...sheet.tabs.map((tab) => [tab.name, tab.about, tab.importsInto ? `Upload this whole workbook at ${tab.importsInto}; it reads this tab` : "Type it in, or send it to ALPS"]),
     [],
-    ["The first line on each tab is an example: replace it with your own. Leave out anything you don't have yet; it can be added later."],
+    ["Where a tab starts with an example line, replace it with your own. Leave out anything you don't have yet; it can be added later."],
     [`Short of time? ALPS can enter all of this for you for a one-off ${SETUP_SERVICE_FEE}. Ask from Set up > Before you get started.`],
   ];
 }
 
-export async function downloadInfoSheet(sheet: InfoSheet) {
+/** The workbook as downloaded: the counts tab fitted to the business's tracks and sites. */
+export function infoSheetForBusiness(sheet: InfoSheet, context: InfoSheetContext = {}): InfoSheet {
+  return { ...sheet, tabs: sheet.tabs.map((tab) => tab.name === "Counts per site" ? siteCountsTab(context) : tab) };
+}
+
+export async function downloadInfoSheet(sheet: InfoSheet, context: InfoSheetContext = {}) {
   const { downloadWorkbook } = await import("@/lib/spreadsheet");
+  const fitted = infoSheetForBusiness(sheet, context);
   downloadWorkbook(`complytrack-${sheet.key}-information.xlsx`, [
-    { name: "Read me", rows: readMeRows(sheet) },
-    ...sheet.tabs.map((tab) => ({ name: tab.name, rows: [tab.headers, ...tab.rows] })),
+    { name: "Read me", rows: readMeRows(fitted) },
+    ...fitted.tabs.map((tab) => ({ name: tab.name, rows: [tab.headers, ...tab.rows] })),
   ]);
 }

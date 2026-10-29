@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDay } from "@/lib/onboarding";
-import { INFO_SHEETS, SETUP_SERVICE_FEE, downloadInfoSheet, type InfoSheet } from "@/lib/setup-info-sheets";
+import { INFO_SHEETS, SETUP_SERVICE_FEE, downloadInfoSheet, type InfoSheet, type InfoSheetContext } from "@/lib/setup-info-sheets";
 
 export type SetupAi = { configured: boolean; active: boolean };
 export type SetupAssistRequest = { requestedAt: string; requestedBy: string };
@@ -28,8 +28,10 @@ const HAVE_READY = [
 ];
 
 /** The page before step 1 of setup: what to have ready, what AI can read, and the setup service. */
-export function SetupGettingStarted({ ai, assistRequest, canRequestAssist, onRequestAssist, onStart, started }: {
+export function SetupGettingStarted({ ai, assistRequest, canRequestAssist, onRequestAssist, onStart, started, infoContext }: {
   ai?: SetupAi;
+  /** The business's tracks and sites, so the "Counts per site" tab lists only what applies. */
+  infoContext: InfoSheetContext;
   assistRequest: SetupAssistRequest | null;
   /** ALPS consultants already are the setup service, so they aren't offered it. */
   canRequestAssist: boolean;
@@ -57,7 +59,7 @@ export function SetupGettingStarted({ ai, assistRequest, canRequestAssist, onReq
         ))}
       </ul>
 
-      <InfoSheetDownloads />
+      <InfoSheetDownloads context={infoContext} />
 
       <AiNote ai={ai} />
 
@@ -72,7 +74,7 @@ export function SetupGettingStarted({ ai, assistRequest, canRequestAssist, onReq
   );
 }
 
-function InfoSheetDownloads() {
+function InfoSheetDownloads({ context }: { context: InfoSheetContext }) {
   const main = INFO_SHEETS.filter((sheet) => MAIN_SHEETS.has(sheet.key));
   const tracks = INFO_SHEETS.filter((sheet) => !MAIN_SHEETS.has(sheet.key));
   return (
@@ -85,22 +87,22 @@ function InfoSheetDownloads() {
         </div>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        {main.map((sheet) => <SheetButton key={sheet.key} sheet={sheet} />)}
+        {main.map((sheet) => <SheetButton key={sheet.key} sheet={sheet} context={context} />)}
       </div>
       <details className="group">
         <summary className="cursor-pointer text-sm font-medium text-primary hover:underline">Checklists for each track ({tracks.length})</summary>
         <div className="grid gap-2 sm:grid-cols-2 pt-3">
-          {tracks.map((sheet) => <SheetButton key={sheet.key} sheet={sheet} />)}
+          {tracks.map((sheet) => <SheetButton key={sheet.key} sheet={sheet} context={context} />)}
         </div>
       </details>
     </div>
   );
 }
 
-function SheetButton({ sheet }: { sheet: InfoSheet }) {
+function SheetButton({ sheet, context }: { sheet: InfoSheet; context: InfoSheetContext }) {
   return (
     <Button type="button" variant="outline" size="sm" className="justify-start h-auto py-2 text-left whitespace-normal"
-      onClick={() => void downloadInfoSheet(sheet)} data-testid={`button-download-info-${sheet.key}`}>
+      onClick={() => void downloadInfoSheet(sheet, context)} data-testid={`button-download-info-${sheet.key}`}>
       <Download className="w-4 h-4 mr-2 shrink-0" aria-hidden="true" /> {sheet.label}
     </Button>
   );
