@@ -73,6 +73,12 @@ export function TrackSetupDialog({ file, sites, open, onClose, onDone }: {
       const config = await json<Record<string, string>>(`/food-safety/config${siteQuery}`);
       let current: ColdUnit[] = [];
       try { current = JSON.parse(config.food_cold_units || "[]"); } catch { current = []; }
+      // Numbers from Counts per site never replace fridges and freezers
+      // someone has already named (from a KitchenTrack list or the kitchen page).
+      const numbered = /^(fridge|freezer|display fridge) \d+$/i;
+      if (group.source === "count" && current.some((unit) => !numbered.test(unit.name.trim()))) {
+        return `kept the fridges and freezers already named${where} (${current.map((unit) => unit.name).join(", ")})`;
+      }
       const units = group.items.slice(0, 30).map((item) => {
         const same = current.find((unit) => unit.name.toLowerCase() === item.name.toLowerCase());
         return { ...(same?.id ? { id: same.id } : {}), name: item.name, type: item.type as ColdUnit["type"] };
