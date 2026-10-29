@@ -510,9 +510,11 @@ try {
   const filterPanel = page.getByPlaceholder("Search tubs, checks, staff…").locator("xpath=../..");
   const filterComboboxes = filterPanel.getByRole("combobox");
   // The page starts on the working site (an Owner's first site); start these
-  // checks from All sites.
+  // checks from All sites, once the page shows it.
+  await filterComboboxes.nth(0).getByText("Main site", { exact: true }).waitFor();
   await filterComboboxes.nth(0).click();
   await chooseOption(page, "All sites");
+  await filterComboboxes.nth(0).getByText("All sites", { exact: true }).waitFor();
   await page.locator("#hot-tub-filter-from").fill("2024-07-01");
   await page.locator("#hot-tub-filter-to").fill("2024-07-31");
   const inRangeIds = expectedRows.map(row => row.id);
