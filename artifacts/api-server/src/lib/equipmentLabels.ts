@@ -368,6 +368,7 @@ const humanise = (value: string) => value.replace(/_/g, " ").replace(/^\w/, c =>
 const INSPECTION_LABELS: Record<string, string> = {
   thorough_examination: "PUWER inspection",
   loler_examination: "LOLER examination",
+  loler_examination_6_monthly: "LOLER examination (6-monthly)",
   annual_inspection: "Annual inspection",
   periodic_inspection: "Periodic inspection",
   nsts_test: "NSTS sprayer test",

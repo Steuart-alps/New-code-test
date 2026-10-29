@@ -24,6 +24,22 @@ export interface CreateFireSafetyCheckRequest {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: CreateFireSafetyCheckRequestNightStaff;
+  /**
+     * Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
+     * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
+     */
+  drillTime?: string | null;
+  /**
+     * Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.
+     * @minimum 1
+     * @maximum 86400
+     */
+  evacuationSeconds?: number | null;
+  /**
+     * Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.
+     * @maxItems 2000
+     */
+  staffPresentIds?: number[];
   /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
   soundLevelDb?: number | null;
   /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */

@@ -300,18 +300,19 @@ export async function collectDueItems(clientId: number, today: string, now: Date
   for (const item of await source(clientId, "coshh", () => getCoshhDueItems(clientId, {}, today))) {
     if (!item.dueDate || (item.status !== "overdue" && item.status !== "due_soon" && item.status !== "ok")) continue;
     if (item.dueDate > horizon) continue;
+    if (item.siteId != null && linkedVisits.has(`coshh:${item.kind}@${item.siteId}`)) continue;
     push({
       id: `coshh:${item.kind}:${item.recordId}`, module: "coshh", siteId: item.siteId, title: item.label,
       dueDate: item.dueDate, kind: "due", assigneeUserId: null, assigneeName: null,
     });
   }
 
-  // Track dates that no check alert covers: pest visits, PAT retests,
-  // GreenTrack servicing and examinations, TreeTrack assessments and the
-  // fire and water risk assessment reviews.
+  // Track dates that no check alert or record of their own covers: pest
+  // visits, PAT retests, GreenTrack servicing and examinations, TreeTrack
+  // assessments and the fire and water risk assessment reviews.
   const trackOnly = visitTypes.filter((type) => {
     const [module, checkType] = type.key.split(":");
-    return !["fire", "legionella", "hot_tub"].includes(module!) || checkType === "risk_assessment";
+    return !["fire", "legionella", "hot_tub", "coshh", "bike"].includes(module!) || checkType === "risk_assessment";
   });
   const trackDates = trackOnly.length ? await trackDueDates(clientId, trackOnly).catch((err) => {
     logger.warn({ err, clientId }, "Due items: could not read track due dates");
@@ -383,6 +384,7 @@ export async function collectDueItems(clientId: number, today: string, now: Date
       WHERE b.client_id = ${clientId} AND b.active = true
         AND s.next_service_date IS NOT NULL AND s.next_service_date <= ${horizon}::date
     `)))) {
+    if (row.site_id != null && linkedVisits.has(`bike:service@${num(row.site_id)}`)) continue;
     push({
       id: `bike-service:${row.id}`, module: "bike", siteId: num(row.site_id), title: `Service: ${row.name}`,
       dueDate: day(row.due)!, kind: "due", assigneeUserId: null, assigneeName: null,

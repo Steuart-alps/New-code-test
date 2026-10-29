@@ -1,0 +1,62 @@
+name: Import file types
+
+# Checks what the import dialogs accept: spreadsheets, and with the AI add-on
+# photos, screenshots, PDFs and pasted screenshots. Runs only when that code or
+# its test changes, so ordinary PRs spend no extra CI minutes on it.
+on:
+  pull_request:
+    paths:
+      - "artifacts/compliance-tracker/src/components/import-csv-dialog.tsx"
+      - "artifacts/compliance-tracker/src/components/spreadsheet-drop-zone.tsx"
+      - "artifacts/compliance-tracker/src/components/ai-list-reader.tsx"
+      - "artifacts/compliance-tracker/src/lib/spreadsheet.ts"
+      - "artifacts/compliance-tracker/tests/import-file-types-browser.test.mjs"
+      - "artifacts/compliance-tracker/tests/import-file-types-harness.tsx"
+      - "artifacts/compliance-tracker/tests/import-file-types-harness.html"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/import-file-types-browser.yml"
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/compliance-tracker/src/components/import-csv-dialog.tsx"
+      - "artifacts/compliance-tracker/src/components/spreadsheet-drop-zone.tsx"
+      - "artifacts/compliance-tracker/src/components/ai-list-reader.tsx"
+      - "artifacts/compliance-tracker/src/lib/spreadsheet.ts"
+      - "artifacts/compliance-tracker/tests/import-file-types-browser.test.mjs"
+      - "artifacts/compliance-tracker/tests/import-file-types-harness.tsx"
+      - "artifacts/compliance-tracker/tests/import-file-types-harness.html"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/import-file-types-browser.yml"
+  workflow_dispatch:
+
+jobs:
+  import-file-types:
+    name: Import file types (Chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run import file type checks
+        run: pnpm --filter @workspace/compliance-tracker run test:import-file-types-browser

@@ -9,7 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, Upload, FileSpreadsheet, X, Download, GraduationCap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { downloadExcel, readSpreadsheet } from "@/lib/spreadsheet";
-import { SpreadsheetDropZone, isSpreadsheetFile } from "@/components/spreadsheet-drop-zone";
+import { SpreadsheetDropZone, isSpreadsheetFile, usePastedFile } from "@/components/spreadsheet-drop-zone";
 import { ListReadNote, ListReadingPanel, isPhotoOrPdf, useListReading, type ListReadResult } from "@/components/ai-list-reader";
 
 // Replace a site's (or the whole business's) staff roster with an uploaded
@@ -132,7 +132,7 @@ export function RosterImportDialog({ open, onClose, onImported, sites, fixedSite
   async function handleFileChange(file: File) {
     if (!isSpreadsheetFile(file)) {
       if (reading.canRead && isPhotoOrPdf(file)) return void handleListFile(file);
-      toast({ title: "That isn't a spreadsheet", description: "Choose an Excel (.xlsx or .xls) or CSV file.", variant: "destructive" });
+      toast({ title: "That isn't a spreadsheet", description: isPhotoOrPdf(file) && reading.status ? "Reading a photo, screenshot or PDF needs the AI features add-on. Or choose an Excel (.xlsx or .xls) or CSV file." : "Choose an Excel (.xlsx or .xls) or CSV file.", variant: "destructive" });
       return;
     }
     setReadFromList(null);
@@ -167,6 +167,8 @@ export function RosterImportDialog({ open, onClose, onImported, sites, fixedSite
       setParsing(false);
     }
   }
+
+  usePastedFile(open && !result && mode === "excel" && !excelFile && !parsing, file => void handleFileChange(file));
 
   const members: ParsedStaff[] = mode === "excel" ? preview : parsePasteText(text);
   const canImport = members.length > 0 && members.every(member => member.name.trim()) && !importing;
@@ -238,8 +240,8 @@ export function RosterImportDialog({ open, onClose, onImported, sites, fixedSite
               </Button>
               {!excelFile ? (
                 <>
-                  <SpreadsheetDropZone onFile={handleFileChange} testId="input-staff-roster-file" />
-                  <ListReadingPanel reading={reading} kind="staff-roster" noun="staff" onFile={file => void handleListFile(file)} />
+                  <SpreadsheetDropZone onFile={handleFileChange} aiReading={reading.canRead} testId="input-staff-roster-file" />
+                  <ListReadingPanel reading={reading} kind="staff-roster" noun="staff" onFile={file => void handleListFile(file)} onSpreadsheet={handleFileChange} />
                 </>
               ) : (
                 <div className="flex items-center gap-3 p-3 border rounded-lg bg-muted/20">

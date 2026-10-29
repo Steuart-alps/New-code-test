@@ -91,7 +91,8 @@ try {
   assert.equal((await staffA.request('GET', `/compliance-items/${itemB}`)).status, 403);
 
   // Writes at another site are refused.
-  const drill = siteId => ({ checkType: 'fire_drill', checkDate: isoDay(), result: 'pass', siteId, nightStaff: 'included' });
+  const drill = siteId => ({ checkType: 'fire_drill', checkDate: isoDay(), result: 'pass', siteId, nightStaff: 'included',
+    drillTime: '10:30', evacuationSeconds: 150, notes: 'No improvements needed' });
   const wrongSite = await staffA.request('POST', '/fire-safety', drill(siteB));
   assert.equal(wrongSite.status, 403, JSON.stringify(wrongSite.data));
   const ownSite = await staffA.request('POST', '/fire-safety', drill(siteA));
