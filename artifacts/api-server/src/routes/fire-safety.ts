@@ -408,7 +408,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
   // Older records of a retired check stay editable, but no new ones are made.
-  if (RETIRED_FIRE_CHECK_TYPES.includes(data.checkType)) {
+  if ((RETIRED_FIRE_CHECK_TYPES as readonly string[]).includes(data.checkType)) {
     return res.status(400).json({
       error: data.checkType === "alarm_panel"
         ? "The alarm panel is now checked on the premises opening and closing checks."

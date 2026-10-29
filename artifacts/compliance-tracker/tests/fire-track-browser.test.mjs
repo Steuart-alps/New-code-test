@@ -197,6 +197,9 @@ async function routeApi(route) {
           return { staffRosterId: person.id, name: person.name, siteId: person.site_id, siteName: person.site_name, lastDrillDate, due: !lastDrillDate || lastDrillDate <= localDate(-365) };
         }),
       });
+      // The fixture site has no night porter and no escape routes listed.
+      case "/api/fire-safety/night-walks": return json(route, { walkTimes: ["22:00", "02:00", "06:00"], graceMinutes: 60, sites: [] });
+      case "/api/fire-safety/escape-routes": return json(route, { siteId: SITE.id, routes: [], shared: false });
       case "/api/storage/status": return json(route, { state: "not_limited", canManage: true, autoTopUp: false, usedBytes: 0, capacityBytes: null });
       case "/api/photos":
       case "/api/photos/requirements":
