@@ -199,12 +199,12 @@ export const INFO_SHEETS: InfoSheet[] = [
     about: "Grounds machinery, spraying products and operators.",
     tabs: [
       {
-        name: "Equipment", about: "Every machine. Type is ride-on, pedestrian, tractor, utility or other. Active is true or false.",
+        name: "Equipment", about: "Every machine. Type is, for example, greens mower - ride on, greens mower - hand, fairway, ride-on, pedestrian, tractor, utility or other. Active is true or false.",
         importsInto: "GreenTrack > Equipment > Import spreadsheet",
         headers: ["name", "type", "make", "model", "serial_no", "reg_no", "year", "site", "notes", "active"],
         rows: [
-          ["Greens mower 1", "ride-on", "Toro", "Reelmaster 5010", "RM-001", "GT-01", "2021", "", "Main cutting unit", "true"],
-          ["Greens mower (hand) 1", "pedestrian", "Toro", "Greensmaster 1000", "GM-001", "", "2022", "", "Hand greens mower", "true"],
+          ["Greens mower 1", "greens mower - ride on", "Toro", "Greensmaster 3150", "GM-001", "GT-01", "2021", "", "Triple greens mower", "true"],
+          ["Greens mower 2", "greens mower - hand", "Toro", "Greensmaster 1000", "GM-002", "GT-02", "2022", "", "Hand greens mower", "true"],
         ],
       },
       {
