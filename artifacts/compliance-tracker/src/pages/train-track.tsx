@@ -62,7 +62,11 @@ import {
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { SignaturePad } from "@/components/signature-pad";
-import { buildTrainingMatrix, certificateStatus, normaliseStaffName, trainingMatrixToCsv } from "@/lib/training-matrix";
+import {
+  buildTrainingMatrix, certificateStatus, FIRE_DRILL_TRAINING_TYPE, fireDrillMatrixRecords, normaliseStaffName, trainingMatrixToCsv,
+  type StaffDrillAttendance,
+} from "@/lib/training-matrix";
+import { DrillAttendanceCard } from "@/components/fire-drill";
 import { getTrainingExpiry } from "@/lib/training-expiry";
 import { useLocalToday } from "@/hooks/use-local-today";
 import { trackTrainingMatrixDownload } from "@/lib/analytics";
@@ -262,6 +266,8 @@ export default function TrainTrackPage() {
   // Documents to read and sign come from DocTrack.
   const showDocuments = hasService("doctrack") || hasService("safetrack");
   const canManageSignOffs = user?.role === "client_admin" || user?.role === "consultant";
+  // Fire drill attendance comes from FireTrack.
+  const showFireDrills = hasService("firetrack") && canMutate;
   // Expiry states, counts and ordering roll over at local midnight while open.
   const today = useLocalToday();
   const qc = useQueryClient();
@@ -308,6 +314,13 @@ export default function TrainTrackPage() {
     queryKey: ["staff-roster", activeClientId],
     queryFn: () => apiFetch("/staff-roster"),
     enabled: !!activeClientId,
+  });
+
+  // Who took part in a fire drill (FireTrack), for the matrix's "Fire drill" column.
+  const { data: drillAttendance } = useQuery<{ periodMonths: number; staff: StaffDrillAttendance[] }>({
+    queryKey: ["fire-drill-attendance", activeClientId],
+    queryFn: () => apiFetch("/fire-safety/drill-attendance"),
+    enabled: !!activeClientId && showFireDrills,
   });
 
   // Effective per-client training types. Existing records whose type has since
@@ -604,7 +617,10 @@ ${rows.map(r => `<tr>
 
   // Training matrix CSV — rows = staff, columns = training types, cells = current status.
   function handleDownloadMatrix() {
-    const matrix = buildTrainingMatrix(certs, activeStaff, siteFilter);
+    const drillStaff = Array.isArray(drillAttendance?.staff) ? drillAttendance.staff : null;
+    const drillRecords = drillStaff ? fireDrillMatrixRecords(drillStaff, drillAttendance!.periodMonths ?? 12) : [];
+    const matrix = buildTrainingMatrix([...certs, ...drillRecords], activeStaff, siteFilter, new Date(),
+      drillStaff ? [FIRE_DRILL_TRAINING_TYPE] : []);
 
     if (matrix.rows.length === 0 || matrix.types.length === 0) {
       toast({
@@ -743,6 +759,8 @@ ${rows.map(r => `<tr>
           )}
         </div>
       </div>
+
+      {showFireDrills && <DrillAttendanceCard siteId={siteFilter === "all" ? undefined : Number(siteFilter)} trackLink />}
 
       {/* Tabs */}
       <div className="flex border-b border-border">

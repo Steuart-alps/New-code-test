@@ -242,6 +242,7 @@ async function routeApi(route, url) {
   }
   if (pathname === "/api/sites" && method === "GET") return jsonResponse(route, [SITE]);
   if (pathname === "/api/staff-roster" && method === "GET") return jsonResponse(route, []);
+  if (pathname === "/api/assignees" && method === "GET") return jsonResponse(route, []);
 
   if (pathname === "/api/track-actions" && method === "GET") return jsonResponse(route, []);
   if (pathname === "/api/track-actions/templates/matching" && method === "GET") return jsonResponse(route, []);
@@ -301,6 +302,8 @@ async function routeApi(route, url) {
     return jsonResponse(route, collections.get(pathname) ?? []);
   }
   if (pathname === "/api/green-track/machines" && method === "GET") return jsonResponse(route, [MACHINE]);
+  // The layout's "Add your team first" gate: this business is already set up.
+  if (pathname === "/api/setup/state" && method === "GET") return jsonResponse(route, { needsSetup: false, canManage: true });
   if (pathname === "/api/green-track/status" && method === "GET") {
     return jsonResponse(route, {
       totalMachines: 1, activeMachines: 1, openDefects: 1, outOfService: 0,
@@ -361,6 +364,11 @@ async function routeApi(route, url) {
     const index = rows.findIndex(row => row.id === Number(updateMatch[1]));
     if (index >= 0) rows[index] = { ...rows[index], ...body };
     return jsonResponse(route, index >= 0 ? rows[index] : { id: Number(updateMatch[1]), ...body });
+  }
+
+  if (pathname === "/api/setup/state" && method === "GET") {
+    // Setup is finished, so the "Add your team first" gate stays out of the way.
+    return jsonResponse(route, { needsSetup: false, canManage: true, team: { recorders: 2, aloneAt: null, ready: true } });
   }
 
   if (pathname === "/api/managed-by" && method === "GET") {

@@ -103,7 +103,7 @@ try {
   console.log('ok - edits keep recorded call points; older records stay editable');
 
   // ── Drills record whether night staff took part ─────────────────────────
-  const drill = { checkType: 'fire_drill', checkDate: today, result: 'pass', siteId: siteA.id };
+  const drill = { checkType: 'fire_drill', checkDate: today, result: 'pass', siteId: siteA.id, drillTime: '10:30', evacuationSeconds: 150, notes: 'No improvements needed' };
   const noAnswer = await owner.request('POST', '/fire-safety', drill);
   assert.equal(noAnswer.status, 400);
   assert.equal(noAnswer.data.error, 'Say whether night staff took part in the drill');

@@ -19,4 +19,6 @@ export interface ContractorVisit {
   contractorId: number | null;
   contractorName: string | null;
   reminderSentAt: Date | null;
+  /** Marked "No contractor needed" (never true while a contractor is chosen) */
+  notNeeded: boolean;
 }

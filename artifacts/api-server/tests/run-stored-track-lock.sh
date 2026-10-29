@@ -35,7 +35,7 @@ WITH expected(table_name, column_name) AS (VALUES
  ('green_pre_use_checks','check_date'),('green_service_records','service_date'),
  ('green_defects','report_date'),('green_puwer_inspections','inspection_date'),
  ('green_fuel_logs','log_date'),('green_hour_readings','reading_date'),
- ('green_applications','application_date'),('green_stock_movements','movement_date'),('pat_tests','test_date'),
+ ('green_applications','application_date'),('green_stock_movements','movement_date'),('green_machine_not_in_use','check_date'),('pat_tests','test_date'),
  ('pat_certificates','visit_date'),('pat_replacements','replaced_on'),
  ('pat_failures','created_at'),('pest_visits','visit_date'),
  ('pest_activity','recorded_date'),('safe_training_records','completed_at'),

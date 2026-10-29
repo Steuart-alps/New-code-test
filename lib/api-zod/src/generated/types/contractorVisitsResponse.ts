@@ -5,10 +5,13 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { ContractorRegisterCheck } from './contractorRegisterCheck';
 import type { ContractorVisit } from './contractorVisit';
 import type { ContractorVisitType } from './contractorVisitType';
 
 export interface ContractorVisitsResponse {
   types: ContractorVisitType[];
   visits: ContractorVisit[];
+  /** The compliance check register's other checks (gas safety, EICR...), not finished one-offs, business-wide or at a site the user can see */
+  checks: ContractorRegisterCheck[];
 }

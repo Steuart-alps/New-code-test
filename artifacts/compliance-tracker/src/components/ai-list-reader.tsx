@@ -4,6 +4,7 @@ import { Camera, Download, Sparkles } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { getApiErrorMessage } from "@/lib/api";
+import { heicToJpeg } from "@/lib/media-upload";
 import { AiAllowanceNote, aiAllowanceState } from "@/components/ai-allowance-note";
 import type { AiStatus } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
@@ -25,42 +26,60 @@ export interface ListReadResult { headers: string[]; rows: string[][]; unclear: 
 const readingPath = (kind: ListReadingKind) => kind === "pat-appliances" ? "/imports/pat-appliances/reading" : `/imports/list-reading/${kind}`;
 const readPath = (kind: ListReadingKind) => kind === "pat-appliances" ? "/imports/pat-appliances/read" : `/imports/list-reading/${kind}/read`;
 
-/** File types ComplyTrack can read a list from (spreadsheets go the usual way). */
-const READABLE_LIST = "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp,.pdf,.docx,.txt";
+/**
+ * File types ComplyTrack can read a list from (spreadsheets go the usual way).
+ * Any photo or screenshot the browser can open is accepted; ones Claude can't
+ * take directly (an iPhone HEIC, a TIFF scan) are turned into a JPEG first.
+ */
+export const READABLE_LIST = "image/*,.jpg,.jpeg,.png,.webp,.gif,.heic,.heif,.tif,.tiff,.bmp,.pdf,.docx,.txt";
 const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif",
+  heic: "image/heic", heif: "image/heif", tif: "image/tiff", tiff: "image/tiff", bmp: "image/bmp", avif: "image/avif",
+};
+/** Image types the AI reader takes as they are. */
+const SENDABLE_IMAGE = /^image\/(jpeg|png|webp|gif)$/;
 
 export function listMimeType(file: File): string {
   if (file.type) return file.type;
-  const ext = file.name.split(".").pop()?.toLowerCase();
-  return ext === "pdf" ? "application/pdf" : ext === "docx" ? DOCX_TYPE : ext === "txt" ? "text/plain"
-    : ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "";
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return ext === "pdf" ? "application/pdf" : ext === "docx" ? DOCX_TYPE : ext === "txt" ? "text/plain" : IMAGE_EXTENSIONS[ext] ?? "";
 }
 
-/** True for a photo or PDF, which only the reader can turn into rows. */
+/** True for a photo, screenshot or PDF, which only the reader can turn into rows. */
 export function isPhotoOrPdf(file: File): boolean {
-  return /^image\/(jpeg|png|webp)$|^application\/pdf$/.test(listMimeType(file));
+  return /^image\/|^application\/pdf$/.test(listMimeType(file));
 }
 
 /**
  * A phone photo can be 5-10 MB; Claude reads a list just as well at 2,000
- * pixels, so photos are shrunk to a JPEG of that size before upload.
+ * pixels, so photos are shrunk to a JPEG of that size before upload. Photos
+ * in other formats (HEIC, TIFF, BMP) are always turned into a JPEG.
  */
 async function shrinkPhoto(file: File, mimeType: string): Promise<{ blob: Blob; mimeType: string }> {
-  if (!/^image\/(jpeg|png|webp)$/.test(mimeType) || typeof createImageBitmap !== "function") return { blob: file, mimeType };
+  if (!mimeType.startsWith("image/") || mimeType === "image/gif") return { blob: file, mimeType };
+  const sendable = SENDABLE_IMAGE.test(mimeType);
+  const cannotOpen = new Error("This photo can't be opened in this browser. Save it as a JPEG or PNG (or take a screenshot of it) and try again.");
+  if (typeof createImageBitmap !== "function") {
+    if (sendable) return { blob: file, mimeType };
+    throw cannotOpen;
+  }
   try {
     const bitmap = await createImageBitmap(file);
     const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
-    if (scale === 1 && file.size <= 1_500_000) { bitmap.close(); return { blob: file, mimeType }; }
+    if (sendable && scale === 1 && file.size <= 1_500_000) { bitmap.close(); return { blob: file, mimeType }; }
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(bitmap.width * scale);
     canvas.height = Math.round(bitmap.height * scale);
     canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close();
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
-    return blob ? { blob, mimeType: "image/jpeg" } : { blob: file, mimeType };
+    if (blob) return { blob, mimeType: "image/jpeg" };
   } catch {
-    return { blob: file, mimeType };
+    // Not an image this browser can open.
   }
+  if (sendable) return { blob: file, mimeType };
+  throw cannotOpen;
 }
 
 function toBase64(blob: Blob): Promise<string> {
@@ -96,7 +115,9 @@ export function useListReading(kind: ListReadingKind, enabled: boolean, defaultS
 
   async function read(file: File): Promise<ListReadResult> {
     try {
-      const shrunk = await shrinkPhoto(file, listMimeType(file));
+      // An iPhone HEIC photo becomes a JPEG where the browser can open it (Safari).
+      const photo = await heicToJpeg(file);
+      const shrunk = await shrinkPhoto(photo, listMimeType(photo));
       const response = await clientApiFetch(readPath(kind), {
         method: "POST",
         body: JSON.stringify({ fileName: file.name, mimeType: shrunk.mimeType, data: await toBase64(shrunk.blob), siteId: siteId ? Number(siteId) : null }),
@@ -115,11 +136,13 @@ export function useListReading(kind: ListReadingKind, enabled: boolean, defaultS
 export type ListReading = ReturnType<typeof useListReading>;
 
 /** The box offering to read a paper list, photo or PDF. Renders nothing when reading is unavailable. */
-export function ListReadingPanel({ reading, kind, noun, onFile, disabled }: {
+export function ListReadingPanel({ reading, kind, noun, onFile, onSpreadsheet, disabled }: {
   reading: ListReading; kind: ListReadingKind;
   /** Plural, for the wording: "appliances", "contractors". */
   noun: string;
   onFile: (file: File) => void;
+  /** An Excel or CSV file dropped here by mistake goes the usual spreadsheet way. */
+  onSpreadsheet?: (file: File) => void;
   disabled?: boolean;
 }) {
   const input = useRef<HTMLInputElement>(null);
@@ -128,11 +151,16 @@ export function ListReadingPanel({ reading, kind, noun, onFile, disabled }: {
   if (!status) return null;
   const usable = canRead && !disabled;
 
+  function chosen(file: File) {
+    if (onSpreadsheet && /\.(xlsx|xls|csv|ods)$/i.test(file.name)) onSpreadsheet(file);
+    else if (usable) onFile(file);
+  }
+
   function drop(event: DragEvent) {
     event.preventDefault();
     setDragging(false);
     const file = event.dataTransfer.files?.[0];
-    if (file && usable) onFile(file);
+    if (file) chosen(file);
   }
 
   return (
@@ -140,9 +168,9 @@ export function ListReadingPanel({ reading, kind, noun, onFile, disabled }: {
       onDragOver={event => { event.preventDefault(); setDragging(true); }}
       onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
       onDrop={drop}>
-      <p className="flex items-center gap-1.5 text-sm font-medium"><Sparkles className="h-4 w-4 text-primary" /> Only have a paper list, photo or PDF?</p>
+      <p className="flex items-center gap-1.5 text-sm font-medium"><Sparkles className="h-4 w-4 text-primary" /> Only have a paper list, photo, screenshot or PDF?</p>
       <p className="text-xs text-muted-foreground">
-        Take a photo of the list (one page at a time), or upload a scan, PDF or Word file. ComplyTrack reads the {noun} and fills in the rows for you to check. Nothing is saved until you import. The file is sent to Anthropic, our AI provider, to read; it isn't used to train their AI or kept by ComplyTrack.
+        Take a photo of the list (one page at a time), or upload a screenshot, scan, PDF or Word file. You can also paste a screenshot (Ctrl+V, or Cmd+V on a Mac). ComplyTrack reads the {noun} and fills in the rows for you to check. Nothing is saved until you import. The file is sent to Anthropic, our AI provider, to read; it isn't used to train their AI or kept by ComplyTrack.
         {readsLeft !== null && status.ai.active && ` ${readsLeft} of ${status.monthlyLimit} readings left this month.`}
       </p>
       {status.sites.length > 0 && kind !== "contractors" && kind !== "staff-roster" && (
@@ -156,7 +184,7 @@ export function ListReadingPanel({ reading, kind, noun, onFile, disabled }: {
         </label>
       )}
       <input ref={input} type="file" accept={READABLE_LIST} className="hidden" data-testid={`input-list-reading-${kind}`}
-        onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file && usable) onFile(file); }} />
+        onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) chosen(file); }} />
       <Button type="button" variant="outline" size="sm" disabled={!usable} onClick={() => input.current?.click()} data-testid={`button-list-reading-${kind}`}>
         <Camera className="mr-1 h-4 w-4" /> Choose or drag in a photo or document
       </Button>
