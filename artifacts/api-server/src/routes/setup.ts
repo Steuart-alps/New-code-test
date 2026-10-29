@@ -7,6 +7,8 @@ import { getClientId, requireAuth, requireClientAdmin } from "../middleware/requ
 import { STARTER_CHECK_NOTE, starterChecksFor, starterItemValues } from "../lib/seedStarterContent";
 import { ADDON_KEYS, getEntitledServices } from "../lib/services";
 import { addMonthsToDay, isCalendarDay } from "../lib/taskSchedule";
+import { getAiStatus } from "../lib/aiAllowance";
+import { escapeHtml, getPublicAppUrl, sendSystemEmail } from "../lib/email";
 import { BUSINESS_TYPES } from "./auth";
 
 // First-run setup wizard (web /setup): business type and nation, first site
@@ -22,6 +24,7 @@ const NATIONS = ["england", "wales", "scotland", "northern_ireland", "multi_nati
 const PICKED_MODULES_SETTING = "setup_modules";
 const DEFERRED_SETTING = "setup_deferred_at";
 const TEAM_ALONE_SETTING = "setup_team_alone_at";
+const ASSIST_SETTING = "setup_assist_requested";
 // Superseded service keys are not offered as starting modules.
 const LEGACY_MODULES = new Set(["pooltrack", "swimtrack", "safetrack"]);
 
@@ -101,6 +104,17 @@ async function teamState(clientId: number) {
   return { recorders, aloneAt, ready: recorders > 0 || aloneAt != null };
 }
 
+type AssistRequest = { requestedAt: string; requestedBy: string };
+
+function parseAssist(raw: string | null): AssistRequest | null {
+  try {
+    const value = JSON.parse(raw ?? "null");
+    return value && typeof value.requestedAt === "string" ? { requestedAt: value.requestedAt, requestedBy: String(value.requestedBy ?? "") } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Modules picked in the setup wizard; empty when none were picked. */
 export async function getPickedModules(clientId: number): Promise<string[]> {
   return parsePicked(await setting(clientId, PICKED_MODULES_SETTING));
@@ -131,9 +145,14 @@ router.get("/setup/state", requireAuth, async (req, res) => {
     .where(and(eq(complianceItemsTable.clientId, clientId), inArray(complianceItemsTable.title, titles)))).map((r) => r.title) : []);
   const values = (check: (typeof catalogue)[number]["check"]) => starterItemValues(check, client.businessType);
   const team = await teamState(clientId);
+  // The getting-started page says what AI can read for them; never block setup on it.
+  const ai = await getAiStatus(clientId).then((s) => ({ configured: s.configured, active: s.active }))
+    .catch(() => ({ configured: false, active: false }));
   res.json({
     ...base,
     deferredAt: await setting(clientId, DEFERRED_SETTING),
+    ai,
+    assistRequest: parseAssist(await setting(clientId, ASSIST_SETTING)),
     // A finished setup never blocks records again.
     team: client.setupCompletedAt ? { ...team, ready: true } : team,
     // No trial end and no subscription: every site and module is free (see
@@ -298,6 +317,70 @@ router.post("/setup/team-alone", requireAuth, requireClientAdmin, async (req, re
   const aloneAt = new Date().toISOString();
   await saveSetting(clientId, TEAM_ALONE_SETTING, aloneAt);
   res.json({ aloneAt });
+});
+
+// "Ask ALPS to set it up for you": the getting-started page's offer of a
+// paid setup service. It only emails ALPS (ADMIN_EMAIL), who agree the price
+// and invoice it themselves; nothing is charged here. One request per
+// business: asking again returns the first request without a second email.
+router.post("/setup/assist-request", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const { clientId: _ignored, ...body } = req.body ?? {};
+  const parsed = z.object({
+    phone: z.string().trim().max(40).optional(),
+    notes: z.string().trim().max(2000).optional(),
+  }).strict().safeParse(body);
+  if (!parsed.success) return res.status(400).json({ error: "Please check the phone number and notes, then try again." });
+
+  const existing = parseAssist(await setting(clientId, ASSIST_SETTING));
+  if (existing) return res.json({ ...existing, emailed: false });
+
+  const adminEmail = process.env.ADMIN_EMAIL?.trim();
+  if (!adminEmail) {
+    req.log.warn({ clientId }, "ADMIN_EMAIL not configured — setup service request not sent");
+    return res.status(503).json({ error: "The setup service can't take requests right now. Please use the Feedback button to ask ALPS instead.", code: "SETUP_SERVICE_UNAVAILABLE" });
+  }
+
+  const user = req.currentUser!;
+  const [client] = await db.select({ name: clientsTable.name, businessType: clientsTable.businessType })
+    .from(clientsTable).where(eq(clientsTable.id, clientId));
+  const [siteCount] = await db.select({ count: sql<number>`count(*)::int` }).from(sitesTable).where(eq(sitesTable.clientId, clientId));
+  const ai = await getAiStatus(clientId).catch(() => null);
+  const { phone, notes } = parsed.data;
+  const businessName = client?.name ?? `Business ${clientId}`;
+  const rows: Array<[string, string]> = [
+    ["Business", businessName],
+    ["Business type", client?.businessType ?? "Not given yet"],
+    ["Asked by", `${user.name} (${user.email})`],
+    ["Phone", phone || "Not given"],
+    ["Sites added so far", String(siteCount?.count ?? 0)],
+    ["AI features", ai?.active ? "On" : "Off"],
+  ];
+  const appUrl = getPublicAppUrl().replace(/\/+$/, "");
+  try {
+    await sendSystemEmail({
+      to: adminEmail,
+      subject: `Setup service request: ${businessName}`,
+      html: `
+        <h2>Setup service request</h2>
+        <p>This business would like ALPS to enter its initial data for it. Agree the price with them before starting; nothing has been charged.</p>
+        <table style="border-collapse: collapse; margin: 16px 0;">
+          ${rows.map(([label, value]) => `<tr><td style="padding: 4px 16px 4px 0; color: #64748b;">${label}</td><td style="padding: 4px 0;"><strong>${escapeHtml(value)}</strong></td></tr>`).join("")}
+        </table>
+        ${notes ? `<h3>Their notes</h3><p style="white-space:pre-wrap">${escapeHtml(notes)}</p>` : ""}
+        <p>The business is listed under Clients in <a href="${escapeHtml(appUrl)}">ComplyTrack</a>.</p>
+      `,
+      text: `Setup service request\n\nThis business would like ALPS to enter its initial data for it. Agree the price with them before starting; nothing has been charged.\n\n${rows.map(([label, value]) => `${label}: ${value}`).join("\n")}${notes ? `\n\nTheir notes:\n${notes}` : ""}\n\nThe business is listed under Clients in ComplyTrack: ${appUrl}`,
+      idempotencyKey: `setup-assist-${clientId}`,
+    });
+  } catch (err) {
+    req.log.error({ err, clientId }, "Setup service request email failed");
+    return res.status(502).json({ error: "Your request didn't reach ALPS. Please try again in a minute.", code: "SETUP_SERVICE_EMAIL_FAILED" });
+  }
+  const request: AssistRequest = { requestedAt: new Date().toISOString(), requestedBy: user.name };
+  await saveSetting(clientId, ASSIST_SETTING, JSON.stringify(request));
+  res.json({ ...request, emailed: true });
 });
 
 router.post("/setup/complete", requireAuth, requireClientAdmin, async (req, res) => {

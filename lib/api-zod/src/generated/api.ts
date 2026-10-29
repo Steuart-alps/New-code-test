@@ -22,6 +22,32 @@ export const ConfirmSetupTeamAloneResponse = zod.object({
 
 
 /**
+ * The getting-started page's offer. Emails ALPS (ADMIN_EMAIL) with the business, the person asking and their notes; ALPS agrees the price and invoices it, so nothing is charged here. One request per business: asking again returns the first request and sends no second email. Owners and consultants only; consultants pass the business as clientId.
+ * @summary Ask ALPS to enter the business's initial data (setup service)
+ */
+export const RequestSetupAssistQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const requestSetupAssistBodyPhoneMax = 40;
+
+export const requestSetupAssistBodyNotesMax = 2000;
+
+
+
+export const RequestSetupAssistBody = zod.object({
+  "phone": zod.string().max(requestSetupAssistBodyPhoneMax).optional().describe('Best number for ALPS to call'),
+  "notes": zod.string().max(requestSetupAssistBodyNotesMax).optional().describe('Anything ALPS should know, such as how many sites or where their lists are kept')
+})
+
+export const RequestSetupAssistResponse = zod.object({
+  "requestedAt": zod.date(),
+  "requestedBy": zod.string(),
+  "emailed": zod.boolean().describe('False when the request had already been sent earlier')
+})
+
+
+/**
  * Deletes the business's records and stored files at once, keeping the audit trail and a record of the deletion. Refused for the operator's own business and for any business with a subscription, a payment, an AI top-up or a legal hold. The business's name must be typed to confirm.
  * @summary Permanently delete a test business that never paid (platform operators)
  */

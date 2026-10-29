@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
 import { SETUP_STATE_KEY, type SetupTeam } from "@/components/setup-team-gate";
+import { SetupGettingStarted, type SetupAi, type SetupAssistRequest } from "@/components/setup-getting-started";
 import { departmentLabel } from "@/lib/departments";
 import { roleLabel } from "@/lib/roles";
 import { UserDialog, type RosterEntry, type User as Person } from "@/pages/users";
@@ -25,7 +26,7 @@ type SetupState = {
   needsSetup: boolean; setupCompletedAt: string | null; canManage: boolean; businessType: string | null;
   deferredAt?: string | null; nation?: string | null; sites?: { id: number; name: string }[];
   modules?: { available: string[]; picked: string[] }; starterChecks?: StarterCheck[];
-  complimentary?: boolean; team?: SetupTeam;
+  complimentary?: boolean; team?: SetupTeam; ai?: SetupAi; assistRequest?: SetupAssistRequest | null;
 };
 /**
  * `partial` marks a date box with an unfinished date (the browser reports no
@@ -51,6 +52,23 @@ const STEPS = [
  * only Owners record for now.
  */
 const TEAM_STEP = 3;
+/** The getting-started page opens setup once per business on this browser; "What you'll need" reopens it. */
+const introSeenKey = (clientId: number | null) => `complytrack:setup-intro-seen:${clientId ?? "own"}`;
+function introSeen(clientId: number | null): boolean {
+  try {
+    return window.localStorage.getItem(introSeenKey(clientId)) === "true";
+  } catch {
+    return false;
+  }
+}
+function markIntroSeen(clientId: number | null) {
+  try {
+    window.localStorage.setItem(introSeenKey(clientId), "true");
+  } catch {
+    // Private windows may block storage; the page just shows again next time.
+  }
+}
+
 /** "12 months (every year)", "60 months (every 5 years)". */
 function intervalLabel(months: number): string {
   if (months % 12 !== 0) return `${months} month${months === 1 ? "" : "s"}`;
@@ -71,6 +89,7 @@ export default function SetupPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   // "Add your team" on a held-back form page opens the wizard at the team step.
   const [step, setStep] = useState(() => new URLSearchParams(search).get("step") === "team" ? TEAM_STEP : 0);
+  const [intro, setIntro] = useState(() => !new URLSearchParams(search).get("step") && !introSeen(clientId));
   const [busy, setBusy] = useState(false);
   const [businessType, setBusinessType] = useState("");
   const [nation, setNation] = useState("");
@@ -257,6 +276,25 @@ export default function SetupPage() {
     navigate("/dashboard");
   }, false);
 
+  const startSetup = () => {
+    markIntroSeen(clientId);
+    setIntro(false);
+  };
+
+  async function requestAssist(details: { phone: string; notes: string }) {
+    try {
+      const result = await post("/setup/assist-request", {
+        ...(details.phone ? { phone: details.phone } : {}),
+        ...(details.notes ? { notes: details.notes } : {}),
+      }) as SetupAssistRequest;
+      setState((current) => current ? { ...current, assistRequest: { requestedAt: result.requestedAt, requestedBy: result.requestedBy } } : current);
+      toast({ title: "Request sent to ALPS", description: "We'll be in touch to agree the price and how to send your lists." });
+    } catch (err) {
+      toast({ title: "Request not sent", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      throw err;
+    }
+  }
+
   const confirmOwnersOnly = () => run(async () => {
     await post("/setup/team-alone", {});
     setAloneOpen(false);
@@ -292,7 +330,10 @@ export default function SetupPage() {
             <h1 className="text-2xl font-bold tracking-tight">Set up your account</h1>
             <p className="text-sm text-muted-foreground mt-1">A few quick questions so your dashboard shows what applies to you. You can skip most steps, but your team comes before any checklists or forms.</p>
           </div>
-          <Button variant="outline" size="sm" onClick={finishLater} disabled={busy}>Finish later</Button>
+          <div className="flex items-center gap-2">
+            {!intro && <Button variant="ghost" size="sm" onClick={() => setIntro(true)}>What you'll need</Button>}
+            <Button variant="outline" size="sm" onClick={finishLater} disabled={busy}>Finish later</Button>
+          </div>
         </div>
 
         <ol className="grid grid-cols-7 gap-1" aria-label="Setup steps">
@@ -300,9 +341,9 @@ export default function SetupPage() {
             const locked = i > TEAM_STEP && !teamReady;
             return (
             <li key={label}>
-              <button type="button" onClick={() => setStep(locked ? TEAM_STEP : i)} aria-current={i === step ? "step" : undefined}
+              <button type="button" onClick={() => { setStep(locked ? TEAM_STEP : i); if (intro) startSetup(); }} aria-current={!intro && i === step ? "step" : undefined}
                 title={locked ? "Add your team first" : undefined}
-                className={`w-full flex flex-col items-center gap-1 rounded-md p-1.5 text-[11px] leading-tight ${i === step ? "bg-primary/10 text-primary font-semibold" : i < step ? "text-foreground" : "text-muted-foreground"}`}>
+                className={`w-full flex flex-col items-center gap-1 rounded-md p-1.5 text-[11px] leading-tight ${!intro && i === step ? "bg-primary/10 text-primary font-semibold" : i < step ? "text-foreground" : "text-muted-foreground"}`}>
                 {locked ? <Lock className="w-4 h-4" aria-label="Locked until your team is added" /> : <Icon className="w-4 h-4" />}
                 <span className="hidden sm:block text-center">{label}</span>
               </button>
@@ -310,12 +351,23 @@ export default function SetupPage() {
             );
           })}
         </ol>
-        <p className="sm:hidden text-sm font-medium">Step {step + 1} of {STEPS.length}: {STEPS[step].label}</p>
+        {!intro && <p className="sm:hidden text-sm font-medium">Step {step + 1} of {STEPS.length}: {STEPS[step].label}</p>}
 
         {loadError && <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{loadError}</div>}
         {!state && !loadError && <div className="h-40 rounded-xl bg-muted animate-pulse" />}
 
-        {state && (
+        {state && intro && (
+          <SetupGettingStarted
+            ai={state.ai}
+            assistRequest={state.assistRequest ?? null}
+            canRequestAssist={user?.role === "client_admin"}
+            onRequestAssist={requestAssist}
+            onStart={startSetup}
+            started={(state.sites?.length ?? 0) > 0}
+          />
+        )}
+
+        {state && !intro && (
           <section className="rounded-xl border bg-card p-5 shadow-sm space-y-5">
             {step === 0 && (
               <>
