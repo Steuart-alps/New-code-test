@@ -10,14 +10,21 @@ type InputProps = React.ComponentProps<"input"> & {
   selectOnFocus?: boolean
 }
 
+const NOT_WORDS = new Set(["numeric", "decimal", "tel", "email", "url"])
+
 const Input = React.forwardRef<HTMLInputElement, InputProps>(
   ({ className, type, dictation = false, selectOnFocus = false, onFocus, onMouseDown, onMouseUp, ...props }, ref) => {
     const clickToFocus = React.useRef(false)
     const [innerRef, setRef] = useMergedRef(ref)
-    const withMic = dictation && dictationSupported && (type === undefined || type === "text" || type === "search")
+    const isTextBox = type === undefined || type === "text" || type === "search"
+    const withMic = dictation && dictationSupported && isTextBox
     const field = (
       <input
         type={type}
+        // Underline spelling mistakes (UK English, from <html lang="en-GB">).
+        // Firefox only checks multi-line boxes unless asked; number-style
+        // boxes are left alone, and spellCheck={false} turns it off for codes.
+        spellCheck={isTextBox && !NOT_WORDS.has(props.inputMode ?? "") ? true : undefined}
         className={cn(
           "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
           className,

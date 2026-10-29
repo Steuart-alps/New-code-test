@@ -94,6 +94,45 @@ paths:
         "403":
           description: Not an Owner or consultant of the business
 
+  /setup/assist-request:
+    post:
+      operationId: requestSetupAssist
+      tags: [setup]
+      summary: Ask ALPS to enter the business's initial data (setup service)
+      description: >-
+        The getting-started page's offer. Emails ALPS (ADMIN_EMAIL) with the
+        business, the person asking and their notes; ALPS agrees the price and
+        invoices it, so nothing is charged here. One request per business:
+        asking again returns the first request and sends no second email.
+        Owners and consultants only; consultants pass the business as clientId.
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetupAssistRequestBody"
+      responses:
+        "200":
+          description: Request sent (or already sent earlier)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupAssistRequestResult"
+        "400":
+          description: No business, or the phone number or notes are too long
+        "403":
+          description: Not an Owner or consultant of the business
+        "502":
+          description: The email to ALPS failed; nothing was recorded
+        "503":
+          description: ALPS's email address is not configured on this server
+
   /clients/{id}/delete-test-business:
     post:
       operationId: deleteTestBusiness
@@ -5871,6 +5910,19 @@ components:
           minLength: 1
           maxLength: 200
           description: The business's name, typed to confirm
+    SetupAssistRequestBody:
+      type: object
+      additionalProperties: false
+      properties:
+        phone: { type: string, maxLength: 40, description: "Best number for ALPS to call" }
+        notes: { type: string, maxLength: 2000, description: "Anything ALPS should know, such as how many sites or where their lists are kept" }
+    SetupAssistRequestResult:
+      type: object
+      required: [requestedAt, requestedBy, emailed]
+      properties:
+        requestedAt: { type: string, format: date-time }
+        requestedBy: { type: string }
+        emailed: { type: boolean, description: "False when the request had already been sent earlier" }
     SetupTeamAloneResult:
       type: object
       required: [aloneAt]
@@ -5960,7 +6012,7 @@ components:
             - $ref: "#/components/schemas/BusinessDashboardAi"
     BusinessDashboardAiAmounts:
       type: object
-      required: [addonPence, topUpPence, invoicedTopUpPence, incomePence, costPence, marginPence, requests]
+      required: [addonPence, topUpPence, invoicedTopUpPence, incomePence, costPence, marginPence, requests, lapsedPence]
       properties:
         addonPence: { type: integer, description: The AI add-on paid through Stripe }
         topUpPence: { type: integer, description: Top-ups paid through Stripe }
@@ -5969,6 +6021,7 @@ components:
         costPence: { type: integer, description: What Claude charged, converted from dollars }
         marginPence: { type: integer }
         requests: { type: integer }
+        lapsedPence: { type: integer, description: Paid-for AI use that lapsed unused after 12 months and came back to ALPS (already part of the margin) }
     BusinessDashboardAi:
       type: object
       required: [months, businesses, totals, usdToGbp, addonIncomeAvailable]

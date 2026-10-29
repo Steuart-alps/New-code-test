@@ -29,7 +29,7 @@ try {
 }
 export const {
   db, sql, pool, runReminderJob, runContractorComplianceReminderJob, runCertificateFollowUpJob, runPersonalReminderJob, runRuntimeMigrations, decryptTokenPayload,
-  encryptTokenPayload, tokenPayloadNeedsReencryption, reencryptQueuedTokenPayloads, certificateInbox,
+  encryptTokenPayload, tokenPayloadNeedsReencryption, reencryptQueuedTokenPayloads, certificateInbox, collectDueItems,
 } = runtime;
 
 // With `browserPolicy`, the session behaves like the same-origin web app under

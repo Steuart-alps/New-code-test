@@ -248,6 +248,7 @@ import type {
   RecordCoshhSignOffs200,
   RecordFoodSafetyColdReadingParams,
   RequestFeedbackScreenshotUploadBody,
+  RequestSetupAssistParams,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   ResetFoodSafetyConfigParams,
@@ -259,6 +260,8 @@ import type {
   SetContractorRegisterCheckRequest,
   SetContractorVisitRequest,
   SetPrivacyIntakeAssigneeParams,
+  SetupAssistRequestBody,
+  SetupAssistRequestResult,
   SetupTeamAloneResult,
   SignTrainingRecordRequest,
   Site,
@@ -405,6 +408,86 @@ export const useConfirmSetupTeamAlone = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getConfirmSetupTeamAloneMutationOptions(options));
+    }
+
+export const getRequestSetupAssistUrl = (params?: RequestSetupAssistParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/setup/assist-request?${stringifiedParams}` : `/api/setup/assist-request`
+}
+
+/**
+ * The getting-started page's offer. Emails ALPS (ADMIN_EMAIL) with the business, the person asking and their notes; ALPS agrees the price and invoices it, so nothing is charged here. One request per business: asking again returns the first request and sends no second email. Owners and consultants only; consultants pass the business as clientId.
+ * @summary Ask ALPS to enter the business's initial data (setup service)
+ */
+export const requestSetupAssist = async (setupAssistRequestBody?: SetupAssistRequestBody,
+    params?: RequestSetupAssistParams, options?: RequestInit): Promise<SetupAssistRequestResult> => {
+
+  return customFetch<SetupAssistRequestResult>(getRequestSetupAssistUrl(params),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(setupAssistRequestBody)
+  }
+);}
+
+
+
+
+
+export const getRequestSetupAssistMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestSetupAssist>>, TError,{data?: BodyType<SetupAssistRequestBody>;params?: RequestSetupAssistParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof requestSetupAssist>>, TError,{data?: BodyType<SetupAssistRequestBody>;params?: RequestSetupAssistParams}, TContext> => {
+
+const mutationKey = ['requestSetupAssist'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof requestSetupAssist>>, {data?: BodyType<SetupAssistRequestBody>;params?: RequestSetupAssistParams}> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  requestSetupAssist(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RequestSetupAssistMutationResult = NonNullable<Awaited<ReturnType<typeof requestSetupAssist>>>
+    export type RequestSetupAssistMutationBody = BodyType<SetupAssistRequestBody> | undefined
+    export type RequestSetupAssistMutationError = ErrorType<void>
+
+    /**
+ * @summary Ask ALPS to enter the business's initial data (setup service)
+ */
+export const useRequestSetupAssist = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestSetupAssist>>, TError,{data?: BodyType<SetupAssistRequestBody>;params?: RequestSetupAssistParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof requestSetupAssist>>,
+        TError,
+        {data?: BodyType<SetupAssistRequestBody>;params?: RequestSetupAssistParams},
+        TContext
+      > => {
+      return useMutation(getRequestSetupAssistMutationOptions(options));
     }
 
 export const getDeleteTestBusinessUrl = (id: number,) => {

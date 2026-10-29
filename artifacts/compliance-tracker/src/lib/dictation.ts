@@ -42,6 +42,20 @@ export function isDictationSupported(): boolean {
   return getSpeechRecognition() !== null;
 }
 
+/**
+ * Whether to listen continuously. Chrome on Android, and Safari on iPhone,
+ * iPad and Mac (every iPhone/iPad browser is Safari underneath), send earlier
+ * words again in continuous mode, so they hear one phrase per tap instead.
+ */
+export function listensContinuously(userAgent: string, maxTouchPoints = 0): boolean {
+  if (/Android/i.test(userAgent)) return false;
+  if (/iPhone|iPad|iPod/i.test(userAgent)) return false;
+  // iPadOS reports itself as a Mac with a touch screen.
+  if (/Macintosh/i.test(userAgent) && maxTouchPoints > 1) return false;
+  if (/Safari/i.test(userAgent) && !/Chrome|Chromium|CriOS|Edg|OPR|Firefox|FxiOS/i.test(userAgent)) return false;
+  return true;
+}
+
 // English for now (the app is English only); keep the viewer's own English
 // variant so US/Australian accents are recognised, otherwise British English.
 export function dictationLanguage(): string {
@@ -131,8 +145,10 @@ export function splitSpokenList(text: string): string[] {
 export function dictationErrorMessage(error: string): string | null {
   switch (error) {
     case "not-allowed":
-    case "service-not-allowed":
       return "Microphone access is blocked. Allow the microphone for this site in your browser settings, then try again.";
+    // Safari reports this when Dictation (or Siri) is switched off.
+    case "service-not-allowed":
+      return "Speech recognition is switched off. On an iPhone or iPad turn on Settings > General > Keyboard > Enable Dictation; on a Mac turn on Dictation in System Settings > Keyboard. Then allow the microphone for this site and try again.";
     case "audio-capture":
       return "No microphone was found. Check one is connected and not in use by another app.";
     case "network":

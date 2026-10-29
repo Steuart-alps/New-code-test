@@ -14,6 +14,26 @@ export interface TestBusinessDeletionRequest {
   confirmName: string;
 }
 
+export interface SetupAssistRequestBody {
+  /**
+     * Best number for ALPS to call
+     * @maxLength 40
+     */
+  phone?: string;
+  /**
+     * Anything ALPS should know, such as how many sites or where their lists are kept
+     * @maxLength 2000
+     */
+  notes?: string;
+}
+
+export interface SetupAssistRequestResult {
+  requestedAt: string;
+  requestedBy: string;
+  /** False when the request had already been sent earlier */
+  emailed: boolean;
+}
+
 export interface SetupTeamAloneResult {
   aloneAt: string;
 }
@@ -78,6 +98,8 @@ export interface BusinessDashboardAiAmounts {
   costPence: number;
   marginPence: number;
   requests: number;
+  /** Paid-for AI use that lapsed unused after 12 months and came back to ALPS (already part of the margin) */
+  lapsedPence: number;
 }
 
 export type BusinessDashboardAiMonthsItem = BusinessDashboardAiAmounts & {
@@ -4935,6 +4957,10 @@ export interface CreateInspectionReportRequest {
 }
 
 export type ConfirmSetupTeamAloneParams = {
+clientId?: number;
+};
+
+export type RequestSetupAssistParams = {
 clientId?: number;
 };
 

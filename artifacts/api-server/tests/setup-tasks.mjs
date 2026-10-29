@@ -2,7 +2,8 @@
 //  - Setup: state, business type + hub nation, module picks, starter-check
 //    selection with real due dates (claim / create / remove-untouched / keep
 //    edited), the team step (Manager/Staff login or Owners-only confirmation
-//    before setup can finish), completion, tenant isolation and viewers refused.
+//    before setup can finish), the setup service request to ALPS, completion,
+//    tenant isolation and viewers refused.
 //  - Tasks: one-off and recurring occurrences, "mine" vs "all", staff can only
 //    complete their own or their role's tasks (today/yesterday), managers
 //    manage, department scoping, tenant isolation and viewers refused;
@@ -164,6 +165,33 @@ async function setupWizard(a, b, viewer) {
   check("setup: edited starter checks are never removed", byTitle.get("Goods Lift — Thorough Examination")?.notes === "We have a goods lift");
   check("setup: unknown starter title rejected",
     (await a("POST", "/setup/starter-checks", { checks: [{ title: "Rocket engine service" }] })).status === 400);
+  check("setup: front loader is on the LOLER starter list",
+    starter.find((c) => c.title === "Front Loader — Thorough Examination")?.category === "LOLER"
+      && starter.find((c) => c.title === "Front Loader — Thorough Examination")?.frequencyMonths === 12);
+
+  // "Add check": the business's own check under a heading, with its own interval.
+  const custom = await a("POST", "/setup/starter-checks", {
+    siteId: site.data?.id,
+    checks: [],
+    custom: [
+      { category: "LOLER", title: "Mini digger — Thorough Examination", frequencyMonths: 6, lastDone: "2026-05-15" },
+      { category: "Grounds", title: "Bunker rake check", frequencyMonths: 3 },
+    ],
+  });
+  check("setup custom: own checks are added", custom.status === 200 && custom.data?.created === 2, JSON.stringify(custom.data));
+  const withCustom = (await a("GET", "/compliance-items")).data ?? [];
+  const digger = withCustom.find((i) => i.title === "Mini digger — Thorough Examination");
+  check("setup custom: due date is last done plus the chosen interval",
+    isoDay(digger?.dueDate) === "2026-11-15" && digger?.frequencyMonths === 6 && digger?.siteId === site.data?.id && digger?.categoryName === "LOLER",
+    JSON.stringify(digger));
+  const rake = withCustom.find((i) => i.title === "Bunker rake check");
+  check("setup custom: undated own check under a new heading", rake?.dueDate == null && rake?.frequencyMonths === 3 && rake?.categoryName === "Grounds", JSON.stringify(rake));
+  const again = await a("POST", "/setup/starter-checks", {
+    siteId: site.data?.id, checks: [], custom: [{ category: "LOLER", title: "mini digger — thorough examination", frequencyMonths: 6 }],
+  });
+  check("setup custom: saving the same check again does not add it twice", again.data?.created === 0 && again.data?.kept === 1, JSON.stringify(again.data));
+  check("setup custom: interval must be 1 to 120 months",
+    (await a("POST", "/setup/starter-checks", { checks: [], custom: [{ category: "LOLER", title: "Crane", frequencyMonths: 0 }] })).status === 400);
 
   // Tenant isolation.
   check("setup isolation: other tenant cannot use this site",
@@ -198,6 +226,34 @@ async function setupWizard(a, b, viewer) {
   await member(b, "teamstaff", "client_staff");
   const staffed = (await b("GET", "/setup/state")).data?.team;
   check("setup team: a Staff login makes the team ready", staffed?.ready === true && staffed?.recorders === 1, JSON.stringify(staffed));
+
+  // Setup service: "Ask ALPS to set it up for you" emails ALPS once per business.
+  check("setup service: viewer cannot ask", (await viewer("POST", "/setup/assist-request", {})).status === 403);
+  check("setup service isolation: other tenant cannot ask for this business",
+    (await b("POST", `/setup/assist-request?clientId=${a.clientId}`, {})).status === 403);
+  check("setup service: unknown fields refused", (await a("POST", "/setup/assist-request", { price: 0 })).status === 400);
+  const assistState = (await a("GET", "/setup/state")).data;
+  check("setup service: not asked yet, AI status shown", assistState?.assistRequest === null && typeof assistState?.ai?.active === "boolean",
+    JSON.stringify({ assist: assistState?.assistRequest, ai: assistState?.ai }));
+  const asked = await a("POST", "/setup/assist-request", { phone: "01563 000000", notes: "Two sites <b>and</b> a staff list" });
+  if (process.env.ADMIN_EMAIL) {
+    check("setup service: request sent", asked.status === 200 && asked.data?.emailed === true && !!asked.data?.requestedAt, JSON.stringify(asked));
+    const again = await a("POST", "/setup/assist-request", { notes: "again" });
+    check("setup service: asking again sends no second email", again.status === 200 && again.data?.emailed === false
+      && again.data?.requestedAt === asked.data?.requestedAt, JSON.stringify(again.data));
+    check("setup service: shown on the setup state", (await a("GET", "/setup/state")).data?.assistRequest?.requestedAt === asked.data?.requestedAt);
+    check("setup service: other business not marked", (await b("GET", "/setup/state")).data?.assistRequest === null);
+    if (process.env.TEST_EMAIL_CAPTURE_PATH) {
+      const { readFile } = await import("node:fs/promises");
+      const sent = (await readFile(process.env.TEST_EMAIL_CAPTURE_PATH, "utf8").catch(() => "")).split("\n").filter(Boolean)
+        .map((line) => JSON.parse(line)).filter((m) => m.subject?.startsWith("Setup service request"));
+      check("setup service: one email to ALPS with the notes, escaped", sent.length === 1 && sent[0].to === process.env.ADMIN_EMAIL
+        && sent[0].text.includes("01563 000000") && sent[0].html.includes("&lt;b&gt;and&lt;/b&gt;"), JSON.stringify(sent.map((m) => m.subject)));
+    }
+  } else {
+    check("setup service: refused without ALPS's email address", asked.status === 503 && asked.data?.code === "SETUP_SERVICE_UNAVAILABLE", JSON.stringify(asked));
+    check("setup service: nothing recorded when refused", (await a("GET", "/setup/state")).data?.assistRequest === null);
+  }
 
   check("setup: finish later", (await a("POST", "/setup/defer", {})).status === 200);
   const deferred = (await a("GET", "/setup/state")).data;
