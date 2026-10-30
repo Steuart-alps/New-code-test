@@ -6281,6 +6281,9 @@ async function migrateFireCallPoints() {
   // blank = 06:00 and 18:00). Mirrors lib/db/src/schema/sites.ts.
   await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "opening_checks_due" text`);
   await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "closing_checks_due" text`);
+  // ... and when the reminder about them goes out (blank = 11:00 and 21:00).
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "opening_reminder_at" text`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "closing_reminder_at" text`);
 }
 
 // Equipment list and QR labels (Oct 2026). Water checks and Compliance Checks

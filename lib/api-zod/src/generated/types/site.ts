@@ -22,6 +22,10 @@ export interface Site {
   openingChecksDue?: string | null;
   /** When the site's closing checks are due ("HH:MM" on the business's clock). Null means 18:00. */
   closingChecksDue?: string | null;
+  /** When the reminder about opening checks not yet submitted goes out ("HH:MM"). Null means 11:00. */
+  openingReminderAt?: string | null;
+  /** When the reminder about closing checks not yet submitted goes out ("HH:MM"). Null means 21:00. */
+  closingReminderAt?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

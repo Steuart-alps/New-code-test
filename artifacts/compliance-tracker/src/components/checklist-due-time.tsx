@@ -15,16 +15,26 @@ import {
 
 /** Used when a site has no due time of its own (api-server lib/checklistDueTimes.ts). */
 export const DEFAULT_CHECKLIST_DUE_TIMES = { opening: "06:00", closing: "18:00" } as const;
+/** When the reminder goes out if a checklist is still not submitted. */
+export const DEFAULT_CHECKLIST_REMINDER_TIMES = { opening: "11:00", closing: "21:00" } as const;
 
 export type ChecklistPeriod = "opening" | "closing";
 
-type SiteDueTimes = Pick<Site, "openingChecksDue" | "closingChecksDue">;
+type SiteDueTimes = Pick<Site, "openingChecksDue" | "closingChecksDue" | "openingReminderAt" | "closingReminderAt">;
 
 /** The site's opening and closing due times ("HH:MM"), defaults filled in. */
 export function siteChecklistDueTimes(site: Partial<SiteDueTimes> | null | undefined): Record<ChecklistPeriod, string> {
   return {
     opening: site?.openingChecksDue || DEFAULT_CHECKLIST_DUE_TIMES.opening,
     closing: site?.closingChecksDue || DEFAULT_CHECKLIST_DUE_TIMES.closing,
+  };
+}
+
+/** When the site's opening and closing reminders go out ("HH:MM"), defaults filled in. */
+export function siteChecklistReminderTimes(site: Partial<SiteDueTimes> | null | undefined): Record<ChecklistPeriod, string> {
+  return {
+    opening: site?.openingReminderAt || DEFAULT_CHECKLIST_REMINDER_TIMES.opening,
+    closing: site?.closingReminderAt || DEFAULT_CHECKLIST_REMINDER_TIMES.closing,
   };
 }
 
@@ -51,6 +61,7 @@ export function ChecklistDueTime({ site, period, date, done, className }: {
   const [editing, setEditing] = useState(false);
   if (!site) return null;
   const due = siteChecklistDueTimes(site)[period];
+  const reminder = siteChecklistReminderTimes(site)[period];
   const now = new Date();
   const overdue = !done && date === format(now, "yyyy-MM-dd") && format(now, "HH:mm") >= due;
   const name = period === "opening" ? "Opening" : "Closing";
@@ -65,6 +76,7 @@ export function ChecklistDueTime({ site, period, date, done, className }: {
         {overdue
           ? <><strong>Overdue:</strong> {name.toLowerCase()} checks for {site.name} were due by <strong>{due}</strong></>
           : <>{name} checks for {site.name} are due by <strong className="text-foreground">{due}</strong></>}
+        <span className="text-xs opacity-80"> · reminder at {reminder} if not done</span>
       </span>
       {canSet && (
         <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setEditing(true)}>
@@ -83,8 +95,11 @@ export function ChecklistDueTimesDialog({ site, open, onOpenChange }: {
   onOpenChange: (open: boolean) => void;
 }) {
   const current = siteChecklistDueTimes(site);
+  const currentReminder = siteChecklistReminderTimes(site);
   const [opening, setOpening] = useState(current.opening);
   const [closing, setClosing] = useState(current.closing);
+  const [openingReminder, setOpeningReminder] = useState(currentReminder.opening);
+  const [closingReminder, setClosingReminder] = useState(currentReminder.closing);
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const save = useSetSiteChecklistDueTimes();
@@ -93,15 +108,23 @@ export function ChecklistDueTimesDialog({ site, open, onOpenChange }: {
     if (next) {
       setOpening(current.opening);
       setClosing(current.closing);
+      setOpeningReminder(currentReminder.opening);
+      setClosingReminder(currentReminder.closing);
     }
     onOpenChange(next);
   };
 
   const submit = async () => {
     try {
-      await save.mutateAsync({ id: site.id, data: { openingChecksDue: opening || null, closingChecksDue: closing || null } });
+      await save.mutateAsync({
+        id: site.id,
+        data: {
+          openingChecksDue: opening || null, closingChecksDue: closing || null,
+          openingReminderAt: openingReminder || null, closingReminderAt: closingReminder || null,
+        },
+      });
       await queryClient.invalidateQueries({ queryKey: getListSitesQueryKey() });
-      toast({ title: "Due times saved", description: `${site.name}: opening checks by ${opening || DEFAULT_CHECKLIST_DUE_TIMES.opening}, closing checks by ${closing || DEFAULT_CHECKLIST_DUE_TIMES.closing}.` });
+      toast({ title: "Times saved", description: `${site.name}: opening checks by ${opening || DEFAULT_CHECKLIST_DUE_TIMES.opening}, closing checks by ${closing || DEFAULT_CHECKLIST_DUE_TIMES.closing}.` });
       onOpenChange(false);
     } catch (err) {
       toast({ title: "Could not save the due times", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
@@ -112,10 +135,10 @@ export function ChecklistDueTimesDialog({ site, open, onOpenChange }: {
     <Dialog open={open} onOpenChange={reset}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>When are checks due at {site.name}?</DialogTitle>
+          <DialogTitle>Check times at {site.name}</DialogTitle>
           <DialogDescription>
-            Checks not submitted by these times show as overdue, and their owner is reminded within the hour.
-            Applies to every opening and closing checklist at this site.
+            Checks not submitted by their due time show as overdue. If they are still not done at the reminder time,
+            the track owner gets a reminder (within the hour). Applies to every opening and closing checklist at this site.
           </DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-3">
@@ -127,10 +150,21 @@ export function ChecklistDueTimesDialog({ site, open, onOpenChange }: {
             <Label htmlFor={`closing-due-${site.id}`}>Closing checks by</Label>
             <Input id={`closing-due-${site.id}`} type="time" value={closing} onChange={(e) => setClosing(e.target.value)} />
           </div>
+          <div className="space-y-1">
+            <Label htmlFor={`opening-reminder-${site.id}`}>Opening reminder at</Label>
+            <Input id={`opening-reminder-${site.id}`} type="time" value={openingReminder} onChange={(e) => setOpeningReminder(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={`closing-reminder-${site.id}`}>Closing reminder at</Label>
+            <Input id={`closing-reminder-${site.id}`} type="time" value={closingReminder} onChange={(e) => setClosingReminder(e.target.value)} />
+          </div>
         </div>
         <Button type="button" variant="link" size="sm" className="h-auto justify-start px-0 text-xs"
-          onClick={() => { setOpening(DEFAULT_CHECKLIST_DUE_TIMES.opening); setClosing(DEFAULT_CHECKLIST_DUE_TIMES.closing); }}>
-          Use the usual times (06:00 and 18:00)
+          onClick={() => {
+            setOpening(DEFAULT_CHECKLIST_DUE_TIMES.opening); setClosing(DEFAULT_CHECKLIST_DUE_TIMES.closing);
+            setOpeningReminder(DEFAULT_CHECKLIST_REMINDER_TIMES.opening); setClosingReminder(DEFAULT_CHECKLIST_REMINDER_TIMES.closing);
+          }}>
+          Use the usual times (due 06:00 and 18:00, reminders 11:00 and 21:00)
         </Button>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => reset(false)}>Cancel</Button>

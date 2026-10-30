@@ -16,7 +16,7 @@ import { getCoshhDueItems } from "../lib/coshhTrack";
 import { NSTS_TEST_INSPECTION_TYPE, nstsStatus } from "@workspace/api-zod/nsts-sprayer-tests";
 import { getEntitledServices, isEntitled } from "../lib/services";
 import { addCalendarDays, getAccountTimezone, localDateIn } from "../lib/accountClock";
-import { isPastDue, localTimeIn, siteChecklistDueTimes, type SiteChecklistDueTimes } from "../lib/checklistDueTimes";
+import { isPastDue, localTimeIn, siteChecklistTimesFromRow, type SiteChecklistDueTimes } from "../lib/checklistDueTimes";
 import { getDailyChecklistCompletionBySite } from "../lib/dailyChecklistCompletion";
 import { getPickedModules } from "./setup";
 import { siteVisibleSql, visibleSiteIdsSql } from "../lib/departmentSites";
@@ -211,7 +211,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   let sitesAvailable = false;
   try {
     const siteRows = await db.execute(sql`
-      SELECT id, name, opening_checks_due, closing_checks_due FROM sites
+      SELECT id, name, opening_checks_due, closing_checks_due, opening_reminder_at, closing_reminder_at FROM sites
       WHERE client_id = ${clientId}
       ${siteId ? sql`AND id = ${siteId}` : sql``}
       ORDER BY name
@@ -219,7 +219,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     allSites = rows(siteRows)
       .map((r: any) => ({
         id: r.id, name: r.name,
-        due: siteChecklistDueTimes({ openingChecksDue: r.opening_checks_due, closingChecksDue: r.closing_checks_due }),
+        due: siteChecklistTimesFromRow(r),
       }))
       .filter((site) => accessibleSiteIds == null || accessibleSiteIds.includes(site.id));
     sitesAvailable = true;

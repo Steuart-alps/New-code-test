@@ -7,19 +7,31 @@
  * One pair of times covers every opening and closing checklist at the site:
  * KitchenTrack and PremisesTrack (DailyTrack AM / PM) and the GreenTrack
  * greenkeeping shed checks. A checklist not submitted by its due time is
- * overdue: the dashboard shows it as overdue and its reminder goes out on the
- * next hourly reminder run (lib/trackReminders.ts).
+ * overdue on the dashboard. The reminder to the track owner goes out at the
+ * site's reminder time instead (sites.opening_reminder_at /
+ * closing_reminder_at, default 11:00 and 21:00), on the first hourly reminder
+ * run after it (lib/trackReminders.ts).
  */
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 
 export const DEFAULT_CHECKLIST_DUE_TIMES = { opening: "06:00", closing: "18:00" } as const;
+export const DEFAULT_CHECKLIST_REMINDER_TIMES = { opening: "11:00", closing: "21:00" } as const;
 
 export type ChecklistPeriod = "opening" | "closing";
 
 export interface SiteChecklistDueTimes {
   opening: string;
   closing: string;
+  /** When the reminder goes out if the checklist is still not submitted. */
+  reminder: { opening: string; closing: string };
+}
+
+interface SiteTimeColumns {
+  openingChecksDue?: string | null;
+  closingChecksDue?: string | null;
+  openingReminderAt?: string | null;
+  closingReminderAt?: string | null;
 }
 
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -39,7 +51,7 @@ export function parseChecklistDueTime(raw: unknown): string | null | "invalid" {
 }
 
 /** The site's due times with the defaults filled in. */
-export function siteChecklistDueTimes(site: { openingChecksDue?: string | null; closingChecksDue?: string | null }): SiteChecklistDueTimes {
+export function siteChecklistDueTimes(site: SiteTimeColumns): SiteChecklistDueTimes {
   const valid = (value: string | null | undefined) => {
     const parsed = parseChecklistDueTime(value);
     return parsed === "invalid" ? null : parsed;
@@ -47,7 +59,22 @@ export function siteChecklistDueTimes(site: { openingChecksDue?: string | null; 
   return {
     opening: valid(site.openingChecksDue) ?? DEFAULT_CHECKLIST_DUE_TIMES.opening,
     closing: valid(site.closingChecksDue) ?? DEFAULT_CHECKLIST_DUE_TIMES.closing,
+    reminder: {
+      opening: valid(site.openingReminderAt) ?? DEFAULT_CHECKLIST_REMINDER_TIMES.opening,
+      closing: valid(site.closingReminderAt) ?? DEFAULT_CHECKLIST_REMINDER_TIMES.closing,
+    },
   };
+}
+
+/** A sites row (snake_case) as read with raw SQL. */
+export function siteChecklistTimesFromRow(row: {
+  opening_checks_due?: string | null; closing_checks_due?: string | null;
+  opening_reminder_at?: string | null; closing_reminder_at?: string | null;
+}): SiteChecklistDueTimes {
+  return siteChecklistDueTimes({
+    openingChecksDue: row.opening_checks_due, closingChecksDue: row.closing_checks_due,
+    openingReminderAt: row.opening_reminder_at, closingReminderAt: row.closing_reminder_at,
+  });
 }
 
 /** Local wall-clock time ("HH:MM", 24-hour) at `now` in the timezone. */
@@ -68,15 +95,13 @@ export async function loadSiteChecklistDueTimes(clientId: number, siteIds: numbe
   const result = new Map<number, SiteChecklistDueTimes>();
   if (siteIds.length === 0) return result;
   const rows = ((await db.execute(sql`
-    SELECT id, opening_checks_due, closing_checks_due
+    SELECT id, opening_checks_due, closing_checks_due, opening_reminder_at, closing_reminder_at
     FROM sites
     WHERE client_id = ${clientId} AND id IN (${sql.join(siteIds.map((id) => sql`${id}`), sql`, `)})
-  `)) as { rows?: Array<{ id: number; opening_checks_due: string | null; closing_checks_due: string | null }> }).rows ?? [];
-  for (const row of rows) {
-    result.set(Number(row.id), siteChecklistDueTimes({ openingChecksDue: row.opening_checks_due, closingChecksDue: row.closing_checks_due }));
-  }
+  `)) as { rows?: Array<{ id: number } & Parameters<typeof siteChecklistTimesFromRow>[0]> }).rows ?? [];
+  for (const row of rows) result.set(Number(row.id), siteChecklistTimesFromRow(row));
   for (const siteId of siteIds) {
-    if (!result.has(siteId)) result.set(siteId, { ...DEFAULT_CHECKLIST_DUE_TIMES });
+    if (!result.has(siteId)) result.set(siteId, siteChecklistDueTimes({}));
   }
   return result;
 }

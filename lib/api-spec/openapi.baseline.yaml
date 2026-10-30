@@ -860,11 +860,12 @@ paths:
     put:
       operationId: setSiteChecklistDueTimes
       tags: [sites]
-      summary: Set when the site's opening and closing checks are due
+      summary: Set when the site's opening and closing checks are due, and when their reminders go out
       description: >
         Owners, consultants and Managers who can see the site. Times are
         "HH:MM" on the business's clock; null or blank uses the default
-        (06:00 opening, 18:00 closing). A field left out keeps its time.
+        (due 06:00 opening, 18:00 closing; reminders 11:00 and 21:00). A
+        field left out keeps its time.
       parameters:
         - name: id
           in: path
@@ -7952,6 +7953,14 @@ components:
           type: string
           nullable: true
           description: '"HH:MM"; null or blank for the default 18:00.'
+        openingReminderAt:
+          type: string
+          nullable: true
+          description: 'When the reminder about opening checks not yet submitted goes out, "HH:MM"; null or blank for the default 11:00.'
+        closingReminderAt:
+          type: string
+          nullable: true
+          description: 'When the reminder about closing checks not yet submitted goes out, "HH:MM"; null or blank for the default 21:00.'
     Site:
       type: object
       properties:
@@ -7989,6 +7998,14 @@ components:
           type: string
           nullable: true
           description: When the site's closing checks are due ("HH:MM" on the business's clock). Null means 18:00.
+        openingReminderAt:
+          type: string
+          nullable: true
+          description: When the reminder about opening checks not yet submitted goes out ("HH:MM"). Null means 11:00.
+        closingReminderAt:
+          type: string
+          nullable: true
+          description: When the reminder about closing checks not yet submitted goes out ("HH:MM"). Null means 21:00.
         createdAt:
           type: string
           format: date-time

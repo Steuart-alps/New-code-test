@@ -11,4 +11,8 @@ export interface SiteChecklistDueTimesRequest {
   openingChecksDue?: string | null;
   /** "HH:MM"; null or blank for the default 18:00. */
   closingChecksDue?: string | null;
+  /** When the reminder about opening checks not yet submitted goes out, "HH:MM"; null or blank for the default 11:00. */
+  openingReminderAt?: string | null;
+  /** When the reminder about closing checks not yet submitted goes out, "HH:MM"; null or blank for the default 21:00. */
+  closingReminderAt?: string | null;
 }

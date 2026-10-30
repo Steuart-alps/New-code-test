@@ -30,6 +30,10 @@ export const sitesTable = pgTable("sites", {
   // them (api-server lib/checklistDueTimes.ts).
   openingChecksDue: text("opening_checks_due"),
   closingChecksDue: text("closing_checks_due"),
+  // When the reminder about checks still not submitted goes out ("HH:MM");
+  // null means 11:00 for opening and 21:00 for closing.
+  openingReminderAt: text("opening_reminder_at"),
+  closingReminderAt: text("closing_reminder_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [

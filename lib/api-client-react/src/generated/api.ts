@@ -2835,8 +2835,8 @@ export const getSetSiteChecklistDueTimesUrl = (id: number,) => {
 }
 
 /**
- * Owners, consultants and Managers who can see the site. Times are "HH:MM" on the business's clock; null or blank uses the default (06:00 opening, 18:00 closing). A field left out keeps its time.
- * @summary Set when the site's opening and closing checks are due
+ * Owners, consultants and Managers who can see the site. Times are "HH:MM" on the business's clock; null or blank uses the default (due 06:00 opening, 18:00 closing; reminders 11:00 and 21:00). A field left out keeps its time.
+ * @summary Set when the site's opening and closing checks are due, and when their reminders go out
  */
 export const setSiteChecklistDueTimes = async (id: number,
     siteChecklistDueTimesRequest: SiteChecklistDueTimesRequest, options?: RequestInit): Promise<Site> => {
@@ -2886,7 +2886,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SetSiteChecklistDueTimesMutationError = ErrorType<ErrorResponse>
 
     /**
- * @summary Set when the site's opening and closing checks are due
+ * @summary Set when the site's opening and closing checks are due, and when their reminders go out
  */
 export const useSetSiteChecklistDueTimes = <TError = ErrorType<ErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setSiteChecklistDueTimes>>, TError,{id: number;data: BodyType<SiteChecklistDueTimesRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
