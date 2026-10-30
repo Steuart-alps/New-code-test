@@ -114,7 +114,7 @@ const runnerLocked = new Set([
   "test:csrf-enforced:ci",
 ]);
 const freshSchema = new Set([
-  "test:schema:fresh", "test:schema:pushed", "test:schema:upgrade", "test:departments-under-sites", "test:fix-track-assign-contractor", "test:contractor-sign-in", "test:doc-sign-offs", "test:green-daily-checks", "test:billing-alerts", "test:delete-test-business", "test:personal-reminders", "test:voice-log", "test:certificate-inbox", "test:fire-retired-checks", "test:auth-me-active-client", "test:ai-addon", "test:inspection-reports", "test:night-fire-walks", "test:fire-drill-records", "test:roster-check", "test:dashboard-accuracy:pushed", "test:kitchen-mobile-replay", "test:mobile-check-replay",
+  "test:schema:fresh", "test:schema:pushed", "test:schema:upgrade", "test:departments-under-sites", "test:fix-track-assign-contractor", "test:contractor-sign-in", "test:doc-sign-offs", "test:green-daily-checks", "test:billing-alerts", "test:delete-test-business", "test:personal-reminders", "test:voice-log", "test:certificate-inbox", "test:fire-retired-checks", "test:auth-me-active-client", "test:ai-addon", "test:inspection-reports", "test:night-fire-walks", "test:fire-drill-records", "test:roster-check", "test:kitchen-month-summary", "test:dashboard-accuracy:pushed", "test:kitchen-mobile-replay", "test:mobile-check-replay",
   "test:kitchen-temperature-actions", "test:kitchen-hold-controls",
   "test:kitchen-inspection-export", "test:kitchen-status-site-scope", "test:dashboard-accuracy", "test:cleaning-schedule-export",
   "test:inspection-pack-calendar", "test:certificate-outcomes", "test:checklist-results-fixtrack",
