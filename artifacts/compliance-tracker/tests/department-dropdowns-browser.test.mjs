@@ -125,6 +125,10 @@ try {
   assert.match(await dropdown("Department").innerText(), /All departments/, "Starts on All departments");
 
   // Not site-specific: every department set up, then names used before, then Other.
+  // (The Site box is the second dropdown; it may start on the working site.)
+  const siteBox = () => dialog.getByRole("combobox").nth(1);
+  await siteBox().click();
+  await pick("Not site-specific");
   let listed = await options("Department");
   assert.deepEqual(listed, [
     "All departments", "Greenkeeping", "Housekeeping", "Kitchen", "Office",
@@ -133,7 +137,7 @@ try {
   await page.keyboard.press("Escape");
 
   // A site narrows the list to its own departments (and ones for every site).
-  await dialog.getByRole("combobox").filter({ hasText: "Not site-specific" }).click();
+  await siteBox().click();
   await pick("Golf Club");
   listed = await options("Department");
   assert.deepEqual(listed, [
@@ -155,6 +159,8 @@ try {
   // "All departments" saves no department: everyone at the site signs.
   await page.getByRole("button", { name: "Upload Document" }).first().click();
   await dialog.locator('input[type="file"]').setInputFiles({ name: "fire-policy.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4") });
+  await siteBox().click();
+  await pick("Not site-specific");
   await dropdown("Department").click();
   await pick("Kitchen");
   await dropdown("Department").click();
@@ -177,7 +183,7 @@ try {
   const staffDialog = page.getByRole("dialog");
   await staffDialog.getByPlaceholder("Full name").fill("Dan Green");
   assert.match(await dropdown("Department").innerText(), /No department/);
-  await staffDialog.getByRole("combobox").filter({ hasText: "All sites" }).click();
+  await staffDialog.getByRole("combobox").first().click();
   await pick("Hotel");
   listed = await options("Department");
   assert.deepEqual(listed, ["No department", "Housekeeping", "Office", "Bar", "Other (type a new department)"]);
