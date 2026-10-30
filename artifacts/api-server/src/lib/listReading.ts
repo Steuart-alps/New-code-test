@@ -17,7 +17,7 @@ import { REGISTER_FILE_WORDING, REGISTER_READING_MAX_BYTES, type RegisterReading
  * ANTHROPIC_API_KEY is set (reportReadingConfigured).
  */
 
-export const LIST_READING_KINDS = ["room-track-rooms", "contractors", "fire-call-points", "greentrack-equipment", "staff-roster"] as const;
+export const LIST_READING_KINDS = ["room-track-rooms", "contractors", "fire-call-points", "greentrack-equipment", "staff-roster", "allergen-ingredients"] as const;
 export type ListReadingKind = typeof LIST_READING_KINDS[number];
 export const isListReadingKind = (value: unknown): value is ListReadingKind =>
   typeof value === "string" && (LIST_READING_KINDS as readonly string[]).includes(value);
@@ -41,6 +41,7 @@ interface ListKind {
   guidance: string;
 }
 
+const ALLERGEN_NAMES = "Celery, Gluten, Crustaceans, Eggs, Fish, Lupin, Milk, Molluscs, Mustard, Tree nuts, Peanuts, Sesame, Soya, Sulphites";
 const NOTES: ListColumn = { key: "notes", label: "Notes", description: "Other useful details from the list.", max: 1000 };
 const SITE: ListColumn = { key: "site", label: "Site", description: "Which of the given sites this is at.", max: 200, site: true };
 
@@ -107,6 +108,22 @@ const KINDS: Record<ListReadingKind, ListKind> = {
       { key: "email", label: "Email", description: "Work email address exactly as written.", max: 254 },
     ],
     guidance: "Return one row per member of staff. Copy payroll numbers and email addresses exactly; leave them empty when the list has none, and never make one up.",
+  },
+  // Suppliers' allergen information: a spec sheet, allergen matrix or
+  // product list. Read on the PAT register's model (lib/aiModels.ts
+  // register_reading), as a wrong allergen matters more than a wrong room.
+  "allergen-ingredients": {
+    noun: "products",
+    columns: [
+      { key: "name", label: "Ingredient", description: "The product or ingredient name as written.", max: 200 },
+      { key: "supplier", label: "Supplier", description: "The supplier or brand, when given.", max: 200 },
+      { key: "productCode", label: "Product code", description: "The supplier's product code exactly as written, when given.", max: 100 },
+      { key: "contains", label: "Contains", description: `Which of the 14 allergens the product contains, separated by "; ", using only these names: ${ALLERGEN_NAMES}. Write "None" when the file says it contains none of them.`, max: 1000 },
+      { key: "mayContain", label: "May contain", description: `Allergens in a "may contain", "traces" or "made in a factory that also handles" warning, separated by "; ", using the same names. Write "None" when the file says there are none.`, max: 1000 },
+      SITE,
+      NOTES,
+    ],
+    guidance: "Return one row per product. Take allergens only from what the file states: an allergen box or matrix, ingredients in bold, \"contains\" or \"may contain\" statements. Never work out allergens from the product's name or from what it usually contains. Wheat, barley, rye, oats and spelt are Gluten; almonds, hazelnuts, walnuts, cashews, pecans, Brazil nuts, pistachios and macadamias are Tree nuts; prawns, crab and lobster are Crustaceans; mussels, oysters and squid are Molluscs. Leave Contains null, and set unclear, when the file does not say which allergens a product has.",
   },
 };
 
@@ -190,21 +207,23 @@ export async function readList(input: ListReadingInput, beforeSending?: () => Pr
     input.kind === "contractors" ? `Trade options: ${input.trades?.length ? input.trades.map((trade) => promptLabel(trade)).join("; ") : "none set"}` : null,
   ].filter(Boolean).join("\n");
 
+  const feature = input.kind === "allergen-ingredients" ? "register_reading" : "list_reading";
   const client = new Anthropic();
   const send = (model: string) => client.beta.messages.stream({
     model,
     max_tokens: 64000,
     ...serverSideFallbackParams(model),
     system: SYSTEM_PROMPT(kind),
-    output_config: { effort: aiEffortFor("list_reading"), format: { type: "json_schema", schema: outputSchema(kind, siteNames) } },
+    output_config: { effort: aiEffortFor(feature), format: { type: "json_schema", schema: outputSchema(kind, siteNames) } },
     messages: [{
       role: "user",
       content: [content, { type: "text", text: `${context}\n\nList the ${kind.noun} in this file.` }],
     }],
   }).finalMessage();
-  // Claude Haiku 5.5 by default (lib/aiModels.ts). It has no server-side
-  // fallback, so a list it declines is tried once more on Claude Sonnet 5.5.
-  let model = aiModelFor("list_reading");
+  // Claude Haiku 5.5 by default (lib/aiModels.ts), Claude Sonnet 5.5 for
+  // allergen information. Haiku has no server-side fallback, so a list it
+  // declines is tried once more on Claude Sonnet 5.5.
+  let model = aiModelFor(feature);
   let message = await send(model);
   let usage = usageFromMessage(message, model);
   if (message.stop_reason === "refusal" && !hasServerSideFallback(model)) {

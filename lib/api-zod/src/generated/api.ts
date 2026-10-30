@@ -4175,6 +4175,44 @@ export const ImportFireCallPointsResponse = zod.object({
 
 
 /**
+ * @summary Download the CSV template for importing suppliers' allergen information (managers)
+ */
+export const GetAllergenIngredientImportTemplateResponse = zod.unknown()
+
+
+/**
+ * The browser sends the spreadsheet's header row and cell text: a column per allergen (Y, N or May) or Contains and May contain lists. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error. Rows match existing ingredients by site and name; changed allergens update every dish using the ingredient, each with a change log entry.
+ * @summary Preview or import suppliers' allergen information as KitchenTrack ingredients (managers)
+ */
+export const ImportAllergenIngredientsBody = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "preview": zod.boolean().optional(),
+  "siteId": zod.number().nullish().describe('The site for rows whose Site cell is blank.')
+})
+
+export const ImportAllergenIngredientsResponse = zod.object({
+  "preview": zod.boolean(),
+  "committed": zod.boolean(),
+  "summary": zod.object({
+  "total": zod.number(),
+  "create": zod.number(),
+  "update": zod.number(),
+  "skip": zod.number(),
+  "error": zod.number()
+}),
+  "rows": zod.array(zod.object({
+  "row": zod.number(),
+  "action": zod.enum(['create', 'update', 'skip', 'error']),
+  "label": zod.string(),
+  "reasons": zod.array(zod.string())
+})),
+  "ignoredHeaders": zod.array(zod.string()),
+  "error": zod.string().optional()
+})
+
+
+/**
  * @summary The AI features add-on, whether this business has it, and how much of its allowance is used
  */
 export const getAiAddonResponseOnePercentUsedMin = 0;
@@ -4327,7 +4365,7 @@ export const ReadPatRegisterListResponse = zod.object({
  * @summary Whether ComplyTrack can read a photo or document list for an import, and this month's use
  */
 export const GetImportListReadingParams = zod.object({
-  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster'])
+  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster', 'allergen-ingredients'])
 })
 
 export const getImportListReadingResponseAiPercentUsedMin = 0;
@@ -4362,11 +4400,11 @@ export const GetImportListReadingResponse = zod.object({
 
 
 /**
- * Claude reads the file and returns rows in the import's own columns (RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment or the staff roster). Nothing is saved: the browser sends the rows through the import's usual preview. The file is not stored. Off until the server has an Anthropic API key; readings share the business's monthly number with the PAT register reading.
+ * Claude reads the file and returns rows in the import's own columns (RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment, the staff roster or KitchenTrack suppliers' allergen information). Nothing is saved: the browser sends the rows through the import's usual preview. The file is not stored. Off until the server has an Anthropic API key; readings share the business's monthly number with the PAT register reading.
  * @summary Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
  */
 export const ReadImportListParams = zod.object({
-  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster'])
+  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster', 'allergen-ingredients'])
 })
 
 export const readImportListBodyFileNameMax = 255;

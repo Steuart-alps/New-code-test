@@ -1,7 +1,7 @@
 import { Router, type Request, type RequestHandler } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, requireUserManager, getClientId, denyViewers, getActiveDepartmentId, isDepartmentLead } from "../middleware/requireAuth";
 import { getEntitledServices, isEntitled, requireService, type ServiceKey } from "../lib/services";
 import { filterName } from "../lib/contentFilter";
@@ -12,6 +12,9 @@ import { ReportReadingError, reportReadingConfigured, UnreadableReportError } fr
 import { readApplianceList, REGISTER_READING_MAX_BYTES, registerReadingMonthlyLimit } from "../lib/registerReading";
 import { isListReadingKind, readList, SORTABLE_LIST_KINDS, sortList, type ListReadingKind, type SortableListKind } from "../lib/listReading";
 import { AiUnavailableError, claimAiUse, getAiStatus, settleAiUse } from "../lib/aiAllowance";
+import { allergenIngredientChangesTable, allergenIngredientsTable } from "@workspace/db/schema";
+import { pushIngredientChange, sameSet } from "../lib/allergenRecipes";
+import { ALLERGEN_COLUMN_LABELS } from "../lib/allergenImport";
 import {
   CSV_IMPORT_MAX_CELL_LENGTH,
   CSV_IMPORT_MAX_COLUMNS,
@@ -48,7 +51,8 @@ const importBody = z.object({
   siteId: z.number().int().positive().nullable().optional(),
 });
 
-// PATTrack lets staff add appliances, so department managers may import into
+// PATTrack lets staff add appliances (and KitchenTrack staff ingredients), so
+// department managers may import into
 // their own department's sites; RoomTrack rooms, contractors and FireTrack call
 // points are admin-only registers, exactly as their single-record routes are.
 const requirePatImporter: RequestHandler = (req, res, next) => {
@@ -348,6 +352,100 @@ async function planFireCallPoints(
   });
 }
 
+/** "Milk, Eggs" for a change summary. */
+const allergenNames = (keys: string[]) => keys.map((key) => ALLERGEN_COLUMN_LABELS[key as keyof typeof ALLERGEN_COLUMN_LABELS] ?? key).join(", ");
+const IMPORT_REASON = "Supplier allergen information imported";
+
+/**
+ * KitchenTrack ingredients from suppliers' allergen information. Rows match
+ * an ingredient by site (blank = every site) and name. Changed allergens are
+ * pushed to every dish using the ingredient with a change log entry, exactly
+ * as an edit on the Ingredients tab does; the preview lists what changes.
+ */
+async function planAllergenIngredients(
+  tx: Tx, clientId: number, departmentId: number | null, user: { id: number; name: string | null }, today: string, rows: MappedRow[],
+): Promise<PlannedRow[]> {
+  const resolveSite = await siteResolver(tx, clientId, departmentId);
+  // Ingredients first (FOR UPDATE), then their dishes: lib/allergenRecipes.ts lock order.
+  const existing = rowsOf(await tx.execute(sql`
+    SELECT id, site_id, name, supplier, product_code, contains, may_contain, notes
+    FROM allergen_ingredients WHERE client_id = ${clientId} AND deleted_at IS NULL ORDER BY id FOR UPDATE
+  `));
+  const duplicate = duplicateGuard();
+  const listOf = (value: string | null) => (value ? value.split(";").filter(Boolean) : []);
+  return rows.map((input): PlannedRow => {
+    const v = input.values;
+    const label = [v.name, v.supplier].filter(Boolean).join(" · ") || `Row ${input.row}`;
+    const errors = [...input.errors];
+    const site = resolveSite(v.site);
+    if (site.error) errors.push(site.error);
+    if (errors.length) return { row: input.row, action: "error", label, reasons: errors };
+
+    const repeated = duplicate(`${site.siteId ?? ""}|${normaliseKey(v.name)}`, input.row);
+    if (repeated) return { row: input.row, action: "error", label, reasons: [repeated] };
+    const contains = listOf(v.contains);
+    const mayContain = listOf(v.mayContain);
+    const summary = `${contains.length ? `contains ${allergenNames(contains)}` : "contains none of the 14"}${mayContain.length ? `; may contain ${allergenNames(mayContain)}` : ""}`;
+    const matches = existing.filter((item) => Number(item.site_id ?? 0) === Number(site.siteId ?? 0) && normaliseKey(item.name) === normaliseKey(v.name));
+    if (matches.length > 1) return { row: input.row, action: "error", label, reasons: ["Matches more than one ingredient with this name; rename one first"] };
+    const match = matches[0];
+    if (!match) {
+      return {
+        row: input.row, action: "create", label, reasons: [`New ingredient: ${summary}`],
+        write: async (t) => {
+          const [created] = await t.insert(allergenIngredientsTable).values({
+            clientId, siteId: site.siteId, name: v.name!, supplier: v.supplier, productCode: v.productCode,
+            contains, mayContain, notes: v.notes, lastCheckedAt: today, checkedBy: user.name, createdBy: user.id,
+          }).returning({ id: allergenIngredientsTable.id });
+          await t.insert(allergenIngredientChangesTable).values({
+            clientId, ingredientId: created.id, changeType: "created", containsAfter: contains, mayContainAfter: mayContain,
+            reason: IMPORT_REASON, changedBy: user.id, changedByName: user.name,
+          });
+        },
+      };
+    }
+    const before = { contains: (match.contains ?? []) as string[], mayContain: (match.may_contain ?? []) as string[] };
+    const allergensChanged = !sameSet(before.contains, contains) || !sameSet(before.mayContain, mayContain);
+    const details = changedFields([
+      ["supplier", match.supplier, v.supplier ?? undefined], ["product code", match.product_code, v.productCode ?? undefined],
+      ["notes", match.notes, v.notes ?? undefined],
+    ]);
+    if (!allergensChanged && !details.length) return { row: input.row, action: "skip", label, reasons: ["Already listed with the same allergens"] };
+    const reasons: string[] = [];
+    if (allergensChanged) {
+      const added = contains.filter((key) => !before.contains.includes(key));
+      const removed = before.contains.filter((key) => !contains.includes(key));
+      const mayAdded = mayContain.filter((key) => !before.mayContain.includes(key));
+      const mayRemoved = before.mayContain.filter((key) => !mayContain.includes(key));
+      reasons.push(`Allergens change: ${[
+        added.length ? `now contains ${allergenNames(added)}` : "", removed.length ? `no longer contains ${allergenNames(removed)}` : "",
+        mayAdded.length ? `may contain ${allergenNames(mayAdded)}` : "", mayRemoved.length ? `no longer "may contain" ${allergenNames(mayRemoved)}` : "",
+      ].filter(Boolean).join("; ")}. Dishes using it are updated.`);
+    }
+    if (details.length) reasons.push(`Updates ${details.join(", ")}`);
+    return {
+      row: input.row, action: "update", label, reasons,
+      write: async (t) => {
+        const id = Number(match.id);
+        await t.update(allergenIngredientsTable).set({
+          supplier: v.supplier ?? match.supplier, productCode: v.productCode ?? match.product_code, notes: v.notes ?? match.notes,
+          ...(allergensChanged ? { contains, mayContain, lastCheckedAt: today, checkedBy: user.name } : {}),
+          updatedAt: new Date(),
+        }).where(and(eq(allergenIngredientsTable.id, id), eq(allergenIngredientsTable.clientId, clientId)));
+        if (!allergensChanged) return;
+        const dishesUpdated = await pushIngredientChange(t, {
+          clientId, ingredientId: id, ingredientName: String(match.name), reason: IMPORT_REASON, userId: user.id, userName: user.name,
+        });
+        await t.insert(allergenIngredientChangesTable).values({
+          clientId, ingredientId: id, changeType: "allergens_changed",
+          containsBefore: before.contains, containsAfter: contains, mayContainBefore: before.mayContain, mayContainAfter: mayContain,
+          reason: IMPORT_REASON, dishesUpdated, changedBy: user.id, changedByName: user.name,
+        });
+      },
+    };
+  });
+}
+
 function handleImport(type: CsvImportType): RequestHandler {
   return async (req: Request, res) => {
     const clientId = getClientId(req);
@@ -374,7 +472,10 @@ function handleImport(type: CsvImportType): RequestHandler {
           ? await planRooms(tx, clientId, departmentId, req.currentUser!.id, mapped.rows)
           : type === "fire-call-points"
             ? await planFireCallPoints(tx, clientId, departmentId, req.currentUser!.id, parsed.data.siteId, mapped.rows)
-            : await planContractors(tx, clientId, mapped.rows);
+            : type === "allergen-ingredients"
+              ? await planAllergenIngredients(tx, clientId, departmentId,
+                { id: req.currentUser!.id, name: req.currentUser!.name ?? null }, await getAccountToday(clientId), mapped.rows)
+              : await planContractors(tx, clientId, mapped.rows);
       const summary = {
         total: planned.length,
         create: planned.filter((row) => row.action === "create").length,
@@ -520,7 +621,8 @@ router.post("/imports/pat-appliances/read", requireAuth, denyViewers, requirePat
 // roster (lib/listReading.ts). Readings share the PAT monthly count, so
 // REGISTER_READING_MONTHLY_LIMIT is the number of lists a business may have
 // read a month across all imports. Each kind keeps its import's own access
-// rule: owners and consultants, with the track switched on.
+// rule: owners and consultants (managers for the roster and KitchenTrack
+// ingredients), with the track switched on.
 const LIST_READING_ACCESS: Record<ListReadingKind, RequestHandler[]> = {
   "room-track-rooms": [requireClientAdmin, requireService("roomtrack")],
   contractors: [requireClientAdmin],
@@ -528,6 +630,7 @@ const LIST_READING_ACCESS: Record<ListReadingKind, RequestHandler[]> = {
   "greentrack-equipment": [requireClientAdmin, requireService("greentrack")],
   // Managers too: they upload their site's roster for the monthly roster check.
   "staff-roster": [requireUserManager],
+  "allergen-ingredients": [requirePatImporter, requireService("kitchentrack")],
 };
 
 /** Runs the access rule for the :kind in the path; unknown kinds are 404. */
@@ -576,7 +679,9 @@ router.post("/imports/list-reading/:kind/read", requireAuth, denyViewers, requir
     const result = await readList({ kind, bytes, mimeType: parsed.data.mimeType, fileName: parsed.data.fileName, sites, siteId, trades }, async () => {
       aiUseId = await claimAiUse({
         clientId, userId: req.currentUser?.id ?? null, feature: "list_reading",
-        estimatePence: LIST_READING_ESTIMATE_PENCE, instead: "Upload a spreadsheet instead.",
+        // Allergen information is read on the PAT register's (dearer) model.
+        estimatePence: kind === "allergen-ingredients" ? REGISTER_READING_ESTIMATE_PENCE : LIST_READING_ESTIMATE_PENCE,
+        instead: "Upload a spreadsheet instead.",
       });
       if (!await claimRegisterRead(clientId, month, limit)) {
         throw new RegisterReadLimitError(`This business has had ${limit} lists read this month, the most allowed. Upload a spreadsheet instead, or ask ALPS.`);
@@ -648,6 +753,11 @@ router.get("/imports/contractors/template", requireAuth, requireClientAdmin, sen
 router.post("/imports/contractors", requireAuth, denyViewers, requireClientAdmin, handleImport("contractors"));
 
 router.get("/imports/fire-call-points/template", requireAuth, requireClientAdmin, requireService("firetrack"), sendTemplate("fire-call-points", "firetrack-call-points-template.csv"));
+
+// KitchenTrack ingredients from suppliers' allergen information. Managers, as
+// for PATTrack: department managers import into their own sites.
+router.get("/imports/allergen-ingredients/template", requireAuth, requirePatImporter, requireService("kitchentrack"), sendTemplate("allergen-ingredients", "kitchentrack-supplier-allergens-template.csv"));
+router.post("/imports/allergen-ingredients", requireAuth, denyViewers, requirePatImporter, requireService("kitchentrack"), handleImport("allergen-ingredients"));
 router.post("/imports/fire-call-points", requireAuth, denyViewers, requireClientAdmin, requireService("firetrack"), handleImport("fire-call-points"));
 
 export default router;

@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-export type ImportCsvType = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points";
+export type ImportCsvType = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "allergen-ingredients";
 
 const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string; required: string; optional: string; matching: string; template: string; sheet: string }> = {
   "pat-appliances": {
@@ -56,6 +56,17 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     matching: "List them in the order you want them tested: new call points join the end of the rotation in file order. Rows match existing call points by site and call point name.",
     template: "firetrack-call-points-template",
     sheet: "Call points",
+  },
+  // A supplier's allergen matrix or product list (api-server lib/allergenImport.ts).
+  "allergen-ingredients": {
+    title: "Import suppliers' allergen information",
+    noun: "ingredients",
+    one: "ingredient",
+    required: "Ingredient, and either a column for each allergen (Y, N or May) or a Contains column",
+    optional: "Supplier, Product code, May contain, Site (blank = every site), Notes",
+    matching: "Use the supplier's own allergen sheet as it is: long headings such as \"Cereals containing gluten\" are recognised. Rows match existing ingredients by site and name; changed allergens update every dish using the ingredient, with a change log entry. Check every allergen against the supplier's information before you import.",
+    template: "kitchentrack-supplier-allergens-template",
+    sheet: "Allergens",
   },
 };
 
@@ -317,8 +328,8 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, 
 
 /**
  * "Import spreadsheet" button plus its dialog, for register pages. Hidden for users
- * the API would refuse: viewers, and staff other than PATTrack department
- * managers.
+ * the API would refuse: viewers, and staff other than department managers
+ * (PATTrack appliances and KitchenTrack ingredients only).
  */
 export function ImportCsvButton({ type, onImported, className, siteId, label = "Import spreadsheet" }: {
   type: ImportCsvType; onImported?: () => void; className?: string; siteId?: number | null; label?: string;
@@ -326,7 +337,9 @@ export function ImportCsvButton({ type, onImported, className, siteId, label = "
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const isAdmin = user?.role === "consultant" || user?.role === "client_admin";
-  const allowed = isAdmin || (type === "pat-appliances" && (user?.role === "client_manager" || (user?.role === "client_staff" && user.isDepartmentManager === true)));
+  // PATTrack appliances and KitchenTrack ingredients: managers too.
+  const managersToo = type === "pat-appliances" || type === "allergen-ingredients";
+  const allowed = isAdmin || (managersToo && (user?.role === "client_manager" || (user?.role === "client_staff" && user.isDepartmentManager === true)));
   if (!allowed) return null;
   return (
     <>

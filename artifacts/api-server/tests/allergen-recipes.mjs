@@ -1,7 +1,8 @@
 // KitchenTrack allergen recipes: ingredients with contains / may contain,
 // dishes worked out from their ingredients, an ingredient change pushed to
 // every dish with a change log row, menus, chart sign-offs and "changed since
-// last checked", plus tenant isolation, department scoping and viewers.
+// last checked", importing suppliers' allergen information, plus tenant
+// isolation, department scoping and viewers.
 // Run: pnpm --filter @workspace/api-server run test:allergen-recipes
 import assert from "node:assert/strict";
 import { createTenant, createUser, pool } from "./approval-workflow-fixtures.mjs";
@@ -207,6 +208,53 @@ await ok(owner.request("DELETE", `/registers/allergen-menus/${emptyMenu.id}`), 2
 charts = await ok(owner.request("GET", "/registers/allergen-charts"), 200, "charts after menu removal");
 assert.ok(!chart(siteA.id, emptyMenu.id), "removed menu has no chart");
 assert.equal(chart(siteA.id, lunch.id).menuName, "Lunch menu");
+
+// ── Import suppliers' allergen information (POST /imports/allergen-ingredients) ──
+{
+  const cream = await ok(owner.request("POST", "/registers/allergen-ingredients", { siteId: siteA.id, name: "Double cream", contains: ["milk"] }), 201, "add cream");
+  const trifle = await ok(owner.request("POST", "/registers/allergens", {
+    siteId: siteA.id, name: "Trifle", allergens: [], ingredients: [{ ingredientId: cream.id }],
+  }), 201, "dish using the cream");
+  const headers = ["Product description", "Supplier", "Code", "Milk", "Cereals containing gluten", "Soya", "Site"];
+  const file = {
+    headers,
+    rows: [
+      ["Strong flour", "Town Mill", "SF1", "N", "Y", "May", ""],
+      ["double cream", "Dairy Co", "DC9", "Yes", "N", "Traces", "Main restaurant"],
+    ],
+  };
+  const bad = { headers, rows: [...file.rows, ["Mystery", "", "", "?", "", "", ""]] };
+  const preview = await ok(owner.request("POST", "/imports/allergen-ingredients", { ...bad, preview: true }), 200, "preview with an error row");
+  assert.deepEqual(preview.summary, { total: 3, create: 1, update: 1, skip: 0, error: 1 });
+  assert.match(preview.rows[1].reasons.join(" "), /may contain Soya/, "the preview says what changes");
+  await ok(owner.request("POST", "/imports/allergen-ingredients", { ...bad, preview: false }), 409, "nothing imported while a row has an error");
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM allergen_ingredients WHERE name = 'Strong flour'")).rows[0].n, 0, "refused import wrote nothing");
+  await ok(owner.request("POST", "/imports/allergen-ingredients", { headers: ["Ingredient", "Supplier"], rows: [["Flour", "Mill"]] }), 400, "a file without allergen columns");
+
+  await ok(staff.request("POST", "/imports/allergen-ingredients", file), 403, "staff cannot bulk import");
+  await ok(viewer.request("POST", "/imports/allergen-ingredients", file), 403, "viewer cannot import");
+  const foreignTry = await ok(foreign.request("POST", "/imports/allergen-ingredients", { ...file, rows: [file.rows[1]], preview: false }), 409, "another business's import");
+  assert.match(foreignTry.rows[0].reasons.join(" "), /Site "Main restaurant" was not found/, "another business's site name is not found");
+
+  const done = await ok(owner.request("POST", "/imports/allergen-ingredients", { ...file, preview: false }), 200, "import");
+  assert.equal(done.committed, true);
+  const ingredients = await ok(owner.request("GET", "/registers/allergen-ingredients"), 200, "ingredients after import");
+  const flour = ingredients.find((i) => i.name === "Strong flour");
+  assert.equal(flour.siteId, null, "a blank Site is every site");
+  assert.deepEqual([flour.contains, flour.mayContain, flour.supplier, flour.productCode], [["gluten"], ["soya"], "Town Mill", "SF1"]);
+  assert.ok(flour.lastCheckedAt && flour.checkedBy, "recorded as checked by the person importing");
+  const updatedCream = ingredients.find((i) => i.id === cream.id);
+  assert.deepEqual([updatedCream.contains, updatedCream.mayContain, updatedCream.supplier], [["milk"], ["soya"], "Dairy Co"]);
+  const dishes = await ok(owner.request("GET", "/registers/allergens"), 200, "dishes after import");
+  assert.deepEqual(dishes.find((d) => d.id === trifle.id).mayContain, ["soya"], "dishes using the ingredient are updated");
+  const log = await ok(owner.request("GET", `/registers/allergen-ingredients/${cream.id}/changes`), 200, "cream change log");
+  assert.equal(log[0].changeType, "allergens_changed");
+  assert.equal(log[0].reason, "Supplier allergen information imported");
+  assert.equal(log[0].dishesUpdated, 1);
+
+  const again = await ok(owner.request("POST", "/imports/allergen-ingredients", { ...file, preview: true }), 200, "the same file again");
+  assert.deepEqual(again.summary, { total: 2, create: 0, update: 0, skip: 2, error: 0 }, "an unchanged file changes nothing");
+}
 
 await pool.end();
 console.log("Allergen recipes: ingredients, recipes, menus and chart sign-offs passed.");

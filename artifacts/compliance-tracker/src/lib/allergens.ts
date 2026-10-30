@@ -1,4 +1,5 @@
 import { format } from "date-fns";
+import { allergenIconSvg } from "@/lib/allergen-icons";
 
 // KitchenTrack allergen records, ingredients, menus and charts
 // (API: /api/registers/allergens, /allergen-ingredients, /allergen-menus,
@@ -136,9 +137,13 @@ function signoffHtml(status: PrintableChart["status"]): string {
   return `<div class="check">Checked by <strong>${escapeHtml(status.lastSignoff.checkedByName)}</strong> on <strong>${escapeHtml(when)}</strong> against the current recipes and ingredient labels.</div>`;
 }
 
-/** Printable front-of-house allergen chart: dishes down the side, the 14 allergens across. */
+/**
+ * Printable front-of-house allergen chart in the layout of the Food Standards
+ * Agency's allergen chart template: dishes down the side, the 14 allergens
+ * across with their pictograms, a tick where a dish contains one.
+ */
 export function renderChartHtml(charts: PrintableChart[], businessName: string): string {
-  const head = ALLERGENS.map((a) => `<th class="allergen"><span>${escapeHtml(a.short)}</span></th>`).join("");
+  const head = ALLERGENS.map((a) => `<th class="allergen" title="${escapeHtml(a.label)}">${allergenIconSvg(a.key, 30)}<span>${escapeHtml(a.short)}</span></th>`).join("");
   const sections = charts.map(({ title, items, status }) => {
     const rows = items.map((item) => {
       const cells = ALLERGENS.map((a) => {
@@ -157,8 +162,8 @@ export function renderChartHtml(charts: PrintableChart[], businessName: string):
       @page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172033;margin:0;font-size:10pt}
       h1{font-size:18pt;margin:0 0 2px}h2{font-size:12pt;margin:14px 0 4px}.sub{margin:0 0 8px;color:#52606d}
       table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #7b8794;padding:4px;text-align:center;vertical-align:middle}
-      th.dish,td.dish{text-align:left;width:24%}th.allergen{height:96px;vertical-align:bottom;font-size:8.5pt;padding:2px}
-      th.allergen span{writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap}
+      th.dish,td.dish{text-align:left;width:24%}th.allergen{height:122px;vertical-align:bottom;font-size:8.5pt;padding:3px 1px}
+      th.allergen svg{display:block;margin:0 auto 4px}th.allergen span{writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;display:inline-block}
       td.yes{font-weight:bold;font-size:12pt;background:#fde2e1;color:#8a1c1c}td.may{font-weight:bold;background:#fff4d6;color:#8a4b00}
       .desc{font-size:8pt;color:#52606d}.ppds{font-size:8pt;color:#8a4b00;margin-top:2px}
       .notice{border:2px solid #172033;padding:8px;margin:10px 0;font-weight:bold}
@@ -168,7 +173,7 @@ export function renderChartHtml(charts: PrintableChart[], businessName: string):
       @media print{body{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
     </style></head><body>
     <h1>Allergen information${businessName ? ` &ndash; ${escapeHtml(businessName)}` : ""}</h1>
-    <p class="sub">&#10004; = contains this allergen as an ingredient. M = may contain traces (supplier's warning).</p>
+    <p class="sub">&#10004; = contains this allergen as an ingredient. M = may contain traces (supplier's warning). Laid out like the Food Standards Agency's allergen chart, covering the 14 allergens the law requires.</p>
     <div class="notice">If you have a food allergy or intolerance, please speak to a member of staff before you order.</div>
     ${sections}
     <p class="foot">Printed ${escapeHtml(format(new Date(), "d MMM yyyy"))}. ${business} prepared this chart from its own recipes and its suppliers' ingredient information and is responsible for it. Recipes and suppliers can change: check this sheet is current.</p>
