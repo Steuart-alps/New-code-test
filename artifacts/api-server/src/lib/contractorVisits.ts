@@ -207,9 +207,9 @@ export const CONTRACTOR_VISIT_TYPES: readonly ContractorVisitType[] = [
   },
   {
     key: "green:service", module: "green", trackLabel: "GreenTrack", services: ["greentrack"],
-    title: "GreenTrack Machine Servicing", label: "Machine servicing",
-    description: "Servicing of grounds machinery. Due when the first machine at the site is due a service; record each service in GreenTrack.",
-    frequencyMonths: null, dueFrom: "track", trades: ["equipment"],
+    title: "GreenTrack Machine Servicing", label: "Machine servicing (greenkeeping machinery)",
+    description: "Servicing of mowers, tractors and other grounds machinery by a grounds machinery dealer or engineer. Due when the first machine at the site is due a service; record each service in GreenTrack. If your own mechanic services the machines, choose \"No contractor needed\" and log each service in GreenTrack as done in house.",
+    frequencyMonths: null, dueFrom: "track", trades: ["grounds_machinery", "equipment"],
   },
   {
     key: "green:puwer", module: "green", trackLabel: "GreenTrack", services: ["greentrack"],

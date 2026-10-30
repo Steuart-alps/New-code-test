@@ -91,6 +91,7 @@
     "test:pat-register-access": "bash tests/run-fresh-schema.sh tests/pat-register-access.mjs",
     "test:green-nsts": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/green-nsts-sprayer-tests.mjs",
     "test:green-hours": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/green-hours.mjs",
+    "test:green-service-in-house": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/green-service-in-house.mjs",
     "test:green-spraying": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/green-spraying.mjs",
     "test:green-daily-checks": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/green-daily-checks.mjs",
     "test:dept-isolation:ci": "bash tests/run-dept-isolation.sh",

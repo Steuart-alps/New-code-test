@@ -4091,6 +4091,16 @@ async function migrateGreenTrack() {
     ON "green_defects" ("client_id", "status")
   `);
 
+  // Machine services done in house or by a contractor (October 2026). An
+  // in-house service keeps its checklist (lib/api-zod green-service-checklist)
+  // and whether the machine was safe to use; each problem found on it becomes
+  // a defect linked back to the service. Older records leave these empty.
+  await db.execute(sql`ALTER TABLE "green_service_records" ADD COLUMN IF NOT EXISTS "done_by" text`);
+  await db.execute(sql`ALTER TABLE "green_service_records" ADD COLUMN IF NOT EXISTS "contractor_id" integer REFERENCES "contractors"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "green_service_records" ADD COLUMN IF NOT EXISTS "checklist" jsonb`);
+  await db.execute(sql`ALTER TABLE "green_service_records" ADD COLUMN IF NOT EXISTS "safe_to_use" boolean`);
+  await db.execute(sql`ALTER TABLE "green_defects" ADD COLUMN IF NOT EXISTS "service_record_id" integer REFERENCES "green_service_records"("id") ON DELETE SET NULL`);
+
   // PUWER statutory thorough examinations
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "green_puwer_inspections" (

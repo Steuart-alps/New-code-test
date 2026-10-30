@@ -60,6 +60,7 @@ const DEFAULT_TRADES = [
   "intruder_alarm", "cctv", "access_control",
   "legionella_water_hygiene", "pest_control", "pat_testing", "loler_puwer_inspection",
   "lev_testing", "asbestos", "tree_surgeon_arborist", "pool_spa_maintenance", "waste_collection",
+  "grounds_machinery",
   "it_comms",
   "safety_hazard", "cleaning", "general",
 ];
