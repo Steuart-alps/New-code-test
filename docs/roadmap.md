@@ -219,8 +219,9 @@ Plan: `plans/reminders-to-the-right-person.md` in the project files.
   (#159), and "Speak a list" for COSHH.
 - The smoke test to run is `mobile/iphone-smoke-test.md` in the project files.
 
-**Voice shortcuts without opening the app first** (asked for on 29 October).
-Saying something like "open fairway mower 1 opening check" to Siri or Google
+**Voice shortcuts without opening the app first** (asked for on 29 and 30
+October). Saying something like "Hey Siri, open the ComplyTrack checklist for
+fairway mower 2" to Siri or Google
 Assistant would open that item's check straight away. The website can't do
 this; the phone apps can, using Siri Shortcuts on iPhone and Google Assistant
 shortcuts on Android. Each shortcut opens the same check page the item's QR
@@ -455,7 +456,8 @@ automatic read. This uses the same AI set-up as items 2, 5 and 11.
 
 Fill in an ingredient's allergens and price from the supplier (for example
 Brakes, Bidfood or Booker) instead of typing them. A person checks the details
-before they are saved, and allergens are never taken on trust.
+before they are saved, and allergens are never taken on trust. (Asked for
+again on 30 October as "link to suppliers", next to the allergen records.)
 
 How we get the details matters. Some supplier websites forbid automatic
 copying ("scraping") in their terms, and their pages change without warning,
