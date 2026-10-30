@@ -19,6 +19,9 @@ import {
   NSTS_TEST_INSPECTION_TYPE, isNstsSprayerCategory, nstsNextTestDate, nstsStatus,
 } from "@workspace/api-zod/nsts-sprayer-tests";
 import {
+  GREEN_SERVICE_DONE_BY, parseGreenServiceChecklist, type GreenServiceChecklistLine, type GreenServiceDoneBy,
+} from "@workspace/api-zod/green-service-checklist";
+import {
   GREEN_SERVICE_DUE_SOON_HOURS, greenCurrentHoursLateral, greenHourReadingsFor, greenServiceHoursState, parseHourMeter,
 } from "../lib/greenHours";
 
@@ -513,14 +516,91 @@ router.delete("/pre-use-checks/:id", requireClientAdmin, async (req, res) => {
 // SERVICE RECORDS
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/**
+ * Who did a service. An in-house service needs the person who did it, every
+ * line of the service checklist answered, and whether the machine is safe to
+ * use; a contractor's service may name the contractor from the Contractors
+ * page. Records saved before October 2026 (and phone saves) say neither, so
+ * leaving `doneBy` out keeps the old free form. Fields left out of an update
+ * keep their stored value.
+ */
+type ServiceDetails = {
+  doneBy: GreenServiceDoneBy | null;
+  contractorId: number | null;
+  checklist: GreenServiceChecklistLine[] | null;
+  safeToUse: boolean | null;
+};
+
+async function resolveServiceDetails(
+  clientId: number, body: Record<string, any>, servicedBy: string | null, existing?: Record<string, any>,
+): Promise<{ ok: true; details: ServiceDetails } | { ok: false; status: number; error: string }> {
+  const doneBy = body.doneBy === undefined ? (existing?.done_by ?? null) : body.doneBy;
+  if (doneBy !== null && !(GREEN_SERVICE_DONE_BY as readonly string[]).includes(doneBy)) {
+    return { ok: false, status: 400, error: "doneBy must be in_house or contractor" };
+  }
+  if (doneBy === "in_house") {
+    if (!servicedBy) return { ok: false, status: 400, error: "Say who did the service" };
+    const checklist = parseGreenServiceChecklist(body.checklist === undefined ? existing?.checklist : body.checklist);
+    if (!checklist.ok) return { ok: false, status: 400, error: checklist.error };
+    const safeToUse = body.safeToUse === undefined ? existing?.safe_to_use : body.safeToUse;
+    if (typeof safeToUse !== "boolean") return { ok: false, status: 400, error: "Say whether the machine is safe to use" };
+    return { ok: true, details: { doneBy, contractorId: null, checklist: checklist.lines, safeToUse } };
+  }
+  if (doneBy === "contractor") {
+    const raw = body.contractorId === undefined ? (existing?.contractor_id ?? null) : body.contractorId;
+    if (raw !== null && !Number.isInteger(raw)) return { ok: false, status: 400, error: "contractorId must be a whole number" };
+    if (raw !== null) {
+      const found = await db.execute(sql`SELECT id FROM contractors WHERE id = ${raw} AND client_id = ${clientId}`);
+      if (!rows(found).length) return { ok: false, status: 404, error: "Contractor not found" };
+    }
+    const safeToUse = body.safeToUse === undefined ? (existing?.safe_to_use ?? null) : body.safeToUse;
+    if (safeToUse !== null && typeof safeToUse !== "boolean") return { ok: false, status: 400, error: "safeToUse must be true or false" };
+    return { ok: true, details: { doneBy, contractorId: raw, checklist: null, safeToUse } };
+  }
+  return { ok: true, details: { doneBy: null, contractorId: null, checklist: null, safeToUse: null } };
+}
+
+/**
+ * Each problem found on a service becomes an open defect on the machine, so
+ * it is fixed and closed in the Defects tab like any other; a machine found
+ * not safe to use is taken out of service until those defects are resolved.
+ */
+async function raiseServiceDefects(
+  tx: { execute(query: unknown): Promise<unknown> }, clientId: number, record: Record<string, any>, details: ServiceDetails,
+  performer: { performedBy: string | null; staffRosterId: number | null } | null,
+) {
+  const problems = (details.checklist ?? []).filter(line => line.result === "problem");
+  const outOfService = details.safeToUse === false;
+  const descriptions = problems.map(line => `Found at service: ${line.label}. ${line.note ?? ""}`.trim());
+  if (outOfService && descriptions.length === 0) {
+    descriptions.push(`Not safe to use after its service${record.notes ? `: ${record.notes}` : ""}`);
+  }
+  for (const description of descriptions) {
+    await tx.execute(sql`
+      INSERT INTO green_defects (
+        client_id, machine_id, report_date, reported_by, reported_by_roster_id, description, severity, out_of_service,
+        status, service_record_id
+      ) VALUES (
+        ${clientId}, ${record.machine_id}, ${record.service_date}, ${performer?.performedBy ?? record.serviced_by ?? null},
+        ${performer?.staffRosterId ?? null}, ${description.slice(0, 1000)}, ${outOfService ? "critical" : "major"}, ${outOfService},
+        'open', ${record.id}
+      )
+    `);
+  }
+  return descriptions.length;
+}
+
 router.get("/service-records", async (req, res) => {
   try {
     const clientId = getClientId(req);
     const { machineId, limit = "100" } = req.query as Record<string, string>;
     const result = await db.execute(sql`
-      SELECT s.*, m.name AS machine_name, m.type AS machine_type
+      SELECT s.*, m.name AS machine_name, m.type AS machine_type,
+             c.name AS contractor_name, c.company AS contractor_company,
+             (SELECT count(*)::int FROM green_defects d WHERE d.service_record_id = s.id AND d.client_id = s.client_id) AS defects_raised
       FROM green_service_records s
       JOIN green_machines m ON m.id = s.machine_id
+      LEFT JOIN contractors c ON c.id = s.contractor_id AND c.client_id = s.client_id
       WHERE s.client_id = ${clientId}
         ${machineId ? sql`AND s.machine_id = ${machineId}` : sql``}
       ORDER BY s.service_date DESC, s.created_at DESC
@@ -549,6 +629,10 @@ router.post("/service-records", requireClientAdmin, async (req, res) => {
     if (!rows(machineCheck).length) return res.status(404).json({ error: "Machine not found" });
     const performer = await resolveStaffRoster(clientId, servicedByRosterId, servicedBy);
     if (servicedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
+    const servicedByName = performer?.performedBy ?? (servicedBy?.trim() || null);
+    const resolved = await resolveServiceDetails(clientId, req.body, servicedByName);
+    if (!resolved.ok) return res.status(resolved.status).json({ error: resolved.error });
+    const { details } = resolved;
 
     const created = await createWithStagedPhotoReceipts({
       clientId,
@@ -560,16 +644,21 @@ router.post("/service-records", requireClientAdmin, async (req, res) => {
       const result = await tx.execute(sql`
         INSERT INTO green_service_records (
           client_id, machine_id, service_date, service_type, hours_at_service, next_service_hours,
-          next_service_date, work_performed, serviced_by, serviced_by_roster_id, cost_pence, notes
+          next_service_date, work_performed, serviced_by, serviced_by_roster_id, cost_pence, notes,
+          done_by, contractor_id, checklist, safe_to_use
         ) VALUES (
           ${clientId}, ${machineId}, ${serviceDate}, ${serviceType ?? "scheduled"},
           ${hoursAtService ?? null}, ${nextServiceHours ?? null}, ${nextServiceDate ?? null},
-          ${workPerformed?.trim() ?? null}, ${performer?.performedBy ?? servicedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null},
-          ${costPence ?? null}, ${notes?.trim() ?? null}
+          ${workPerformed?.trim() ?? null}, ${servicedByName}, ${performer?.staffRosterId ?? null},
+          ${costPence ?? null}, ${notes?.trim() ?? null},
+          ${details.doneBy}, ${details.contractorId},
+          ${details.checklist ? JSON.stringify(details.checklist) : null}::jsonb, ${details.safeToUse}
         )
         RETURNING *
       `);
-      return rows(result)[0];
+      const record = rows(result)[0];
+      const defectsRaised = await raiseServiceDefects(tx, clientId, record, details, performer);
+      return { ...record, defects_raised: defectsRaised };
     });
     res.status(201).json(created);
   } catch (err) {
@@ -589,6 +678,11 @@ router.put("/service-records/:id", requireClientAdmin, async (req, res) => {
     if (!existing) return res.status(404).json({ error: "Service record not found" });
     const performer = await resolveStaffPerformerUpdate(clientId, servicedByRosterId, servicedBy, existing.serviced_by_roster_id, existing.serviced_by);
     if (servicedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
+    // Defects raised when the service was logged stay as they are; a problem
+    // added on an edit is reported in the Defects tab.
+    const resolved = await resolveServiceDetails(clientId!, req.body, performer?.performedBy ?? null, existing);
+    if (!resolved.ok) return res.status(resolved.status).json({ error: resolved.error });
+    const { details } = resolved;
     const value = (input: any, stored: any) => input === undefined ? stored : input;
     const result = await db.execute(sql`
       UPDATE green_service_records
@@ -596,7 +690,10 @@ router.put("/service-records/:id", requireClientAdmin, async (req, res) => {
           hours_at_service = ${value(hoursAtService, existing.hours_at_service)}, next_service_hours = ${value(nextServiceHours, existing.next_service_hours)},
           next_service_date = ${value(nextServiceDate, existing.next_service_date)}, work_performed = ${workPerformed === undefined ? existing.work_performed : workPerformed?.trim() ?? null},
           serviced_by = ${performer?.performedBy ?? null}, serviced_by_roster_id = ${performer?.staffRosterId ?? null}, cost_pence = ${value(costPence, existing.cost_pence)},
-          notes = ${notes === undefined ? existing.notes : notes?.trim() ?? null}, updated_at = now()
+          notes = ${notes === undefined ? existing.notes : notes?.trim() ?? null},
+          done_by = ${details.doneBy}, contractor_id = ${details.contractorId},
+          checklist = ${details.checklist ? JSON.stringify(details.checklist) : null}::jsonb, safe_to_use = ${details.safeToUse},
+          updated_at = now()
       WHERE id = ${req.params.id} AND client_id = ${clientId}
       RETURNING *
     `);
@@ -1278,7 +1375,8 @@ router.get("/status", async (req, res) => {
       db.execute(sql`
         SELECT
           COUNT(*) FILTER (WHERE status IN ('open','under_repair')) AS open_count,
-          COUNT(*) FILTER (WHERE status IN ('open','under_repair') AND out_of_service) AS out_of_service_count,
+          -- Machines, not defects: one machine can have several defects.
+          COUNT(DISTINCT machine_id) FILTER (WHERE status IN ('open','under_repair') AND out_of_service) AS out_of_service_count,
           COUNT(*) FILTER (WHERE status IN ('open','under_repair') AND severity = 'critical') AS critical_count
         FROM green_defects WHERE client_id = ${clientId}
       `),

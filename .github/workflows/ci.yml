@@ -265,6 +265,9 @@ jobs:
       - name: GreenTrack hour meter readings (production schema base)
         run: pnpm --filter @workspace/api-server run test:green-hours
 
+      - name: GreenTrack in-house and contractor machine services (production schema base)
+        run: pnpm --filter @workspace/api-server run test:green-service-in-house
+
       - name: GreenTrack shed and machine pre-start daily checks (production schema base)
         run: pnpm --filter @workspace/api-server run test:green-daily-checks
 
