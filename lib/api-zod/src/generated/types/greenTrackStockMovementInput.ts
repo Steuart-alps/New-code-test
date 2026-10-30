@@ -11,7 +11,7 @@ export interface GreenTrackStockMovementInput {
   productId: number;
   movementDate: Date;
   kind: GreenTrackStockMovementInputKind;
-  /** Delivered or written-off quantity (above 0) */
+  /** Delivered, written-off or used quantity (above 0). "use" is refused for pesticides, whose use goes in a spraying record. */
   quantity?: number;
   /** The quantity counted, for a stock count */
   countedQuantity?: number;

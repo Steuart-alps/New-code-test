@@ -831,6 +831,8 @@ export interface GreenTrackProductInput {
   reorderLevel?: number | null;
   notes?: string | null;
   active?: boolean;
+  /** Only when adding a product. The amount in stock now, saved as a stock count dated today. */
+  openingStock?: number | null;
 }
 
 export type GreenTrackStockLedgerEntryKind = typeof GreenTrackStockLedgerEntryKind[keyof typeof GreenTrackStockLedgerEntryKind];
@@ -840,6 +842,7 @@ export const GreenTrackStockLedgerEntryKind = {
   delivery: 'delivery',
   count: 'count',
   write_off: 'write_off',
+  use: 'use',
   application: 'application',
 } as const;
 
@@ -869,6 +872,7 @@ export const GreenTrackStockMovementKind = {
   delivery: 'delivery',
   count: 'count',
   write_off: 'write_off',
+  use: 'use',
 } as const;
 
 export interface GreenTrackStockMovement {
@@ -878,7 +882,7 @@ export interface GreenTrackStockMovement {
   unit: string;
   movementDate: string;
   kind: GreenTrackStockMovementKind;
-  /** Signed change (a write-off is negative; a count is 0) */
+  /** Signed change (a write-off or use is negative; a count is 0) */
   quantity: number;
   countedQuantity?: number | null;
   supplier?: string | null;
@@ -896,13 +900,14 @@ export const GreenTrackStockMovementInputKind = {
   delivery: 'delivery',
   count: 'count',
   write_off: 'write_off',
+  use: 'use',
 } as const;
 
 export interface GreenTrackStockMovementInput {
   productId: number;
   movementDate: string;
   kind: GreenTrackStockMovementInputKind;
-  /** Delivered or written-off quantity (above 0) */
+  /** Delivered, written-off or used quantity (above 0). "use" is refused for pesticides, whose use goes in a spraying record. */
   quantity?: number;
   /** The quantity counted, for a stock count */
   countedQuantity?: number;
@@ -1446,6 +1451,10 @@ export interface Site {
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;
+  /** Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation. */
+  sleepingAccommodation?: boolean | null;
+  /** A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists. */
+  nightPorter?: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1456,6 +1465,10 @@ export interface CreateSiteRequest {
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;
+  /** Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation. */
+  sleepingAccommodation?: boolean | null;
+  /** A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists. */
+  nightPorter?: boolean | null;
 }
 
 export interface UpdateSiteRequest {
@@ -1464,6 +1477,10 @@ export interface UpdateSiteRequest {
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;
+  /** Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation. */
+  sleepingAccommodation?: boolean | null;
+  /** A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists. */
+  nightPorter?: boolean | null;
 }
 
 export type ContractorVisitTypeDueFrom = typeof ContractorVisitTypeDueFrom[keyof typeof ContractorVisitTypeDueFrom];
@@ -1484,6 +1501,8 @@ export interface ContractorVisitType {
   label: string;
   description: string;
   dueFrom: ContractorVisitTypeDueFrom;
+  /** Contractor trades suggested first when choosing who does this visit */
+  trades?: string[];
 }
 
 export interface ContractorVisit {
@@ -1748,20 +1767,30 @@ export interface CertificateReadRequest {
   fileName: string;
   /** application/pdf, image/jpeg, image/png, image/webp, image/gif, .docx or text/plain */
   mimeType: string;
-  /** The file as base64 (15 MB at most before encoding) */
+  /** The file as base64 (20 MB at most before encoding) */
   data: string;
   /** The check the certificate is for, when the person opened the reader from one */
   itemId?: number | null;
 }
 
-export interface CertificateReadingDefect {
-  code: CertificateDefectCode;
-  description: string;
-  location: string | null;
-  /** The item or observation number on the certificate */
-  reference: string | null;
-  /** Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are. */
-  needsWork: boolean;
+export interface CertificateReadFile {
+  /** @maxLength 255 */
+  fileName: string;
+  /** application/pdf, image/jpeg, image/png, image/webp, image/gif, .docx or text/plain */
+  mimeType: string;
+  /** The file as base64 */
+  data: string;
+}
+
+export interface CertificateReadFilesRequest {
+  /**
+     * Up to 10 files, 20 MB at most together before encoding
+     * @minItems 1
+     * @maxItems 10
+     */
+  files: CertificateReadFile[];
+  /** The check the reader was opened from: the files are one certificate for it */
+  itemId?: number | null;
 }
 
 export interface CertificateReadingNewCheck {
@@ -1779,6 +1808,16 @@ export const CertificateReadingNextInspectionSource = {
   certificate: 'certificate',
   repeat: 'repeat',
 } as const;
+
+export interface CertificateReadingDefect {
+  code: CertificateDefectCode;
+  description: string;
+  location: string | null;
+  /** The item or observation number on the certificate */
+  reference: string | null;
+  /** Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are. */
+  needsWork: boolean;
+}
 
 export interface CertificateReading {
   certificateType: string;
@@ -1799,6 +1838,22 @@ export interface CertificateReading {
   defects: CertificateReadingDefect[];
   /** Things that could not be read with confidence. */
   unclear: string[];
+}
+
+export type CertificateFileReading = CertificateReading & {
+  /** The files (0-based, in the order sent) this certificate is on */
+  fileIndexes: number[];
+};
+
+export interface CertificateSkippedFile {
+  fileIndex: number;
+  reason: string;
+}
+
+export interface CertificateFilesReading {
+  certificates: CertificateFileReading[];
+  /** Files that hold no certificate */
+  skipped: CertificateSkippedFile[];
 }
 
 export interface CreateRecordSignatureRequest {
@@ -2984,6 +3039,9 @@ export interface RequestUploadUrlResponse {
   objectPath: string;
 }
 
+/**
+ * "fire_walk" is the escape route sign-off (sites with sleeping accommodation). "night_walk" is a night porter's fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see /fire-safety/night-walks).
+ */
 export type FireCheckType = typeof FireCheckType[keyof typeof FireCheckType];
 
 
@@ -2998,6 +3056,7 @@ export const FireCheckType = {
   emergency_lights_annual: 'emergency_lights_annual',
   alarm_service: 'alarm_service',
   extinguisher_service: 'extinguisher_service',
+  night_walk: 'night_walk',
 } as const;
 
 export type FireSafetyCheckResult = typeof FireSafetyCheckResult[keyof typeof FireSafetyCheckResult];
@@ -3029,6 +3088,18 @@ export type FireSafetyCheckSoundLevelMethod = typeof FireSafetyCheckSoundLevelMe
 export const FireSafetyCheckSoundLevelMethod = {
   meter: 'meter',
   phone: 'phone',
+} as const;
+
+/**
+ * Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on.
+ */
+export type FireSafetyCheckWalkTime = typeof FireSafetyCheckWalkTime[keyof typeof FireSafetyCheckWalkTime] | null;
+
+
+export const FireSafetyCheckWalkTime = {
+  '22:00': '22:00',
+  '02:00': '02:00',
+  '06:00': '06:00',
 } as const;
 
 export interface FireDrillAttendee {
@@ -3072,6 +3143,8 @@ export interface FireSafetyCheck {
   soundLevelMethod?: FireSafetyCheckSoundLevelMethod;
   /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
   soundLevelBedhead?: boolean | null;
+  /** Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on. */
+  walkTime?: FireSafetyCheckWalkTime;
   createdAt: string;
   updatedAt: string;
 }
@@ -3105,6 +3178,18 @@ export type CreateFireSafetyCheckRequestSoundLevelMethod = typeof CreateFireSafe
 export const CreateFireSafetyCheckRequestSoundLevelMethod = {
   meter: 'meter',
   phone: 'phone',
+} as const;
+
+/**
+ * Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on.
+ */
+export type CreateFireSafetyCheckRequestWalkTime = typeof CreateFireSafetyCheckRequestWalkTime[keyof typeof CreateFireSafetyCheckRequestWalkTime] | null;
+
+
+export const CreateFireSafetyCheckRequestWalkTime = {
+  '22:00': '22:00',
+  '02:00': '02:00',
+  '06:00': '06:00',
 } as const;
 
 export interface CreateFireSafetyCheckRequest {
@@ -3143,6 +3228,8 @@ export interface CreateFireSafetyCheckRequest {
   soundLevelMethod?: CreateFireSafetyCheckRequestSoundLevelMethod;
   /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
   soundLevelBedhead?: boolean | null;
+  /** Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on. */
+  walkTime?: CreateFireSafetyCheckRequestWalkTime;
 }
 
 export type UpdateFireSafetyCheckRequestResult = typeof UpdateFireSafetyCheckRequestResult[keyof typeof UpdateFireSafetyCheckRequestResult];
@@ -3174,6 +3261,18 @@ export type UpdateFireSafetyCheckRequestSoundLevelMethod = typeof UpdateFireSafe
 export const UpdateFireSafetyCheckRequestSoundLevelMethod = {
   meter: 'meter',
   phone: 'phone',
+} as const;
+
+/**
+ * Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on.
+ */
+export type UpdateFireSafetyCheckRequestWalkTime = typeof UpdateFireSafetyCheckRequestWalkTime[keyof typeof UpdateFireSafetyCheckRequestWalkTime] | null;
+
+
+export const UpdateFireSafetyCheckRequestWalkTime = {
+  '22:00': '22:00',
+  '02:00': '02:00',
+  '06:00': '06:00',
 } as const;
 
 export interface UpdateFireSafetyCheckRequest {
@@ -3211,6 +3310,90 @@ export interface UpdateFireSafetyCheckRequest {
   soundLevelMethod?: UpdateFireSafetyCheckRequestSoundLevelMethod;
   /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
   soundLevelBedhead?: boolean | null;
+  /** Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on. */
+  walkTime?: UpdateFireSafetyCheckRequestWalkTime;
+}
+
+export interface FireEscapeRoute {
+  /**
+     * e.g. "Final fire exit door route 1" or "Escape stairway 2".
+     * @maxLength 200
+     */
+  name: string;
+  /**
+     * Where it leads, or the assembly point (optional).
+     * @maxLength 200
+     */
+  location?: string | null;
+}
+
+export interface FireEscapeRouteList {
+  siteId: number | null;
+  routes: FireEscapeRoute[];
+  /** True when the site has no list of its own yet and these are the business-wide routes saved before routes were set per site. */
+  shared: boolean;
+}
+
+export interface UpdateFireEscapeRoutesRequest {
+  /** @maxItems 100 */
+  routes: FireEscapeRoute[];
+}
+
+export type NightFireWalkTime = typeof NightFireWalkTime[keyof typeof NightFireWalkTime];
+
+
+export const NightFireWalkTime = {
+  '22:00': '22:00',
+  '02:00': '02:00',
+  '06:00': '06:00',
+} as const;
+
+/**
+ * done or failed once recorded (failed = something found); due from its time until an hour after; missed after that; upcoming before its time; not_needed before the site had a night porter.
+ */
+export type NightFireWalkStatus = typeof NightFireWalkStatus[keyof typeof NightFireWalkStatus];
+
+
+export const NightFireWalkStatus = {
+  done: 'done',
+  failed: 'failed',
+  due: 'due',
+  missed: 'missed',
+  upcoming: 'upcoming',
+  not_needed: 'not_needed',
+} as const;
+
+export interface NightFireWalk {
+  /** The calendar day the walk falls on (YYYY-MM-DD). */
+  date: string;
+  time: NightFireWalkTime;
+  /** done or failed once recorded (failed = something found); due from its time until an hour after; missed after that; upcoming before its time; not_needed before the site had a night porter. */
+  status: NightFireWalkStatus;
+  checkId: number | null;
+  performedBy: string | null;
+}
+
+export interface NightFireWalkNight {
+  /** The evening the night starts (YYYY-MM-DD); its 02:00 and 06:00 walks fall on the next day. */
+  nightOf: string;
+  walks: NightFireWalk[];
+}
+
+export interface NightFireWalkSite {
+  siteId: number;
+  siteName: string;
+  /** Tonight (or the night now ending) first, then the six nights before. */
+  nights: NightFireWalkNight[];
+  /** Walks missed over the nights listed. */
+  missedCount: number;
+}
+
+export interface NightFireWalks {
+  walkTimes: string[];
+  /** A walk counts as missed this many minutes after its time. */
+  graceMinutes: number;
+  /** Sites with a night porter that the caller can see. */
+  sites: NightFireWalkSite[];
 }
 
 export interface FireDrillStaffStatus {
@@ -3301,6 +3484,30 @@ export interface PatRegisterReadResult {
   rows: string[][];
   /** Rows that were hard to read; their Notes start with "Check:" */
   unclear: number;
+}
+
+/**
+ * The import the file belongs in; null when it is none of them
+ * @nullable
+ */
+export type ImportListSortResultKind = typeof ImportListSortResultKind[keyof typeof ImportListSortResultKind] | null;
+
+
+export const ImportListSortResultKind = {
+  'pat-appliances': 'pat-appliances',
+  'room-track-rooms': 'room-track-rooms',
+  contractors: 'contractors',
+  'fire-call-points': 'fire-call-points',
+  'greentrack-equipment': 'greentrack-equipment',
+  'staff-roster': 'staff-roster',
+} as const;
+
+export interface ImportListSortResult {
+  /**
+     * The import the file belongs in; null when it is none of them
+     * @nullable
+     */
+  kind: ImportListSortResultKind;
 }
 
 export interface ImportListReadResult {
@@ -3668,6 +3875,8 @@ export interface BikeTrackConfig {
 export interface GreenTrackConfig {
   green_show_fuel?: string;
   green_default_operators?: string;
+  /** The site new machines and the Daily checks tab start on ("" for none) */
+  green_default_site_id?: string;
 }
 
 export interface IncidentConfig {
@@ -4439,6 +4648,45 @@ export interface KitchenClosedDaysCreated {
   created: string[];
 }
 
+export interface KitchenMonthSummarySite {
+  siteId: number | null;
+  siteName: string | null;
+  /** The site's first diary record; days before it are not counted. */
+  startedOn: string | null;
+  daysCounted: number;
+  recordedDays: number;
+  draftDays: number;
+  closedDays: number;
+  missedDays: number;
+  missedDates: string[];
+  failedReadings: number;
+  actionsRaised: number;
+  actionsOpen: number;
+}
+
+export type KitchenMonthSummaryTotals = {
+  daysCounted: number;
+  recordedDays: number;
+  draftDays: number;
+  closedDays: number;
+  missedDays: number;
+  failedReadings: number;
+  actionsRaised: number;
+  actionsResolved: number;
+  actionsOpen: number;
+  actionsOverdue: number;
+};
+
+export interface KitchenMonthSummary {
+  month: string;
+  from: string;
+  /** The last day counted (yesterday, or the month's last day). Null when no day has finished yet. */
+  through: string | null;
+  today: string;
+  sites: KitchenMonthSummarySite[];
+  totals: KitchenMonthSummaryTotals;
+}
+
 export interface FoodSafetyMonthlySummary {
   year: number;
   month: number;
@@ -4618,6 +4866,11 @@ export const LegionellaCheckResult = {
   action_required: 'action_required',
 } as const;
 
+/**
+ * Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
+ */
+export type LegionellaCheckFindings = {[key: string]: string} | null;
+
 export interface LegionellaCheck {
   id: number;
   clientId: number;
@@ -4630,6 +4883,10 @@ export interface LegionellaCheck {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** The named cold water tank or calorifier (equipment list item) the check was made on. */
+  equipmentId?: number | null;
+  /** Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail. */
+  findings?: LegionellaCheckFindings;
   createdAt: string;
   updatedAt: string;
 }
@@ -4641,6 +4898,11 @@ export const CreateLegionellaCheckRequestResult = {
   pass: 'pass',
   fail: 'fail',
 } as const;
+
+/**
+ * Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
+ */
+export type CreateLegionellaCheckRequestFindings = {[key: string]: string} | null;
 
 /**
  * temperature is required for calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, and cold_nonsent_temp checks.
@@ -4656,6 +4918,8 @@ export type CreateLegionellaCheckRequest = unknown & ({
   performedBy?: string | null;
   /** A cold water tank or calorifier on the equipment list (its site must match siteId). */
   equipmentId?: number | null;
+  /** Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail. */
+  findings?: CreateLegionellaCheckRequestFindings;
 });
 
 export type UpdateLegionellaCheckRequestResult = typeof UpdateLegionellaCheckRequestResult[keyof typeof UpdateLegionellaCheckRequestResult];
@@ -4665,6 +4929,11 @@ export const UpdateLegionellaCheckRequestResult = {
   pass: 'pass',
   fail: 'fail',
 } as const;
+
+/**
+ * Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
+ */
+export type UpdateLegionellaCheckRequestFindings = {[key: string]: string} | null;
 
 /**
  * For an existing temperature check, temperature is required. New results use pass or fail.
@@ -4677,6 +4946,10 @@ export interface UpdateLegionellaCheckRequest {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Move the check to another named tank or calorifier at the same site. */
+  equipmentId?: number | null;
+  /** Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail. */
+  findings?: UpdateLegionellaCheckRequestFindings;
 }
 
 export type LegionellaStatusLastResult = typeof LegionellaStatusLastResult[keyof typeof LegionellaStatusLastResult] | null;
@@ -4767,6 +5040,7 @@ export const EquipmentLabelKind = {
   room: 'room',
   cold_unit: 'cold_unit',
   equipment: 'equipment',
+  track_point: 'track_point',
 } as const;
 
 export interface EquipmentLinkedCheck {
@@ -4821,7 +5095,7 @@ export interface UpdateEquipmentItemRequest {
 
 export interface EquipmentLabelRef {
   kind: EquipmentLabelKind;
-  /** The record's id, or "<siteId or 0>:<unit id>" for a kitchen fridge or freezer. */
+  /** The record's id, "<siteId or 0>:<unit id>" for a kitchen fridge or freezer, or "<point>:<siteId or 0>" for a track's checks at a site. */
   ref: string;
 }
 
@@ -5371,6 +5645,24 @@ export type GetFireSafetyStatusParams = {
 siteId?: number;
 };
 
+export type GetFireEscapeRoutesParams = {
+/**
+ * The site. Omit for a business with no sites.
+ */
+siteId?: number;
+};
+
+export type UpdateFireEscapeRoutesParams = {
+/**
+ * The site. Omit for a business with no sites.
+ */
+siteId?: number;
+};
+
+export type GetNightFireWalksParams = {
+siteId?: number;
+};
+
 export type GetFireDrillAttendanceParams = {
 /**
  * Staff at this site and staff with no site. Omit for every visible member.
@@ -5590,6 +5882,14 @@ month: number;
  * Scope to a site's diary. Omit for the whole-organisation diary.
  */
 siteId?: number;
+};
+
+export type GetFoodSafetyMonthSummaryParams = {
+/**
+ * The month as YYYY-MM. Defaults to the business's current month.
+ * @pattern ^[0-9]{4}-[0-9]{2}$
+ */
+month?: string;
 };
 
 export type GetFoodSafetyMissingDatesParams = {

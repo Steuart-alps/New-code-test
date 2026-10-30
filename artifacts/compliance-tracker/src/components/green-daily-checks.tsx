@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useListSites } from "@workspace/api-client-react";
+import { useChecklistSite } from "@/hooks/use-checklist-site";
+import { ChecklistSiteSelect } from "@/components/checklist-site-select";
+import { createChecklistDraftStore } from "@/lib/checklist-carry";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
@@ -264,34 +266,43 @@ export function GreenDailyChecksTab({ initialSiteId, onCheckMachine }: {
 }) {
   const { activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
-  const { data: sites = [] } = useListSites();
+  // A checklist saved with no site never counts for a site, so the tab
+  // starts on one: the machine's site when opened from one, else the user's
+  // working site (see useChecklistSite).
+  const checklistSite = useChecklistSite();
+  const sites = checklistSite.sites;
+  const [machineSiteId, setMachineSiteId] = useState<number | null>(initialSiteId ?? null);
+  useEffect(() => {
+    if (initialSiteId != null) setMachineSiteId(initialSiteId);
+  }, [initialSiteId]);
+  const selectedSiteId = machineSiteId ?? checklistSite.siteId;
+  const setSiteId = (id: number | null) => { setMachineSiteId(null); checklistSite.setSiteId(id); };
+  const siteReady = machineSiteId != null || checklistSite.ready;
   const today = format(new Date(), "yyyy-MM-dd");
   const [date, setDate] = useState(today);
-  const [siteId, setSiteId] = useState<string>(initialSiteId != null ? String(initialSiteId) : "__none__");
   const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [loading, setLoading] = useState(false);
+  // Unsaved ticks per checklist, kept while the site or date changes.
+  const [drafts] = useState(createChecklistDraftStore);
+  const loadSeq = useRef(0);
 
-  // A checklist saved with no site never counts for a site, so pick one.
-  useEffect(() => {
-    if (siteId === "__none__" && sites.length > 0) setSiteId(String(sites[0].id));
-  }, [sites, siteId]);
-  useEffect(() => {
-    if (initialSiteId != null) setSiteId(String(initialSiteId));
-  }, [initialSiteId]);
-
-  const selectedSiteId = siteId === "__none__" ? null : Number(siteId);
   const selectedSiteName = sites.find((s) => s.id === selectedSiteId)?.name;
 
   const load = useCallback(async () => {
+    if (!siteReady) return;
+    // A slower answer for the previous site or date must not replace this one.
+    const seq = ++loadSeq.current;
     setLoading(true);
     const params = new URLSearchParams({ date });
     if (selectedSiteId) params.set("siteId", String(selectedSiteId));
+    let rows: Checklist[] = [];
     try {
-      setChecklists(await readJson<Checklist[]>(`${SHED_ENDPOINT}?${params}`));
-    } catch {
-      setChecklists([]);
-    } finally { setLoading(false); }
-  }, [date, selectedSiteId, activeClientId]);
+      rows = await readJson<Checklist[]>(`${SHED_ENDPOINT}?${params}`);
+    } catch { /* shown as not started */ }
+    if (seq !== loadSeq.current) return;
+    setChecklists(rows);
+    setLoading(false);
+  }, [date, selectedSiteId, siteReady, activeClientId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -304,16 +315,7 @@ export function GreenDailyChecksTab({ initialSiteId, onCheckMachine }: {
           <Label className="text-xs">Date</Label>
           <Input type="date" value={date} max={today} onChange={(e) => setDate(e.target.value || today)} className="h-9" />
         </div>
-        <div className="min-w-[180px] flex-1 space-y-1">
-          <Label className="text-xs">Site</Label>
-          <Select value={siteId} onValueChange={setSiteId}>
-            <SelectTrigger className="h-9"><SelectValue placeholder="Select site…" /></SelectTrigger>
-            <SelectContent>
-              {sites.length === 0 && <SelectItem value="__none__">No site</SelectItem>}
-              {sites.map((s) => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+        <ChecklistSiteSelect sites={sites} value={selectedSiteId} onChange={setSiteId} />
         <div className="flex items-end">
           <Button variant="outline" size="sm" onClick={load} className="h-9 gap-1.5">
             <RotateCcw className={cn("h-3.5 w-3.5", loading && "animate-spin")} /> Refresh
@@ -323,7 +325,7 @@ export function GreenDailyChecksTab({ initialSiteId, onCheckMachine }: {
 
       {selectedSiteId != null && <TeamPicker siteId={selectedSiteId} />}
 
-      {loading ? (
+      {loading || !siteReady ? (
         <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -333,6 +335,7 @@ export function GreenDailyChecksTab({ initialSiteId, onCheckMachine }: {
             defaultItems={SHED_OPENING_ITEMS} endpoint={SHED_ENDPOINT}
             siteId={selectedSiteId} siteName={selectedSiteName} date={date}
             existing={getChecklist("greenkeeping_opening")} onSaved={load} canAdmin={canAdmin}
+            draft={drafts.slot("greenkeeping_opening")}
           />
           <ChecklistCard
             key={`greenkeeping_closing-${selectedSiteId}-${date}`}
@@ -340,6 +343,7 @@ export function GreenDailyChecksTab({ initialSiteId, onCheckMachine }: {
             defaultItems={SHED_CLOSING_ITEMS} endpoint={SHED_ENDPOINT}
             siteId={selectedSiteId} siteName={selectedSiteName} date={date}
             existing={getChecklist("greenkeeping_closing")} onSaved={load} canAdmin={canAdmin}
+            draft={drafts.slot("greenkeeping_closing")}
           />
         </div>
       )}

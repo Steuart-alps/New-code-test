@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import {
@@ -40,6 +41,7 @@ import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 import { sortByLabel } from "@/lib/sort-options";
+import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import { RecordSignedBy } from "@/components/record-signature";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -819,12 +821,14 @@ function BikeFormDialog({
   const [siteId, setSiteId] = useState(bike?.siteId ? String(bike.siteId) : "");
   const [notes, setNotes] = useState(bike?.notes ?? "");
   const [saving, setSaving] = useState(false);
+  // A new bike starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
 
-  // Sync form when bike changes
+  // Sync form when bike changes (or the dialog opens for a new bike)
   useMemo(() => {
     setRef(bike?.ref ?? ""); setName(bike?.name ?? ""); setType(bike?.type ?? "hybrid");
-    setSiteId(bike?.siteId ? String(bike.siteId) : ""); setNotes(bike?.notes ?? "");
-  }, [bike]);
+    setSiteId(bike ? (bike.siteId ? String(bike.siteId) : "") : workingSiteId ? String(workingSiteId) : ""); setNotes(bike?.notes ?? "");
+  }, [bike, open]);
 
   async function handleSave() {
     if (!ref.trim()) return;
@@ -1371,6 +1375,7 @@ export default function BikeTrackPage() {
       {/* ── Overview tab ─────────────────────────────────────────────────────── */}
       {activeTab === "overview" && (
         <div className="space-y-4">
+          <TrackContractorChecks module="bike" />
           <h3 className="font-bold text-sm text-muted-foreground uppercase tracking-wide">Active Hires</h3>
           {activeHires.length === 0 ? (
             <div className="text-center py-10 border border-dashed rounded-sm">

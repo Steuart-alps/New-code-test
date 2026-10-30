@@ -5,6 +5,7 @@ import { CheckCircle2, ChevronDown, CircleDot, Loader2, Plus, Wrench } from "luc
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -100,6 +101,9 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
   const [showCreate, setShowCreate] = useState(false);
   const [showResolved, setShowResolved] = useState(false);
   const [draft, setDraft] = useState(emptyDraft);
+  // A new action starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
+  const newDraft = () => ({ ...emptyDraft, siteId: workingSiteId ? String(workingSiteId) : "" });
   // Photos and videos chosen in the "Add action" form, uploaded once it is created.
   const [draftMedia, setDraftMedia] = useState<File[]>([]);
   const [mediaStatus, setMediaStatus] = useState<string | null>(null);
@@ -161,7 +165,7 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
 
   function selectTemplate(templateId: string) {
     if (templateId === "one-off") {
-      setDraft(emptyDraft);
+      setDraft(newDraft());
       return;
     }
     const template = templates.find(item => String(item.id) === templateId);
@@ -275,7 +279,7 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
             </CardTitle>
             <CardDescription className="mt-1">Corrective actions raised from this module stay with its operational records.</CardDescription>
           </div>
-          {canMutate && <Button type="button" size="sm" className="rounded-sm self-start" onClick={() => setShowCreate(value => !value)}><Plus className="mr-1.5 h-4 w-4" />Add action</Button>}
+          {canMutate && <Button type="button" size="sm" className="rounded-sm self-start" onClick={() => { if (!showCreate && draft === emptyDraft) setDraft(newDraft()); setShowCreate(value => !value); }}><Plus className="mr-1.5 h-4 w-4" />Add action</Button>}
         </CardHeader>
         <CardContent className="space-y-4">
           {showCreate && canMutate && (

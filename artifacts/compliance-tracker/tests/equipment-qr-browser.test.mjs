@@ -5,6 +5,8 @@
 //     button opens GreenTrack's pre-use form with that mower chosen;
 //   - a cold water tank's label opens LegionellaTrack's form recording for it;
 //   - "Report a fault" opens a FixTrack report naming the item;
+//   - a site's opening checks label shows they are not done and opens
+//     DailyTrack AM for that site; the accident label opens a new report;
 //   - a made-up code says the label isn't available;
 //   - scanning while signed out goes to sign-in, and signing in comes back.
 //
@@ -135,14 +137,55 @@ test("the tank's label records its check against it", async () => {
   await page.getByRole("heading", { name: "Cold water tank 1" }).waitFor({ timeout: 60_000 });
   await page.getByRole("link", { name: "Record temperature" }).click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByText("Recording for").waitFor({ timeout: 30_000 });
-  await dialog.getByText("Cold water tank 1", { exact: true }).waitFor();
+  // The tank is chosen under "Which tank?" (or named above the form when the
+  // user's tank list doesn't show it).
+  await dialog.getByText(/^Cold water tank 1\b/).first().waitFor({ timeout: 30_000 });
 
   await page.goto(`${appOrigin}/q/${codes["Cold water tank 1"]}`);
   await page.getByRole("link", { name: "Report a fault" }).click();
   const report = page.getByRole("dialog");
   await report.waitFor({ timeout: 30_000 });
   assert.equal(await report.locator("input").first().inputValue(), "Fault: Cold water tank 1");
+  await context.close();
+});
+
+/** Saves a screenshot when SCREENSHOT_DIR is set (for showing a change). */
+async function screenshot(page, name) {
+  if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, name), fullPage: true });
+}
+
+test("track labels open the site's checks and the accident report", async () => {
+  const points = ok(await owner.request("GET", `/equipment-labels?siteId=${site.id}`)).filter(r => r.kind === "track_point");
+  const items = ["opening_checks", "report_incident"].map(key => ({ kind: "track_point", ref: `${key}:${site.id}` }));
+  assert.equal(items.every(item => points.some(p => p.ref === item.ref)), true, JSON.stringify(points));
+  assert.equal((await owner.request("POST", "/equipment-labels/sheet", { items }, "buffer")).status, 200);
+  const printed = ok(await owner.request("GET", `/equipment-labels?siteId=${site.id}`));
+  const codeOf = key => printed.find(r => r.ref === `${key}:${site.id}`).code;
+
+  const ownerContext = await contextFor(owner);
+  const list = await ownerContext.newPage();
+  await list.goto(`${appOrigin}/equipment`);
+  await list.getByLabel("Select Opening checks").waitFor({ timeout: 60_000 });
+  await screenshot(list, "1-print-labels-list.png");
+  await ownerContext.close();
+
+  const context = await contextFor(staff);
+  const page = await context.newPage();
+  await page.goto(`${appOrigin}/q/${codeOf("opening_checks")}`);
+  await page.getByRole("heading", { name: "Opening checks" }).waitFor({ timeout: 60_000 });
+  await page.getByText("Not done yet today").waitFor();
+  await screenshot(page, "2-scan-opening-checks.png");
+  await page.getByRole("link", { name: "Open today's opening checks" }).click();
+  await page.waitForURL(url => new URL(url).pathname === "/daily-track-am", { timeout: 30_000 });
+  assert.equal(new URL(page.url()).searchParams.get("siteId"), String(site.id));
+
+  await page.goto(`${appOrigin}/q/${codeOf("report_incident")}`);
+  await page.getByRole("heading", { name: "Report an accident or incident" }).waitFor({ timeout: 60_000 });
+  await screenshot(page, "3-scan-accident-label.png");
+  await page.getByRole("link", { name: "Report an accident or incident" }).click();
+  await page.getByRole("dialog").waitFor({ timeout: 30_000 });
+  await screenshot(page, "4-accident-report-opens.png");
+  assert.equal(new URL(page.url()).search, "", "the label's settings leave the address bar");
   await context.close();
 });
 

@@ -4,7 +4,7 @@ import { appSettingsTable } from "@workspace/db/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, denyViewers, getClientId } from "../middleware/requireAuth";
 import {
-  FORM_OPTION_DEFAULTS, FORM_OPTION_KEYS, isFormOptionKey, settingKey,
+  FORM_OPTION_DEFAULTS, DEFAULTS_ADDED_LATER, FORM_OPTION_KEYS, isFormOptionKey, settingKey,
   parseStoredOptionState, serialiseOptionState, validateOptionList, MAX_OPTIONS, type FormOptionKey, type StoredOptionState,
 } from "../lib/formOptions";
 
@@ -41,7 +41,7 @@ router.get("/", requireAuth, async (req, res) => {
     let isCustom = false;
     if (raw) {
       try {
-        const check = parseStoredOptionState(JSON.parse(raw), def);
+        const check = parseStoredOptionState(JSON.parse(raw), def, DEFAULTS_ADDED_LATER[key]);
         if (check.ok) {
           effective = check.value.active;
           disabledItems = check.value.disabled;
@@ -110,7 +110,7 @@ async function loadOptionState(clientId: number, key: FormOptionKey): Promise<St
   const raw = rows[0]?.value;
   if (raw) {
     try {
-      const parsed = parseStoredOptionState(JSON.parse(raw), FORM_OPTION_DEFAULTS[key]);
+      const parsed = parseStoredOptionState(JSON.parse(raw), FORM_OPTION_DEFAULTS[key], DEFAULTS_ADDED_LATER[key]);
       if (parsed.ok) return parsed.value;
     } catch {
       // Invalid saved settings are treated as an unsaved default list.

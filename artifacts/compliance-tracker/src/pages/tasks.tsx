@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { MODULE_INFO, formatDay, localToday, moduleLabel, onboardingRequest } from "@/lib/onboarding";
 import { TaskItem, describeRecurrence, useTaskClientId, type TaskList, type TaskRow } from "@/components/task-item";
 import { RosterCheckButton, isRosterCheck, rosterCheckMonth } from "@/components/roster-check";
@@ -37,6 +38,8 @@ export default function TasksPage() {
   const [tab, setTab] = useState<"mine" | "all">(isManager || isViewer ? "all" : "mine");
   const [busyId, setBusyId] = useState<number | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
+  // A new task starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
   const [saving, setSaving] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const today = localToday();
@@ -136,7 +139,7 @@ export default function TasksPage() {
             <p className="text-sm text-muted-foreground mt-0.5">Jobs for your team that don't belong to a track, one-off or repeating. {formatDay(today)}</p>
           </div>
           {isManager && tab === "all" && !draft && (
-            <Button onClick={() => setDraft({ title: "", instruction: "", module: "", siteId: sites.data?.length === 1 ? String(sites.data[0].id) : "", assignee: "role:client_staff", recurrence: "daily", startsOn: today })}>
+            <Button onClick={() => setDraft({ title: "", instruction: "", module: "", siteId: workingSiteId ? String(workingSiteId) : sites.data?.length === 1 ? String(sites.data[0].id) : "", assignee: "role:client_staff", recurrence: "daily", startsOn: today })}>
               <Plus className="w-4 h-4 mr-1" /> New task
             </Button>
           )}

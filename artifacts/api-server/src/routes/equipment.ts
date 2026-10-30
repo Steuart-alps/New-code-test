@@ -12,13 +12,13 @@ import { appendAuditEvent } from "../lib/audit";
 import { getPublicAppUrl } from "../lib/email";
 import {
   EQUIPMENT_TYPE_LABELS, KIND_INFO, activeLabels, buildScanSummary, ensureLabels, findActiveLabel, findLabelTarget,
-  isLabelKind, listLabelTargets, normaliseLabelCode, replaceLabel, type LabelTarget,
+  isLabelKind, listLabelTargets, normaliseLabelCode, replaceLabel, targetTrack, type LabelTarget,
 } from "../lib/equipmentLabels";
 import { createEquipmentLabelPdf } from "../lib/equipmentLabelPdf";
 
 /**
  * The equipment list (plant no track keeps a record of) and QR labels for
- * every labelled item. Owners, consultants and Managers keep the list and
+ * every labelled item and for each track's checks at each site. Owners, consultants and Managers keep the list and
  * print labels; anyone signed in (Viewers excepted) can open a scanned label
  * for an item they are allowed to see.
  */
@@ -243,7 +243,7 @@ function labelUrl(code: string) {
 
 function targetRow(target: LabelTarget, code: string | null) {
   return {
-    kind: target.kind, ref: target.ref, track: KIND_INFO[target.kind].track, name: target.name, detail: target.detail,
+    kind: target.kind, ref: target.ref, track: targetTrack(target), name: target.name, detail: target.detail,
     siteId: target.siteId, siteName: target.siteName, code, url: code ? labelUrl(code) : null,
   };
 }
@@ -284,7 +284,7 @@ router.post("/equipment-labels/sheet", requireAuth, denyViewers, requireManager,
   const [client] = rowsOf(await db.execute(sql`SELECT name FROM clients WHERE id = ${clientId}`));
   const pdf = await createEquipmentLabelPdf(targets.map(t => {
     const code = labels.get(`${t.kind}:${t.ref}`)!.code;
-    return { code, url: labelUrl(code), name: t.name, track: KIND_INFO[t.kind].track, siteName: t.siteName };
+    return { code, url: labelUrl(code), name: t.name, track: targetTrack(t), siteName: t.siteName };
   }), parsed.data.size, client?.name ?? "ComplyTrack");
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="equipment-labels.pdf"`);

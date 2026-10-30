@@ -327,6 +327,9 @@ async function routeApi(route, url) {
   // AquaTrack opens on its water-quality tab.
   if (pathname === "/api/pool-track" && method === "GET") return jsonResponse(route, []);
   if (pathname === "/api/pool-track/config" && method === "GET") return jsonResponse(route, {});
+  // The business has one site, so AquaTrack opens on it and loads its status and plan.
+  if (pathname === "/api/pool-track/status" && method === "GET") return jsonResponse(route, []);
+  if (pathname === "/api/pool-track/monitoring-plan" && method === "GET") return jsonResponse(route, { profile: {}, approved: false });
   if (pathname === "/api/photos" && method === "POST") {
     unexpectedApiRequests.push({ method, url: url.toString(), body: request.postData() ?? null });
     return jsonResponse(route, { error: "Staged evidence must only be attached with a record create request" }, 501);
@@ -375,6 +378,11 @@ async function routeApi(route, url) {
     // Setup is finished, so the "Add your team first" gate stays out of the way.
     return jsonResponse(route, { needsSetup: false, canManage: true, team: { recorders: 2, aloneAt: null, ready: true } });
   }
+
+  // GreenTrack's "Contractor checks" box (components/track-contractor-checks.tsx):
+  // no contractor visits or compliance checks in this business.
+  if (pathname === "/api/contractor-visits" && method === "GET") return jsonResponse(route, { types: [], visits: [] });
+  if (pathname === "/api/compliance-items" && method === "GET") return jsonResponse(route, []);
 
   if (pathname === "/api/managed-by" && method === "GET") {
     // No consultant practice branding for this business.

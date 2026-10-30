@@ -33,7 +33,7 @@ process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${(server.address() as Addres
 delete process.env.CERTIFICATE_READING_MODEL;
 delete process.env.CERTIFICATE_READING_EFFORT;
 
-const { readCertificate } = await import("../src/lib/certificateReading");
+const { readCertificate, readCertificates } = await import("../src/lib/certificateReading");
 const { ReportReadingError, UnreadableReportError } = await import("../src/lib/reportReading");
 
 const checks = [
@@ -49,8 +49,8 @@ const input = {
   checks,
   itemId: null as number | null,
 };
-const reading = (overrides: Record<string, unknown> = {}) => JSON.stringify({
-  wrong_file: false,
+const certificate = (overrides: Record<string, unknown> = {}) => ({
+  files: [1],
   certificate_type: "Electrical Installation Condition Report (EICR)",
   name: "EICR 2026 - Clubhouse",
   check_id: 11,
@@ -73,6 +73,10 @@ const reading = (overrides: Record<string, unknown> = {}) => JSON.stringify({
   unclear: ["Engineer's signature date"],
   ...overrides,
 });
+const reading = (overrides: Record<string, unknown> = {}) => {
+  const { wrong_file = false, ...rest } = overrides;
+  return JSON.stringify({ wrong_file, certificates: [certificate(rest)], not_certificates: [] });
+};
 
 try {
   // ── An EICR is matched to its check; codes decide what needs work ───────
@@ -86,8 +90,10 @@ try {
   assert.equal(sent.body.fallbacks, "default");
   assert.match(String(sent.headers["anthropic-beta"]), /server-side-fallback-2026-07-01/);
   const schema = sent.body.output_config.format.schema;
-  assert.deepEqual(schema.properties.check_id.anyOf[0].enum, [11, 12, 13]);
-  assert.ok(schema.properties.defects.items.properties.code.enum.includes("FI"));
+  const certificateProps = schema.properties.certificates.items.properties;
+  assert.deepEqual(certificateProps.check_id.anyOf[0].enum, [11, 12, 13]);
+  assert.ok(certificateProps.defects.items.properties.code.enum.includes("FI"));
+  assert.deepEqual(certificateProps.files.items.enum, [1]);
   const [doc, context] = sent.body.messages[0].content;
   assert.equal(doc.type, "document");
   assert.match(context.text, /11 = "Electrical Installation Condition Report \(EICR\)"; track: "Electrical"; site: "Clubhouse" \("6 Greek Street, Leeds LS1 5RW"\); contractor: "Sparks Ltd"; every 60 months/);
@@ -129,7 +135,7 @@ try {
   // ── Opened from a check: only that check is offered and kept ────────────
   reply = { stopReason: "end_turn", text: reading({ check_id: 12 }) };
   const fixed = await readCertificate({ ...input, itemId: 13 });
-  assert.deepEqual(requests.at(-1)!.body.output_config.format.schema.properties.check_id.anyOf[0].enum, [13]);
+  assert.deepEqual(requests.at(-1)!.body.output_config.format.schema.properties.certificates.items.properties.check_id.anyOf[0].enum, [13]);
   assert.match(requests.at(-1)!.body.messages[0].content[1].text, /opened this from check 13/);
   assert.equal(fixed.itemId, 13, "the check it was opened from wins");
   console.log("ok - opened from a check, the certificate stays with that check");
@@ -151,7 +157,7 @@ try {
   claimed = 0;
   const claim = async () => { claimed += 1; };
   await assert.rejects(readCertificate({ ...input, mimeType: "application/vnd.ms-excel" }, claim), UnreadableReportError);
-  await assert.rejects(readCertificate({ ...input, bytes: Buffer.alloc(16 * 1024 * 1024) }, claim), UnreadableReportError);
+  await assert.rejects(readCertificate({ ...input, bytes: Buffer.alloc(21 * 1024 * 1024) }, claim), UnreadableReportError);
   await assert.rejects(readCertificate({ ...input, mimeType: "image/jpeg", bytes: Buffer.alloc(6 * 1024 * 1024) }, claim), UnreadableReportError);
   assert.equal(requests.length, before, "nothing is sent for a file that cannot be read");
   assert.equal(claimed, 0, "nor claimed against the AI allowance");
@@ -169,6 +175,77 @@ try {
   reply = { stopReason: "end_turn", text: reading({ wrong_file: true }) };
   await assert.rejects(readCertificate(input), /does not look like a contractor certificate/);
   console.log("ok - unusable replies and files that are not certificates give a message the person can act on");
+
+  // ── Oil certificates are described to Claude ────────────────────────────
+  assert.match(requests.at(-1)!.body.system, /OFTEC/);
+  assert.match(requests.at(-1)!.body.system, /CD\/11/);
+  assert.match(requests.at(-1)!.body.system, /fire valve/);
+  console.log("ok - oil (OFTEC) service and tank records are in the reading rules");
+
+  // ── Several files: pages of one certificate, and several certificates ──
+  const files = [
+    { bytes: Buffer.from("%PDF-1.4\n"), mimeType: "application/pdf", fileName: "boiler page 1.pdf" },
+    { bytes: Buffer.from([0xff, 0xd8, 0xff]), mimeType: "image/jpeg", fileName: "boiler page 2.jpg" },
+    { bytes: Buffer.from("%PDF-1.4\n"), mimeType: "application/pdf", fileName: "EICR.pdf" },
+    { bytes: Buffer.from([0xff, 0xd8, 0xff]), mimeType: "image/jpeg", fileName: "boiler.jpg" },
+  ];
+  reply = { stopReason: "end_turn", text: JSON.stringify({
+    wrong_file: false,
+    certificates: [
+      certificate({ files: [2, 1], check_id: null, certificate_type: "Oil boiler service record (OFTEC CD/11)", name: "Oil boiler service 2026",
+        new_check: { title: "Oil Boiler Service", frequency_months: 12 }, issue_date: "2026-09-15", next_inspection_date: null, outcome: "satisfactory", defects: [] }),
+      certificate({ files: [3] }),
+    ],
+    not_certificates: [{ file: 4, reason: "A photo of a boiler, not a certificate" }, { file: 9, reason: "No such file" }],
+  }) };
+  claimed = 0;
+  const batch = await readCertificates({ files, today: "2026-10-29", checks, itemId: null }, claim);
+  assert.equal(claimed, 1, "one claim for the whole batch");
+  const batchSent = requests.at(-1)!.body;
+  const content = batchSent.messages[0].content;
+  assert.equal(content.length, 9, "a label and a block for each file, then the context");
+  assert.equal(content[0].text, 'File 1: "boiler page 1.pdf"');
+  assert.equal(content[3].type, "image");
+  assert.deepEqual(batchSent.output_config.format.schema.properties.certificates.items.properties.files.items.enum, [1, 2, 3, 4]);
+  assert.match(content[8].text, /Read these files/);
+  assert.equal(batch.certificates.length, 2);
+  assert.deepEqual(batch.certificates[0]!.fileIndexes, [0, 1], "file numbers become 0-based indexes, in order");
+  assert.deepEqual(batch.certificates[0]!.newCheck, { title: "Oil Boiler Service", frequencyMonths: 12 });
+  assert.equal(batch.certificates[0]!.nextInspectionDate, "2027-09-15", "an oil service repeats yearly from its date");
+  assert.equal(batch.certificates[1]!.itemId, 11);
+  assert.deepEqual(batch.certificates[1]!.fileIndexes, [2]);
+  assert.deepEqual(batch.skipped, [{ fileIndex: 3, reason: "A photo of a boiler, not a certificate" }], "unknown file numbers are dropped");
+  console.log("ok - several files are read in one request and each certificate keeps its files");
+
+  // ── Opened from a check: every page is one certificate for it ───────────
+  reply = { stopReason: "end_turn", text: JSON.stringify({
+    wrong_file: false,
+    certificates: [certificate({ files: [1] }), certificate({ files: [2] })],
+    not_certificates: [{ file: 4, reason: "Blank page" }],
+  }) };
+  const pages = await readCertificates({ files, today: "2026-10-29", checks, itemId: 12 });
+  assert.match(requests.at(-1)!.body.messages[0].content.at(-1).text, /the files are one certificate for that check/);
+  assert.equal(pages.certificates.length, 1);
+  assert.equal(pages.certificates[0]!.itemId, 12);
+  assert.deepEqual(pages.certificates[0]!.fileIndexes, [0, 1, 2]);
+  assert.deepEqual(pages.skipped, [{ fileIndex: 3, reason: "Blank page" }]);
+  console.log("ok - opened from a check, all the pages are one certificate for it");
+
+  // ── Batch limits and bad files are caught before anything is sent ───────
+  const sentBefore = requests.length;
+  claimed = 0;
+  await assert.rejects(readCertificates({ files: Array(11).fill(files[0]), today: "2026-10-29", checks, itemId: null }, claim), /up to 10 files/);
+  const big = { bytes: Buffer.alloc(11 * 1024 * 1024), mimeType: "application/pdf", fileName: "big.pdf" };
+  await assert.rejects(readCertificates({ files: [big, big], today: "2026-10-29", checks, itemId: null }, claim), /too large to read together/);
+  await assert.rejects(
+    readCertificates({ files: [files[0]!, { ...files[0]!, mimeType: "application/msword", fileName: "old.doc" }], today: "2026-10-29", checks, itemId: null }, claim),
+    (err: Error) => err instanceof UnreadableReportError && err.message.startsWith("old.doc: "),
+  );
+  assert.equal(requests.length, sentBefore);
+  assert.equal(claimed, 0);
+  reply = { stopReason: "end_turn", text: JSON.stringify({ wrong_file: true, certificates: [], not_certificates: [] }) };
+  await assert.rejects(readCertificates({ files, today: "2026-10-29", checks, itemId: null }), /None of these files looks like/);
+  console.log("ok - too many or too large files, and files that cannot be read, are named and turned away");
 
   console.log("Certificate reading checks passed.");
 } finally {

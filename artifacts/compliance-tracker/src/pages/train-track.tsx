@@ -72,6 +72,7 @@ import { useLocalToday } from "@/hooks/use-local-today";
 import { trackTrainingMatrixDownload } from "@/lib/analytics";
 import { CoshhSignOffSection } from "@/components/coshh-sign-offs";
 import { DocumentSignOffSection } from "@/components/document-sign-offs";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 import { matchSpokenItem, spokenDate, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { sortByLabel, sortedEntries } from "@/lib/sort-options";
 
@@ -275,7 +276,8 @@ export default function TrainTrackPage() {
   const apiFetch = useTrainTrackApi();
 
   const [tab, setTab]           = useState<RecordType | "audit" | "coshh" | "documents">("certificate");
-  const [siteFilter, setSite]   = useState("all");
+  const [siteFilter, setSite]   = useSiteFilter("all");
+  const workingSiteId = useWorkingSiteId();
   const [search, setSearch]     = useState("");
   const [certStatus, setCertStatus] = useState<"all" | CertStatus>("all");
 
@@ -417,9 +419,11 @@ export default function TrainTrackPage() {
 
   function openAdd() {
     setEditRecord(null);
-    setCertForm(emptyCert());
-    setSignoffForm(emptySignoff());
-    setInternalForm(emptyInternal());
+    // A new record starts on the user's working site.
+    const siteId = workingSiteId ? String(workingSiteId) : "";
+    setCertForm({ ...emptyCert(), siteId });
+    setSignoffForm({ ...emptySignoff(), siteId });
+    setInternalForm({ ...emptyInternal(), siteId });
     setShowDialog(true);
   }
 
@@ -757,11 +761,11 @@ ${rows.map(r => `<tr>
   return (
     <AppLayout title="TrainTrack">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <p className="text-sm text-muted-foreground mt-1">
           Training certificates, document sign-offs, and internal training records
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {canMutate && (
             <FormOptionsEditor
               optionKey="traintrack_types"
@@ -788,7 +792,7 @@ ${rows.map(r => `<tr>
       {showFireDrills && <DrillAttendanceCard siteId={siteFilter === "all" ? undefined : Number(siteFilter)} trackLink />}
 
       {/* Tabs */}
-      <div className="flex border-b border-border">
+      <div className="flex border-b border-border overflow-x-auto">
         {tabDef.map(({ key, label, Icon, count }) => (
           <button
             key={key}

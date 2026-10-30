@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import { apiFetch } from "@/lib/api";
@@ -39,13 +39,23 @@ import { format } from "date-fns";
 import { Droplets, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX, Filter, Pencil, Trash2, Lock, ThermometerSun, Settings, X, XCircle, ShieldAlert, Footprints } from "lucide-react";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { cn } from "@/lib/utils";
-import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { useAuth, useCanAdmin, useCanManageUsers } from "@/context/auth-context";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { WalkRoundDialog, type WalkRoundPoint } from "@/components/walk-round-dialog";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { useSiteFilterId, useWorkingSiteId } from "@/hooks/use-working-site";
 import { sortByLabel } from "@/lib/sort-options";
+import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import { RecordSignedBy } from "@/components/record-signature";
+import { ImportCsvButton } from "@/components/import-csv-dialog";
+import {
+  LegionellaConditionQuestions, LegionellaFindingsSummary, legionellaFindingsComplete, legionellaFindingsPayload,
+} from "@/components/legionella-condition-questions";
+import type { LegionellaFindings } from "@workspace/api-zod/legionella-condition";
+import {
+  LegionellaUnitPicker, legionellaUnitLabel, legionellaUnitType, siteUnitsFor, useLegionellaUnits, type LegionellaUnit,
+} from "@/components/legionella-unit-picker";
 
 // HSG274 Part 2 Table 2.1
 const CHECK_TYPE_LABELS: Record<LegionellaCheckType, string> = {
@@ -84,9 +94,9 @@ const CHECK_TYPE_HINTS: Record<LegionellaCheckType, string> = {
   cold_tank_temp:        "HSG274 benchmark: cold-water storage monitoring — set controls in the written scheme.",
   cold_sentinel_temp:    "HSG274 benchmark: sentinel cold-water monitoring — set outlets and frequency in the written scheme.",
   cold_nonsent_temp:     "HSG274 benchmark: representative cold-outlet monitoring — set sampling and frequency from the risk assessment.",
-  cold_tank_inspection:  "HSG274 benchmark: inspect tank condition — use the risk-assessed written scheme.",
+  cold_tank_inspection:  "HSG274 benchmark: inspect the tank and the water in it for sediment, slime (biofilm), debris, a loose lid or missing screens — use the risk-assessed written scheme.",
   cold_tank_clean:       "HSG274 benchmark: cleaning and disinfection — arrange when justified by the system risk assessment. A pass here also completes the \"Clean & Disinfect Water Tanks\" task in ComplyTrack, and completing that task records it here.",
-  calorifier_inspection: "HSG274 benchmark: inspect calorifier condition — set the scope and interval with a competent person.",
+  calorifier_inspection: "HSG274 benchmark: drain the base to check for sediment and inspect the calorifier — set the scope and interval with a competent person.",
   calorifier_clean:      "HSG274 benchmark: clean and recommission a calorifier — arrange when justified by the risk assessment.",
   shower_clean:          "HSG274 benchmark: shower-head and hose cleaning — set method and frequency in the written scheme.",
   tmv_service:           "HSG274 benchmark: service and test TMVs — set the interval with competent advice.",
@@ -105,6 +115,23 @@ const TEMP_PLACEHOLDER: Partial<Record<LegionellaCheckType, string>> = {
   cold_tank_temp:     "e.g. 16.0  (target ≤20°C)",
   cold_sentinel_temp: "e.g. 17.5  (target ≤20°C)",
   cold_nonsent_temp:  "e.g. 18.0  (target ≤20°C)",
+};
+
+// Each check type is done on different plant, so the location example matches it.
+const LOCATION_PLACEHOLDER: Record<LegionellaCheckType, string> = {
+  calorifier_temp:       "e.g. Plant room, calorifier 1",
+  hot_sentinel_temp:     "e.g. 2nd floor bathroom, hot tap (furthest from calorifier)",
+  hot_nonsent_temp:      "e.g. Ground floor male toilets, hot tap 3",
+  cold_tank_temp:        "e.g. Roof void, main cold water tank",
+  cold_sentinel_temp:    "e.g. Kitchen, cold tap (nearest the tank)",
+  cold_nonsent_temp:     "e.g. Ground floor male toilets, cold tap 3",
+  cold_tank_inspection:  "e.g. Roof void, main cold water tank",
+  cold_tank_clean:       "e.g. Roof void, main cold water tank",
+  calorifier_inspection: "e.g. Plant room, calorifier 1",
+  calorifier_clean:      "e.g. Plant room, calorifier 1",
+  shower_clean:          "e.g. Room 12 en-suite shower",
+  tmv_service:           "e.g. Accessible toilet basin TMV",
+  outlet_flush:          "e.g. Spare room 7, basin and shower",
 };
 
 function ResultBadge({ result }: { result: string }) {
@@ -460,7 +487,9 @@ function AddOutletDialog({ open, onClose, onSuccess, siteId }: {
   const [name, setName] = useState("");
   const [type, setType] = useState<OutletType>("hot");
   const [location, setLocation] = useState("");
-  const [outletSite, setOutletSite] = useState<number | undefined>(siteId);
+  // Without a page site, a new outlet starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
+  const [outletSite, setOutletSite] = useState<number | undefined>(siteId ?? workingSiteId ?? undefined);
   const [busy, setBusy] = useState(false);
   const { toast } = useToast();
   const { data: sites } = useListSites();
@@ -551,6 +580,7 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
   const [performedBy, setPerformedBy] = useState("");
   const [staffRosterId, setStaffRosterId] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
+  const [findings, setFindings] = useState<LegionellaFindings>({});
   const [busy, setBusy] = useState(false);
   const { user } = useAuth();
   const { data: config } = useGetLegionellaConfig();
@@ -568,6 +598,10 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
   const locationStr = outlet.name + (outlet.location ? ` — ${outlet.location}` : "");
 
   const handleSubmit = async () => {
+    if (!legionellaFindingsComplete(checkType, findings)) {
+      toast({ title: "Answer every \"What did you find?\" question", variant: "destructive" });
+      return;
+    }
     setBusy(true);
     const r = await apiFetch("/legionella", {
       method: "POST",
@@ -582,6 +616,7 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
         notes: notes || undefined,
         siteId: outlet.siteId ?? undefined,
         outletId: outlet.id,
+        findings: legionellaFindingsPayload(checkType, findings),
       }),
     });
     setBusy(false);
@@ -614,6 +649,11 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
             <Label>Date</Label>
             <Input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} />
           </div>
+          <LegionellaConditionQuestions
+            checkType={checkType}
+            findings={findings}
+            onChange={(next, needsAction) => { setFindings(next); if (needsAction) setResult("fail"); }}
+          />
           <div className="space-y-1.5">
             <Label>Check result</Label>
             <Select value={result} onValueChange={v => setResult(v as any)}>
@@ -669,8 +709,10 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
   const [addOpen, setAddOpen] = useState(false);
   const [walkRoundOpen, setWalkRoundOpen] = useState(false);
   const [walkSite, setWalkSite] = useState<number | undefined>(undefined);
+  const workingSiteId = useWorkingSiteId();
   const { data: sites } = useListSites();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const refresh = async () => {
     setLoading(true);
@@ -753,16 +795,25 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
             </CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">Monitoring points and frequency should match this site's risk assessment and written scheme.</p>
           </div>
-          {canAdmin && (
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setWalkRoundOpen(true)} data-testid="button-walk-round-outlets">
-                <Footprints className="w-3.5 h-3.5 mr-1.5" /> Walk round and speak
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
-                <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Outlet
-              </Button>
-            </div>
-          )}
+          <div className="flex flex-wrap justify-end gap-2">
+            {/* Outlets, tanks and calorifiers from the business's own list or risk assessment. */}
+            <ImportCsvButton
+              type="legionella-outlets"
+              siteId={siteId ?? workingSiteId ?? null}
+              label="Upload a list"
+              onImported={() => { refresh(); queryClient.invalidateQueries({ queryKey: ["equipment"] }); }}
+            />
+            {canAdmin && (
+              <>
+                <Button variant="outline" size="sm" onClick={() => { setWalkSite(workingSiteId ?? undefined); setWalkRoundOpen(true); }} data-testid="button-walk-round-outlets">
+                  <Footprints className="w-3.5 h-3.5 mr-1.5" /> Walk round and speak
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
+                  <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Outlet
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="p-4">
@@ -932,12 +983,17 @@ function RecordCheckDialog({
   const [performedBy, setPerformedBy] = useState(user?.name ?? "");
   const [staffRosterId, setStaffRosterId] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
+  const [findings, setFindings] = useState<LegionellaFindings>({});
   const [selectedSite, setSelectedSite] = useState<number | undefined>(siteId);
   const [equipment, setEquipment] = useState<{ id: number; name: string } | null>(null);
+  const workingSiteId = useWorkingSiteId();
+  // Each check type asks its own condition questions.
+  useEffect(() => { setFindings({}); }, [checkType]);
 
   useEffect(() => {
     if (!open) return;
-    if (!preset) { setEquipment(null); return; }
+    // A new check starts on the page's site, else the user's working site.
+    if (!preset) { setEquipment(null); setSelectedSite(siteId ?? workingSiteId ?? undefined); return; }
     setEquipment({ id: preset.equipmentId, name: preset.name });
     setSelectedSite(preset.siteId);
     setLocation(preset.location ?? preset.name);
@@ -948,6 +1004,32 @@ function RecordCheckDialog({
   const createCheck = useCreateLegionellaCheck();
   const { data: sites } = useListSites();
   const { data: config } = useGetLegionellaConfig();
+  const { data: allUnits } = useLegionellaUnits();
+  const siteUnits = siteUnitsFor(allUnits, checkType, selectedSite);
+  const siteUnitIds = siteUnits.map(u => u.id).join(",");
+  // The location a picked tank filled in, cleared again when the tank is dropped.
+  const unitLocation = useRef<string | null>(null);
+  const pickUnit = (unit: LegionellaUnit | null) => {
+    setEquipment(unit ? { id: unit.id, name: unit.name } : null);
+    if (unit) {
+      unitLocation.current = unit.location ?? unit.name;
+      setLocation(unitLocation.current);
+    } else {
+      const filled = unitLocation.current;
+      unitLocation.current = null;
+      setLocation(current => (filled !== null && current === filled ? "" : current));
+    }
+  };
+  // A tank from another site or of the wrong kind is dropped; a site with
+  // only one tank (or calorifier) has it chosen already.
+  useEffect(() => {
+    if (!open || !allUnits) return;
+    // A tank the list doesn't show (outside the user's view) is kept unless the
+    // check type no longer takes a tank.
+    const known = allUnits.some(u => u.id === equipment?.id);
+    if (equipment && (!legionellaUnitType(checkType) || (known && !siteUnits.some(u => u.id === equipment.id)))) pickUnit(null);
+    else if (!equipment && !preset && siteUnits.length === 1) pickUnit(siteUnits[0]);
+  }, [open, allUnits, siteUnitIds, equipment?.id]);
 
   // Pre-fill from template
   useEffect(() => {
@@ -968,6 +1050,14 @@ function RecordCheckDialog({
       toast({ title: "Temperature reading is required", variant: "destructive" });
       return;
     }
+    if (!legionellaFindingsComplete(checkType, findings)) {
+      toast({ title: "Answer every \"What did you find?\" question", variant: "destructive" });
+      return;
+    }
+    if (siteUnits.length > 1 && !equipment) {
+      toast({ title: legionellaUnitType(checkType) === "calorifier" ? "Choose which calorifier" : "Choose which tank", variant: "destructive" });
+      return;
+    }
     const data: CreateLegionellaCheckRequest & { staffRosterId?: number | null } = {
       checkType,
       checkDate,
@@ -978,6 +1068,7 @@ function RecordCheckDialog({
       performedBy: performedBy || null, staffRosterId: staffRosterId,
       notes: notes || undefined,
       equipmentId: equipment?.id ?? null,
+      findings: legionellaFindingsPayload(checkType, findings),
     };
 
     createCheck.mutate(
@@ -993,6 +1084,8 @@ function RecordCheckDialog({
           setLocation("");
           setPerformedBy(user?.name ?? "");
           setNotes("");
+          setFindings({});
+          setResult("pass");
           setCheckDate(format(new Date(), "yyyy-MM-dd"));
         },
         onError: (error: any) => {
@@ -1014,12 +1107,6 @@ function RecordCheckDialog({
         <DialogHeader>
           <DialogTitle className="font-display font-bold">Record Legionella Check</DialogTitle>
         </DialogHeader>
-        {equipment && (
-          <div className="flex items-center justify-between gap-2 rounded-sm border bg-muted/40 px-3 py-2 text-sm">
-            <span>Recording for <span className="font-medium">{equipment.name}</span></span>
-            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setEquipment(null)}>Not this item</Button>
-          </div>
-        )}
         <div className="space-y-4 py-4">
           <div className="space-y-1.5">
             <Label>Check Type</Label>
@@ -1040,6 +1127,12 @@ function RecordCheckDialog({
             <Label>Date</Label>
             <Input type="date" value={checkDate} onChange={(e) => setCheckDate(e.target.value)} />
           </div>
+
+          <LegionellaConditionQuestions
+            checkType={checkType}
+            findings={findings}
+            onChange={(next, needsAction) => { setFindings(next); if (needsAction) setResult("fail"); }}
+          />
 
           <div className="space-y-1.5">
             <Label>Check result</Label>
@@ -1094,9 +1187,18 @@ function RecordCheckDialog({
             </div>
           )}
 
+          {equipment && !siteUnits.some(u => u.id === equipment.id) ? (
+            <div className="flex items-center justify-between gap-2 rounded-sm border bg-muted/40 px-3 py-2 text-sm">
+              <span>Recording for <span className="font-medium">{equipment.name}</span></span>
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => pickUnit(null)}>Not this item</Button>
+            </div>
+          ) : (
+            <LegionellaUnitPicker checkType={checkType} siteId={selectedSite} units={siteUnits} value={equipment?.id ?? null} onChange={pickUnit} />
+          )}
+
           <div className="space-y-1.5">
-            <Label>Location / Outlet</Label>
-            <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Ground floor male toilets, tap 3" />
+            <Label>Location</Label>
+            <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder={LOCATION_PLACEHOLDER[checkType]} />
           </div>
 
           <div className="space-y-1.5">
@@ -1129,7 +1231,12 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
   const [performedBy, setPerformedBy] = useState(check.performedBy || "");
   const [staffRosterId, setStaffRosterId] = useState<number | null>((check as any).staffRosterId ?? null);
   const [notes, setNotes] = useState(check.notes || "");
+  const [findings, setFindings] = useState<LegionellaFindings>(check.findings ?? {});
+  const [findingsChanged, setFindingsChanged] = useState(false);
   const [selectedSite, setSelectedSite] = useState<number | undefined>(check.siteId || undefined);
+  const [equipmentId, setEquipmentId] = useState<number | null>(check.equipmentId ?? null);
+  const { data: allUnits } = useLegionellaUnits();
+  const siteUnits = siteUnitsFor(allUnits, check.checkType, selectedSite);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -1139,6 +1246,14 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
   const isTemperatureCheck = TEMPERATURE_TYPES.has(check.checkType as LegionellaCheckType);
 
   const handleSubmit = async () => {
+    // Records saved before the questions existed can be left unanswered.
+    if (findingsChanged && !legionellaFindingsComplete(check.checkType, findings)) {
+      toast({ title: "Answer every \"What did you find?\" question", variant: "destructive" });
+      return;
+    }
+    // A tank from the old site cannot follow the check to a new one.
+    const unit = allUnits?.find(u => u.id === equipmentId);
+    const nextEquipmentId = unit && (unit.siteId ?? undefined) !== selectedSite ? null : equipmentId;
     updateCheck.mutate(
       {
         id: check.id,
@@ -1151,6 +1266,8 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
           location: location || null,
           performedBy: performedBy || null, staffRosterId: staffRosterId,
           notes: notes || null,
+          ...(findingsChanged ? { findings: legionellaFindingsPayload(check.checkType, findings) } : {}),
+          ...(nextEquipmentId !== (check.equipmentId ?? null) ? { equipmentId: nextEquipmentId } : {}),
         } as any,
       },
       {
@@ -1181,6 +1298,16 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
             <Label>Date</Label>
             <Input type="date" value={checkDate} onChange={(e) => setCheckDate(e.target.value)} />
           </div>
+
+          <LegionellaConditionQuestions
+            checkType={check.checkType}
+            findings={findings}
+            onChange={(next, needsAction) => {
+              setFindings(next);
+              setFindingsChanged(true);
+              if (needsAction) { setResult("fail"); setResultChanged(true); }
+            }}
+          />
 
           <div className="space-y-1.5">
             <Label>Check result</Label>
@@ -1227,9 +1354,18 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
             </div>
           )}
 
+          <LegionellaUnitPicker
+            checkType={check.checkType}
+            siteId={selectedSite}
+            units={siteUnits}
+            value={equipmentId}
+            onChange={unit => { setEquipmentId(unit?.id ?? null); if (unit) setLocation(unit.location ?? unit.name); }}
+          />
+
           <div className="space-y-1.5">
-            <Label>Location / Outlet</Label>
-            <Input value={location} onChange={(e) => setLocation(e.target.value)} />
+            <Label>Location</Label>
+            <Input value={location} onChange={(e) => setLocation(e.target.value)}
+              placeholder={LOCATION_PLACEHOLDER[check.checkType as LegionellaCheckType]} />
           </div>
 
           <div className="space-y-1.5">
@@ -1255,10 +1391,11 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
 export default function LegionellaPage() {
   const { hasService } = useAuth();
   const canAdmin = useCanAdmin();
+  const canManageOutlets = useCanManageUsers();
   const hasLegionellatrack = hasService("legionellatrack");
 
   const [filterType, setFilterType] = useState<LegionellaCheckType | "">("");
-  const [filterSite, setFilterSite] = useState<number | undefined>(undefined);
+  const [filterSite, setFilterSite] = useSiteFilterId();
   useSayItSite(filterSite);
   const [recordOpen, setRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<LegionellaCheckType | undefined>(undefined);
@@ -1295,6 +1432,8 @@ export default function LegionellaPage() {
   );
   const serverLocked = (statusError as any)?.status === 403;
 
+  const { data: legionellaUnits } = useLegionellaUnits();
+  const unitById = new Map((legionellaUnits ?? []).map(unit => [unit.id, unit]));
   const { data: checks, isLoading: checksLoading } = useListLegionellaChecks(
     { checkType: filterType || undefined, siteId: filterSite },
     { query: { enabled: hasLegionellatrack, queryKey: getListLegionellaChecksQueryKey({ checkType: filterType || undefined, siteId: filterSite }) } }
@@ -1397,6 +1536,8 @@ export default function LegionellaPage() {
             queryClient.invalidateQueries({ queryKey: getGetLegionellaStatusQueryKey({ siteId: filterSite }) });
             queryClient.invalidateQueries({ queryKey: getGetLegionellaConfigQueryKey() });
           }} />
+        <TrackContractorChecks module="legionella" siteId={filterSite} />
+
         {/* Status Overview */}
         {filterSite && (statusLoading ? (
           <Card>
@@ -1466,7 +1607,8 @@ export default function LegionellaPage() {
         ))}
 
         {/* Sentinel Outlets — per-outlet monthly tracking */}
-        <SentinelOutletsPanel canAdmin={canAdmin} siteId={filterSite} openOutletId={scanOutletId} />
+        {/* Managers name their sites' outlets too, as the outlet routes allow. */}
+        <SentinelOutletsPanel canAdmin={canManageOutlets} siteId={filterSite} openOutletId={scanOutletId} />
 
         {(overdueStatuses.length > 0 || dueSoonStatuses.length > 0) && (
           <div className="space-y-3">
@@ -1559,6 +1701,7 @@ export default function LegionellaPage() {
               <div className="divide-y divide-border">
                 {checks.map((check) => {
                   const site = sites?.find((s) => s.id === check.siteId);
+                  const unit = check.equipmentId != null ? unitById.get(check.equipmentId) : undefined;
                   return (
                     <div key={check.id} className="p-4 hover:bg-muted/20 transition-colors">
                       <div className="flex items-start justify-between gap-4">
@@ -1575,6 +1718,9 @@ export default function LegionellaPage() {
                             {site && (
                               <Badge variant="outline" className="text-xs">{site.name}</Badge>
                             )}
+                            {unit && (
+                              <Badge variant="outline" className="text-xs bg-slate-50" data-testid="legionella-check-unit">{unit.name}</Badge>
+                            )}
                           </div>
                           <div className="text-xs text-muted-foreground space-y-0.5">
                             <div>
@@ -1587,6 +1733,7 @@ export default function LegionellaPage() {
                             {check.performedBy && (
                               <div><span className="font-medium">Performed by:</span> {check.performedBy}</div>
                             )}
+                            <LegionellaFindingsSummary checkType={check.checkType} findings={check.findings} />
                             {check.notes && (
                               <div><span className="font-medium">Notes:</span> {check.notes}</div>
                             )}

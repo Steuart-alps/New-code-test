@@ -13,6 +13,7 @@ import { loadUser, enforceClientAccess, enforceTwoFactorEnrollment } from "./mid
 import { enforceTrialLock } from "./middleware/trialLock";
 import { enforceDailyEntryCutoff } from "./middleware/dailyEntryCutoff";
 import { requireRecordSignature } from "./middleware/recordSignatureGate";
+import { requireCorrectiveActions } from "./middleware/correctiveActionGate";
 import { WebhookHandlers } from "./lib/webhookHandlers";
 import {
   certificateInboxDomain, inboundWebhookSecret, processInboundEmail, recordInboundEmail, verifyInboundWebhook,
@@ -274,8 +275,10 @@ app.post(
 // Register CSV imports send up to 1,000 rows, and a PAT register photo or PDF
 // is sent as base64 (8 MB file at most); every other route keeps the default limit.
 app.use("/api/imports/pat-appliances/read", express.json({ limit: "12mb" }));
-// A certificate read by ComplyTrack's AI arrives as base64 (15 MB at most before encoding).
-app.use("/api/certificates/read", express.json({ limit: "21mb" }));
+// Certificates read by ComplyTrack's AI arrive as base64 (20 MB at most before
+// encoding, all files together).
+app.use("/api/certificates/read", express.json({ limit: "28mb" }));
+app.use("/api/certificates/read-files", express.json({ limit: "28mb" }));
 // A contractor's certificate upload arrives as base64 (10 MB at most before encoding).
 app.use("/api/certificate-upload", express.json({ limit: "14mb" }));
 // A contractor's drawn signature arrives as a PNG data URL when they sign in at a site.
@@ -288,6 +291,8 @@ app.use(csrfProtection);
 app.use(loadUser);
 app.use(enforceTwoFactorEnrollment);
 app.use(enforceClientAccess);
+// A fail is answered with its corrective action first, then the check is signed.
+app.use("/api", requireCorrectiveActions);
 // Before the late-edit reason, so a reason is asked (and audited) only once.
 app.use("/api", requireRecordSignature);
 app.use("/api", enforceDailyEntryCutoff);

@@ -42,10 +42,15 @@ import { format } from "date-fns";
 import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer, GripVertical, Sparkles, AlertTriangle, CheckCircle, CheckSquare, Square, Sunrise, Sunset, Building2, RotateCcw, Settings2, Loader2, FileText } from "lucide-react";
 import { DocTrackLibrary } from "./doc-track";
 import { HaccpReviewCard } from "@/components/haccp-review-card";
+import { KitchenMonthSummary } from "@/components/kitchen-month-summary";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { useChecklistSite } from "@/hooks/use-checklist-site";
+import { useWorkingSite } from "@/hooks/use-working-site";
+import { ChecklistSiteSelect } from "@/components/checklist-site-select";
+import { carryAnswers, createChecklistDraftStore, hasAnswers, type ChecklistDraftSlot } from "@/lib/checklist-carry";
 import WeeklyReviewTab from "./kitchen-weekly";
 import ProbeCheckTab from "./kitchen-probe";
 import CleaningScheduleTab from "./kitchen-cleaning";
@@ -65,6 +70,8 @@ import {
   requestKitchenDiaryScopeChange,
   stampedLimit,
   shouldDisplayKitchenSection,
+  withReadyLines,
+  withoutUnsavedBlankLines,
   type ColdUnit,
   type KitchenDayStatus,
   type KitchenDiaryLoaded,
@@ -103,6 +110,7 @@ type CookingRow = {
   timeFinish: string;         // Time finished cooking
   coreTemp: string;           // Core temp at end (°C)
   holdSeconds?: string;       // Seconds held at the core temperature
+  correctiveAction?: string;  // Action taken if the line failed
 };
 type CoolingRow = {
   item: string;
@@ -110,17 +118,20 @@ type CoolingRow = {
   startTemp?: string;         // Core temp when cooling started (°C), a record only
   timeFinish: string;         // Time cooling finished
   coreTemp: string;           // Core temp after cooling (°C) — target ≤8°C within 90 min
+  correctiveAction?: string;  // Action taken if the line failed
 };
 type ReheatingRow = {
   item: string;
   timeStart: string;          // Time reheating started
   timeFinish: string;         // Time finished reheating
   coreTemp: string;           // Core temp (°C)
+  correctiveAction?: string;  // Action taken if the line failed
 };
 type HotHoldingRow = {
   item: string;
   coreTemp: string;           // Core temperature (°C)
   timeOfCheck: string;        // Time of check (HH:mm)
+  correctiveAction?: string;  // Action taken if the line failed
 };
 type SousVideRow = {
   item: string;               // Food item
@@ -132,7 +143,18 @@ type SousVideRow = {
   holdMinutes?: string;       // Minutes held at the core temperature
   result: string;             // "pass"|"fail"|""
   notes: string;
+  correctiveAction?: string;  // Action taken if the line failed
 };
+
+// Empty lines for the cooking-type sections ("Add line", and the lines each
+// new diary day opens with).
+const blankCooking = (): CookingRow => ({ item: "", timeStart: "", timeFinish: "", coreTemp: "" });
+const blankCooling = (): CoolingRow => ({ item: "", timeStart: "", startTemp: "", timeFinish: "", coreTemp: "" });
+const blankReheating = (): ReheatingRow => ({ item: "", timeStart: "", timeFinish: "", coreTemp: "" });
+const blankHotHolding = (): HotHoldingRow => ({ item: "", coreTemp: "", timeOfCheck: "" });
+const blankSousVide = (): SousVideRow => ({
+  item: "", targetTemp: "", waterTemp: "", timeStarted: "", timeFinished: "", coreTemp: "", result: "", notes: "",
+});
 
 type ActiveTab = "diary" | "weekly" | "probe" | "cleaning" | "checks" | "documents";
 
@@ -846,13 +868,31 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
 
 // ── Daily Diary tab ───────────────────────────────────────────────────────────
 
-export function DailyDiaryTab() {
+/** A line's corrective action. Red, and required, once the line has failed. */
+function CorrectiveActionInput({ value, onChange, disabled, needed, line }: {
+  value: string | undefined; onChange: (value: string) => void; disabled: boolean; needed: boolean; line: string;
+}) {
+  return (
+    <Input value={value ?? ""} disabled={disabled} onChange={e => onChange(e.target.value)}
+      aria-label={`${line} corrective action`} aria-invalid={needed || undefined}
+      className={cn("h-7 text-xs rounded-sm min-w-[170px]", needed && "border-rose-500 bg-rose-50 placeholder:text-rose-700")}
+      placeholder={needed ? "Failed: say what you did" : "If it fails: what you did"} />
+  );
+}
+
+/** A day picked elsewhere on the page (the month summary's missed days). */
+export type KitchenDiaryOpenDay = { date: string; siteId: number | null; at: number };
+
+export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {}) {
   const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  // Which site's diary we're viewing/filling. null = the legacy client-wide
-  // whole-organisation diary (records with no site), matching the original
-  // single-diary behaviour.
-  const [selectedSiteId, setSelectedSiteId] = useState<number | null>(null);
+  // Which site's diary we're viewing/filling. It starts on the user's working
+  // site; null = the legacy client-wide whole-organisation diary (records with
+  // no site), which is also where a user without a working site starts.
+  const workingSite = useWorkingSite();
+  const [chosenSite, setChosenSite] = useState<{ id: number | null } | null>(null);
+  const selectedSiteId = chosenSite ? chosenSite.id : workingSite.siteId;
+  const setSelectedSiteId = (id: number | null) => setChosenSite({ id });
   const { data: sites } = useListSites();
 
   // The diary is scoped to the selected site: it loads that site's effective
@@ -984,6 +1024,17 @@ export function DailyDiaryTab() {
         managerSignature: "",
       };
     }
+    // An open day starts each cooking-type section with lines ready to fill.
+    if (!record?.submittedAt && user?.role !== "client_viewer") {
+      next = {
+        ...next,
+        cooking: withReadyLines(next.cooking, blankCooking),
+        cooling: withReadyLines(next.cooling, blankCooling),
+        reheating: withReadyLines(next.reheating, blankReheating),
+        hotHolding: withReadyLines(next.hotHolding, blankHotHolding),
+        sousVide: withReadyLines(next.sousVide, blankSousVide),
+      };
+    }
     setDeliveries(next.deliveries);
     setColdFood(next.coldFood);
     setCooking(next.cooking);
@@ -1007,17 +1058,19 @@ export function DailyDiaryTab() {
     templateHotItems,
     templateSvItems,
     user?.name,
+    user?.role,
   ]);
 
   // A fridge or freezer's scanned QR label opens today's diary for its site
   // and puts the cursor in that unit's reading (AM before noon, PM after).
+  // The kitchen records label opens today's diary for its site.
   const [scanColdUnit, setScanColdUnit] = useState<string | null>(null);
   useEffect(() => {
     const link = takeLinkParams(["siteId", "coldUnit"] as const);
-    if (!link?.coldUnit) return;
+    if (!link?.coldUnit && !link?.siteId) return;
     const site = Number(link.siteId);
     applyScope({ date: format(new Date(), "yyyy-MM-dd"), siteId: Number.isSafeInteger(site) && site > 0 ? site : null });
-    setScanColdUnit(link.coldUnit.slice(0, 100));
+    if (link.coldUnit) setScanColdUnit(link.coldUnit.slice(0, 100));
   }, []);
   useEffect(() => {
     if (!scanColdUnit || !formReady) return;
@@ -1055,6 +1108,10 @@ export function DailyDiaryTab() {
     if (decision === "confirm") setPendingScope(next);
     else if (decision === "switch") applyScope(next);
   };
+  useEffect(() => {
+    if (openDay) changeScope({ date: openDay.date, siteId: openDay.siteId });
+    // Only a new pick moves the diary; later renders must not undo the user's own choice.
+  }, [openDay?.at]);
   useEffect(() => {
     if (!isDirty) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
@@ -1106,15 +1163,22 @@ export function DailyDiaryTab() {
     });
   };
 
-  const buildData = (submittedAt?: string) => ({
+  // Lines left empty are not saved, unless the server already holds them.
+  // The on-screen checks keep them, so failures line up with what is shown.
+  const savedLines = <T extends object>(rows: T[], field: string, keepBlankLines: boolean) => {
+    if (keepBlankLines) return rows;
+    const saved = (baseRecord as Record<string, unknown> | null)?.[field];
+    return withoutUnsavedBlankLines(rows, Array.isArray(saved) ? saved.length : 0);
+  };
+  const buildData = (submittedAt?: string, keepBlankLines = false) => ({
     recordDate: selectedDate,
     deliveries: baseRecord || showDeliveries ? deliveries : [],
     coldFood: baseRecord || showColdFood ? coldFood : [],
-    hotTemperature: baseRecord || showHotTemp ? cooking : [],
-    cooling: baseRecord || showCooling ? cooling : [],
-    reheating: baseRecord || showReheating ? reheating : [],
-    hotHolding: baseRecord || showHotHolding ? hotHolding : [],
-    sousVide: baseRecord || showSousVide ? sousVide : [],
+    hotTemperature: baseRecord || showHotTemp ? savedLines(cooking, "hotTemperature", keepBlankLines) : [],
+    cooling: baseRecord || showCooling ? savedLines(cooling, "cooling", keepBlankLines) : [],
+    reheating: baseRecord || showReheating ? savedLines(reheating, "reheating", keepBlankLines) : [],
+    hotHolding: baseRecord || showHotHolding ? savedLines(hotHolding, "hotHolding", keepBlankLines) : [],
+    sousVide: baseRecord || showSousVide ? savedLines(sousVide, "sousVide", keepBlankLines) : [],
     cookingLimit: entryCookingLimit,
     coolingLimit: entryCoolingLimit,
     reheatingLimit: entryReheatingLimit,
@@ -1128,13 +1192,16 @@ export function DailyDiaryTab() {
     try {
       const rules = parseKitchenTemperatureRules(config?.food_temperature_rules);
       const units = JSON.parse(config?.food_cold_units || "[]");
-      const failures = assessKitchenTemperatures(baseRecord as unknown as Record<string, unknown> | null, buildData(), rules, units);
+      const failures = assessKitchenTemperatures(baseRecord as unknown as Record<string, unknown> | null, buildData(undefined, true), rules, units);
       return { failures, error: "", rules };
     } catch (problem) {
       return { failures: [] as KitchenTemperatureFailure[], error: problem instanceof Error ? problem.message : "Numeric rules could not be evaluated", rules: null };
     }
   })();
   const missingCorrective = temperatureAssessment.failures.some(failure => !failure.actionTaken);
+  /** A line that failed and still needs its corrective action filled in. */
+  const needsAction = (section: string, rowIndex: number) =>
+    temperatureAssessment.failures.some(failure => failure.section === section && failure.rowIndex === rowIndex && !failure.actionTaken);
   const holdRules = temperatureAssessment.rules;
   const holdPlaceholder = (section: "hotTemperature" | "sousVide", item: string) => {
     const hold = holdRules ? kitchenHoldRequirement(holdRules, section, item) : null;
@@ -1142,7 +1209,7 @@ export function DailyDiaryTab() {
   };
   const validateTemperatures = () => {
     if (temperatureAssessment.error || missingCorrective) {
-      toast({ title: "Temperature follow-up required", description: temperatureAssessment.error || "Record the corrective action taken for every failed reading, using the row's action field or new corrective-action notes.", variant: "destructive" });
+      toast({ title: "Temperature follow-up required", description: temperatureAssessment.error || "Fill in the corrective action on every line marked in red: what was done about the failed reading.", variant: "destructive" });
       return false;
     }
     return true;
@@ -1323,7 +1390,7 @@ export function DailyDiaryTab() {
         </CardContent>
       </Card>
 
-      {recordLoading || configLoading || !formReady ? (
+      {recordLoading || configLoading || !formReady || (!chosenSite && !workingSite.ready) ? (
         <Card>
           <CardContent className="p-12 flex justify-center">
             <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
@@ -1439,9 +1506,12 @@ export function DailyDiaryTab() {
                       <YNBtn field="allergyAware" label="Allergy awareness?" />
                     </div>
                     <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground">Corrective actions (if applicable)</p>
+                      <p className={cn("text-xs", needsAction("deliveries", i) ? "text-rose-700 font-medium" : "text-muted-foreground")}>
+                        {needsAction("deliveries", i) ? "Corrective action needed: the delivery temperature failed" : "Corrective actions (if applicable)"}
+                      </p>
                       <Input placeholder="e.g. Rejected — temp too high. Supplier notified." value={row.correctiveActions} disabled={isSubmitted}
-                        onChange={e => upd("correctiveActions", e.target.value)} className="h-8 text-sm rounded-sm" />
+                        aria-invalid={needsAction("deliveries", i) || undefined}
+                        onChange={e => upd("correctiveActions", e.target.value)} className={cn("h-8 text-sm rounded-sm", needsAction("deliveries", i) && "border-rose-500 bg-rose-50")} />
                     </div>
                   </div>
                 );
@@ -1460,13 +1530,13 @@ export function DailyDiaryTab() {
                 {!isSubmitted && (
                   <Button variant="outline" size="sm"
                     onClick={() => { newRow.expect(); setColdFood([...coldFood, { unit: "", tempAm: "", tempPm: "", correctiveAction: "" }]); }}>
-                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
+                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add line
                   </Button>
                 )}
               </div>
             </CardHeader>
-            <CardContent className="p-0">
-              <table className="w-full text-sm">
+            <CardContent className="p-0 overflow-x-auto">
+              <table className="w-full text-sm min-w-[640px]">
                 <thead className="bg-muted/40 border-b border-border">
                   <tr>
                     <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Unit</th>
@@ -1483,7 +1553,7 @@ export function DailyDiaryTab() {
                       <tr key={i} className="hover:bg-muted/10">
                         <td className="px-3 py-1.5">
                           <Input value={row.unit} disabled={isSubmitted} onChange={e => upd("unit", e.target.value)}
-                            className="h-7 text-xs rounded-sm" placeholder="Fridge 1" />
+                            className="h-7 text-xs rounded-sm min-w-[120px]" placeholder="Fridge 1" />
                         </td>
                         <td className="px-3 py-1.5">
                           <Input value={row.tempAm} disabled={isSubmitted} onChange={e => upd("tempAm", e.target.value)}
@@ -1496,8 +1566,8 @@ export function DailyDiaryTab() {
                             className="h-7 text-xs rounded-sm w-24" placeholder="e.g. 4" />
                         </td>
                         <td className="px-3 py-1.5">
-                          <Input value={row.correctiveAction} disabled={isSubmitted} onChange={e => upd("correctiveAction", e.target.value)}
-                            className="h-7 text-xs rounded-sm" placeholder="Action taken if out of range" />
+                          <CorrectiveActionInput value={row.correctiveAction} disabled={isSubmitted} onChange={v => upd("correctiveAction", v)}
+                            needed={needsAction("coldFood", i)} line={row.unit || `Fridge or freezer line ${i + 1}`} />
                         </td>
                         {!isSubmitted && (
                           <td className="px-2 py-1.5">
@@ -1524,8 +1594,8 @@ export function DailyDiaryTab() {
                   <CardDescription className="text-xs mt-1">Target: {entryCookingLimit}</CardDescription>
                 </div>
                 {!isSubmitted && (
-                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setCooking([...cooking, { item: "", timeStart: "", timeFinish: "", coreTemp: "" }]); }}>
-                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
+                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setCooking([...cooking, blankCooking()]); }}>
+                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add line
                   </Button>
                 )}
               </div>
@@ -1539,21 +1609,23 @@ export function DailyDiaryTab() {
                     <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Time finished</th>
                     <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Core temp (°C)</th>
                     <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Held (seconds)</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Corrective action</th>
                     {!isSubmitted && <th className="w-8" />}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {cooking.length === 0
-                    ? <tr><td colSpan={6} className="px-4 py-5 text-center text-muted-foreground italic text-sm">No cooking records yet.</td></tr>
+                    ? <tr><td colSpan={7} className="px-4 py-5 text-center text-muted-foreground italic text-sm">No cooking records yet.</td></tr>
                     : cooking.map((row, i) => {
                       const upd = (f: keyof CookingRow, v: string) => { const n = [...cooking]; n[i] = { ...n[i], [f]: v }; setCooking(n); };
                       return (
-                        <tr key={i} className="hover:bg-muted/10">
+                        <tr key={i} className={cn("hover:bg-muted/10", needsAction("hotTemperature", i) && "bg-rose-50")}>
                           <td className="px-3 py-1.5"><Input value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)} className="h-7 text-xs rounded-sm min-w-[110px]" placeholder="e.g. Chicken" /></td>
                           <td className="px-2 py-1.5"><Input type="time" value={row.timeStart} disabled={isSubmitted} onChange={e => upd("timeStart", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
                           <td className="px-2 py-1.5"><Input type="time" value={row.timeFinish} disabled={isSubmitted} onChange={e => upd("timeFinish", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
                           <td className="px-2 py-1.5"><Input value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder="°C" /></td>
                           <td className="px-2 py-1.5"><Input inputMode="numeric" aria-label={`${row.item || `Cooking row ${i + 1}`} seconds held at core temperature`} value={row.holdSeconds ?? ""} disabled={isSubmitted} onChange={e => upd("holdSeconds", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder={holdPlaceholder("hotTemperature", row.item)} /></td>
+                          <td className="px-2 py-1.5"><CorrectiveActionInput value={row.correctiveAction} disabled={isSubmitted} onChange={v => upd("correctiveAction", v)} needed={needsAction("hotTemperature", i)} line={row.item || `Cooking line ${i + 1}`} /></td>
                           {!isSubmitted && <td className="px-2 py-1.5"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setCooking(cooking.filter((_, x) => x !== i))}><Trash2 className="w-3 h-3 text-destructive" /></Button></td>}
                         </tr>
                       );
@@ -1572,8 +1644,8 @@ export function DailyDiaryTab() {
                   <CardDescription className="text-xs mt-1">Target: {entryCoolingLimit} · Rows exceeding 90 minutes are flagged red</CardDescription>
                 </div>
                 {!isSubmitted && (
-                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setCooling([...cooling, { item: "", timeStart: "", startTemp: "", timeFinish: "", coreTemp: "" }]); }}>
-                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
+                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setCooling([...cooling, blankCooling()]); }}>
+                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add line
                   </Button>
                 )}
               </div>
@@ -1588,19 +1660,20 @@ export function DailyDiaryTab() {
                     <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Cooling finished</th>
                     <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">End temp (°C)</th>
                     <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Duration</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Corrective action</th>
                     {!isSubmitted && <th className="w-8" />}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {cooling.length === 0
-                    ? <tr><td colSpan={7} className="px-4 py-5 text-center text-muted-foreground italic text-sm">No cooling records yet.</td></tr>
+                    ? <tr><td colSpan={8} className="px-4 py-5 text-center text-muted-foreground italic text-sm">No cooling records yet.</td></tr>
                     : cooling.map((row, i) => {
                       const upd = (f: keyof CoolingRow, v: string) => { const n = [...cooling]; n[i] = { ...n[i], [f]: v }; setCooling(n); };
                       const mins = coolingMins(row.timeStart, row.timeFinish);
                       const overTime = mins !== null && mins > (temperatureAssessment.rules?.coolingMinutes ?? 90);
                       const durationLabel = mins === null ? "" : mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
                       return (
-                        <tr key={i} className={cn("hover:bg-muted/10", overTime && "bg-rose-50")}>
+                        <tr key={i} className={cn("hover:bg-muted/10", (overTime || needsAction("cooling", i)) && "bg-rose-50")}>
                           <td className="px-3 py-1.5"><Input value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)} className="h-7 text-xs rounded-sm min-w-[110px]" placeholder="e.g. Soup" /></td>
                           <td className="px-2 py-1.5"><Input type="time" value={row.timeStart} disabled={isSubmitted} onChange={e => upd("timeStart", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
                           <td className="px-2 py-1.5"><Input inputMode="decimal" aria-label={`${row.item || `Cooling row ${i + 1}`} temperature when cooling started`} value={row.startTemp ?? ""} disabled={isSubmitted} onChange={e => upd("startTemp", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder="°C" /></td>
@@ -1611,6 +1684,7 @@ export function DailyDiaryTab() {
                               {overTime && <AlertTriangle className="w-3 h-3 inline mr-0.5" />}{durationLabel}
                             </span>
                           </td>
+                          <td className="px-2 py-1.5"><CorrectiveActionInput value={row.correctiveAction} disabled={isSubmitted} onChange={v => upd("correctiveAction", v)} needed={needsAction("cooling", i)} line={row.item || `Cooling line ${i + 1}`} /></td>
                           {!isSubmitted && <td className="px-2 py-1.5"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setCooling(cooling.filter((_, x) => x !== i))}><Trash2 className="w-3 h-3 text-destructive" /></Button></td>}
                         </tr>
                       );
@@ -1629,8 +1703,8 @@ export function DailyDiaryTab() {
                   <CardDescription className="text-xs mt-1">Target: {entryReheatingLimit}</CardDescription>
                 </div>
                 {!isSubmitted && (
-                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setReheating([...reheating, { item: "", timeStart: "", timeFinish: "", coreTemp: "" }]); }}>
-                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
+                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setReheating([...reheating, blankReheating()]); }}>
+                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add line
                   </Button>
                 )}
               </div>
@@ -1643,20 +1717,22 @@ export function DailyDiaryTab() {
                     <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Time started</th>
                     <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Time finished</th>
                     <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Core temp (°C)</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Corrective action</th>
                     {!isSubmitted && <th className="w-8" />}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {reheating.length === 0
-                    ? <tr><td colSpan={5} className="px-4 py-5 text-center text-muted-foreground italic text-sm">No reheating records yet.</td></tr>
+                    ? <tr><td colSpan={6} className="px-4 py-5 text-center text-muted-foreground italic text-sm">No reheating records yet.</td></tr>
                     : reheating.map((row, i) => {
                       const upd = (f: keyof ReheatingRow, v: string) => { const n = [...reheating]; n[i] = { ...n[i], [f]: v }; setReheating(n); };
                       return (
-                        <tr key={i} className="hover:bg-muted/10">
+                        <tr key={i} className={cn("hover:bg-muted/10", needsAction("reheating", i) && "bg-rose-50")}>
                           <td className="px-3 py-1.5"><Input value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)} className="h-7 text-xs rounded-sm min-w-[110px]" placeholder="e.g. Curry" /></td>
                           <td className="px-2 py-1.5"><Input type="time" value={row.timeStart} disabled={isSubmitted} onChange={e => upd("timeStart", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
                           <td className="px-2 py-1.5"><Input type="time" value={row.timeFinish} disabled={isSubmitted} onChange={e => upd("timeFinish", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
                           <td className="px-2 py-1.5"><Input value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder="°C" /></td>
+                          <td className="px-2 py-1.5"><CorrectiveActionInput value={row.correctiveAction} disabled={isSubmitted} onChange={v => upd("correctiveAction", v)} needed={needsAction("reheating", i)} line={row.item || `Reheating line ${i + 1}`} /></td>
                           {!isSubmitted && <td className="px-2 py-1.5"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setReheating(reheating.filter((_, x) => x !== i))}><Trash2 className="w-3 h-3 text-destructive" /></Button></td>}
                         </tr>
                       );
@@ -1676,29 +1752,30 @@ export function DailyDiaryTab() {
                 </div>
                 {!isSubmitted && (
                   <Button variant="outline" size="sm"
-                    onClick={() => { newRow.expect(); setHotHolding([...hotHolding, { item: "", coreTemp: "", timeOfCheck: "" }]); }}>
-                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
+                    onClick={() => { newRow.expect(); setHotHolding([...hotHolding, blankHotHolding()]); }}>
+                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add line
                   </Button>
                 )}
               </div>
             </CardHeader>
-            <CardContent className="p-0">
-              <table className="w-full text-sm">
+            <CardContent className="p-0 overflow-x-auto">
+              <table className="w-full text-sm min-w-[600px]">
                 <thead className="bg-muted/40 border-b border-border">
                   <tr>
                     <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Food Item</th>
                     <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Core Temp (°C)</th>
                     <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Time of Check</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Corrective action</th>
                     {!isSubmitted && <th className="w-8 px-2" />}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {hotHolding.length === 0 ? (
-                    <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground italic text-sm">No hot holding checks recorded.</td></tr>
+                    <tr><td colSpan={5} className="px-4 py-6 text-center text-muted-foreground italic text-sm">No hot holding checks recorded.</td></tr>
                   ) : hotHolding.map((row, i) => {
                     const upd = (f: keyof HotHoldingRow, v: string) => { const n = [...hotHolding]; n[i] = { ...n[i], [f]: v }; setHotHolding(n); };
                     return (
-                      <tr key={i} className="hover:bg-muted/10">
+                      <tr key={i} className={cn("hover:bg-muted/10", needsAction("hotHolding", i) && "bg-rose-50")}>
                         <td className="px-3 py-1.5">
                           <Input value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)}
                             className="h-7 text-xs rounded-sm" placeholder="Food item" />
@@ -1710,6 +1787,10 @@ export function DailyDiaryTab() {
                         <td className="px-3 py-1.5">
                           <Input type="time" value={row.timeOfCheck} disabled={isSubmitted} onChange={e => upd("timeOfCheck", e.target.value)}
                             className="h-7 text-xs rounded-sm w-28" />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <CorrectiveActionInput value={row.correctiveAction} disabled={isSubmitted} onChange={v => upd("correctiveAction", v)}
+                            needed={needsAction("hotHolding", i)} line={row.item || `Hot holding line ${i + 1}`} />
                         </td>
                         {!isSubmitted && (
                           <td className="px-2 py-1.5">
@@ -1736,17 +1817,15 @@ export function DailyDiaryTab() {
                   <CardDescription className="text-xs mt-1">Log bath temperature, cooking duration and core probe temperature</CardDescription>
                 </div>
                 {!isSubmitted && (
-                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setSousVide([...sousVide, {
-                    item: "", targetTemp: "", waterTemp: "", timeStarted: "", timeFinished: "", coreTemp: "", result: "", notes: "",
-                  }]); }}>
-                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
+                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setSousVide([...sousVide, blankSousVide()]); }}>
+                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add line
                   </Button>
                 )}
               </div>
             </CardHeader>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
-                <table className="w-full text-xs min-w-[700px]">
+                <table className="w-full text-xs min-w-[880px]">
                   <thead className="bg-muted/40 border-b border-border">
                     <tr>
                       <th className="text-left px-3 py-2 font-medium text-muted-foreground">Food item</th>
@@ -1758,16 +1837,17 @@ export function DailyDiaryTab() {
                       <th className="text-left px-2 py-2 font-medium text-muted-foreground">Held (minutes)</th>
                       <th className="text-left px-2 py-2 font-medium text-muted-foreground">Result</th>
                       <th className="text-left px-2 py-2 font-medium text-muted-foreground">Notes</th>
+                      <th className="text-left px-2 py-2 font-medium text-muted-foreground">Corrective action</th>
                       {!isSubmitted && <th className="w-8" />}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
                     {sousVide.length === 0 ? (
-                      <tr><td colSpan={10} className="px-4 py-6 text-center text-muted-foreground italic text-sm">No sous vide records yet.</td></tr>
+                      <tr><td colSpan={11} className="px-4 py-6 text-center text-muted-foreground italic text-sm">No sous vide records yet.</td></tr>
                     ) : sousVide.map((row, i) => {
                       const upd = (f: keyof SousVideRow, v: string) => { const n = [...sousVide]; n[i] = { ...n[i], [f]: v }; setSousVide(n); };
                       return (
-                        <tr key={i} className="hover:bg-muted/10">
+                        <tr key={i} className={cn("hover:bg-muted/10", needsAction("sousVide", i) && "bg-rose-50")}>
                           <td className="px-3 py-1.5">
                             <Input value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)}
                               className="h-7 text-xs rounded-sm min-w-[110px]" placeholder="e.g. Chicken breast" />
@@ -1814,6 +1894,10 @@ export function DailyDiaryTab() {
                             <Input value={row.notes} disabled={isSubmitted} onChange={e => upd("notes", e.target.value)}
                               className="h-7 text-xs rounded-sm min-w-[100px]" placeholder="Notes" />
                           </td>
+                          <td className="px-2 py-1.5">
+                            <CorrectiveActionInput value={row.correctiveAction} disabled={isSubmitted} onChange={v => upd("correctiveAction", v)}
+                              needed={needsAction("sousVide", i)} line={row.item || `Sous vide line ${i + 1}`} />
+                          </td>
                           {!isSubmitted && (
                             <td className="px-2 py-1.5">
                               <Button variant="ghost" size="sm" className="h-7 w-7 p-0"
@@ -1831,12 +1915,13 @@ export function DailyDiaryTab() {
             </CardContent>
           </Card>}
 
-          {/* Correctives */}
-          <Card>
+          {/* Earlier whole-day corrective actions box. Actions now go on each
+              heading's own lines; the box stays only for days that used it. */}
+          {(!!baseRecord?.correctives || !!correctives) && <Card>
             <CardHeader className="border-b border-border/50 pb-4">
-              <CardTitle className="text-base font-display font-bold">Corrective Actions Taken</CardTitle>
+              <CardTitle className="text-base font-display font-bold">Corrective Actions Taken (whole day)</CardTitle>
               <CardDescription className="text-xs mt-1">
-                Note any issues found and what was done to fix them
+                Written in the single box this diary used before each heading had its own corrective action column.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-4">
@@ -1848,7 +1933,7 @@ export function DailyDiaryTab() {
                 disabled={isSubmitted}
               />
             </CardContent>
-          </Card>
+          </Card>}
 
           {/* Sign-off */}
           {!isSubmitted && (
@@ -1961,7 +2046,8 @@ const KCL_OPENING: KCLItem[] = [
   { label: "Ensure cleaning chemicals are labelled and stored correctly", checked: false },
   { section: "Temperature Checks", label: "Walk-in fridge temperature checked (target 0–5°C)", checked: false },
   { label: "Under-counter fridge temperature checked (target 0–5°C)", checked: false },
-  { label: "Freezer temperature checked (target -18°C or below)", checked: false },
+  { label: "Standalone fridges temperature checked (target 0–5°C)", checked: false },
+  { label: "Freezers temperature checked (target -18°C or below)", checked: false },
   { label: "Display fridge temperature checked (target 0–5°C, if applicable)", checked: false },
   { label: "Any temperature outside safe limits reported", checked: false },
   { section: "Equipment Checks", label: "Ovens turned on", checked: false },
@@ -1998,7 +2084,8 @@ const KCL_CLOSING: KCLItem[] = [
   { label: "Expired or out-of-date food discarded", checked: false },
   { label: "Walk-in fridge temperature recorded", checked: false },
   { label: "Under-counter fridge temperature recorded", checked: false },
-  { label: "Freezer temperature recorded", checked: false },
+  { label: "Standalone fridges temperature recorded", checked: false },
+  { label: "Freezers temperature recorded", checked: false },
   { section: "Equipment", label: "Ovens switched off (unless required overnight)", checked: false },
   { label: "Hobs and grills cleaned and turned off", checked: false },
   { label: "Fryers filtered, cleaned and switched off", checked: false },
@@ -2036,8 +2123,8 @@ const KCL_LABELS: Record<string, string> = { kitchen_opening: "Kitchen Opening",
 const KCL_ENDPOINT: Record<string, string> = { kitchen_opening: "/daily-track-am", kitchen_closing: "/daily-track-pm" };
 
 function KitchenChecklistCard({
-  type, siteId, siteName, date, existing, onSaved, canAdmin,
-}: { type: string; siteId: number | null; siteName?: string; date: string; existing?: KCLRecord; onSaved: () => void; canAdmin: boolean }) {
+  type, siteId, siteName, date, existing, onSaved, canAdmin, draft,
+}: { type: string; siteId: number | null; siteName?: string; date: string; existing?: KCLRecord; onSaved: () => void; canAdmin: boolean; draft?: ChecklistDraftSlot<KCLItem> }) {
   const [templateItems, setTemplateItems] = useState<KCLItem[] | null>(null);
   const [templateLoading, setTemplateLoading] = useState(true);
   const [showEditor, setShowEditor] = useState(false);
@@ -2057,23 +2144,37 @@ function KitchenChecklistCard({
   }, [type, siteId, existing]);
 
   const effectiveDefault = templateItems ? templateItems.map(i => ({ ...i, checked: false })) : (KCL_DEFAULTS[type] ?? []);
-  const [items, setItems] = useState<KCLItem[]>(existing?.items ?? effectiveDefault);
-  const [completedBy, setCompletedBy] = useState(existing?.completedBy ?? user?.name ?? "");
-  const [staffRosterId, setStaffRosterId] = useState<number | null>((existing as any)?.staffRosterId ?? null);
-  const [managerNote, setManagerNote] = useState(existing?.managerNote ?? "");
-  const [saving, setSaving] = useState(false);
   const submitted = !!existing?.submittedAt;
+  // Ticks made before the site or date was changed (or before a reload) are
+  // carried onto this card, unless this one is already submitted.
+  const carried = submitted ? undefined : draft?.get();
+  const startItems = () => {
+    const base = existing?.items ?? effectiveDefault;
+    return carried ? carryAnswers(base, carried.items, item => item.label) : base;
+  };
+  const [items, setItems] = useState<KCLItem[]>(startItems);
+  const [completedBy, setCompletedBy] = useState(carried?.completedBy || (existing?.completedBy ?? user?.name ?? ""));
+  const [staffRosterId, setStaffRosterId] = useState<number | null>(carried ? carried.staffRosterId : (existing as any)?.staffRosterId ?? null);
+  const [managerNote, setManagerNote] = useState(carried?.managerNote || (existing?.managerNote ?? ""));
+  const [saving, setSaving] = useState(false);
+  const touched = useRef(false);
 
   useEffect(() => {
-    setItems(existing?.items ?? effectiveDefault);
-    setCompletedBy(existing?.completedBy ?? user?.name ?? "");
-    setStaffRosterId((existing as any)?.staffRosterId ?? null);
-    setManagerNote(existing?.managerNote ?? "");
+    setItems(startItems());
+    setCompletedBy(carried?.completedBy || (existing?.completedBy ?? user?.name ?? ""));
+    setStaffRosterId(carried ? carried.staffRosterId : (existing as any)?.staffRosterId ?? null);
+    setManagerNote(carried?.managerNote || (existing?.managerNote ?? ""));
   }, [existing, type, templateItems]);
 
-  const setResult = (i: number, result: ChecklistResult) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? withResult(item, result) : item)); };
-  const passRemaining = () => { if (submitted) return; setItems(prev => prev.map(item => itemResult(item) ? item : withResult(item, "pass"))); };
-  const setNote = (i: number, note: string) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? { ...item, notes: note } : item)); };
+  useEffect(() => {
+    if (touched.current && !submitted) draft?.set({ items, completedBy, staffRosterId, managerNote });
+  }, [items, completedBy, staffRosterId, managerNote]);
+
+  const edit = <T,>(set: (value: T) => void) => (value: T) => { touched.current = true; set(value); };
+  const setResult = (i: number, result: ChecklistResult) => { if (submitted) return; touched.current = true; setItems(prev => prev.map((item, idx) => idx === i ? withResult(item, result) : item)); };
+  const passRemaining = () => { if (submitted) return; touched.current = true; setItems(prev => prev.map(item => itemResult(item) ? item : withResult(item, "pass"))); };
+
+  const setNote = (i: number, note: string) => { if (submitted) return; touched.current = true; setItems(prev => prev.map((item, idx) => idx === i ? { ...item, notes: note } : item)); };
 
   async function save(submit: boolean) {
     setSaving(true);
@@ -2093,6 +2194,8 @@ function KitchenChecklistCard({
         return;
       }
       toast({ title: submit ? "Checklist submitted" : "Draft saved" });
+      touched.current = false;
+      draft?.set(undefined);
       onSaved();
     } catch {
       toast({ title: failedTitle, description: "Check your connection and try again.", variant: "destructive" });
@@ -2126,6 +2229,10 @@ function KitchenChecklistCard({
           </div>
         </div>
 
+        {carried && hasAnswers(carried.items) && !touched.current && (
+          <p className="text-xs text-blue-700 mb-3">Your unsaved ticks are filled in below. Save or submit to keep them.</p>
+        )}
+
         {templateLoading && !existing ? (
           <div className="flex items-center justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
         ) : (
@@ -2144,8 +2251,8 @@ function KitchenChecklistCard({
         {!submitted && (
           <div className="space-y-3 border-t pt-3">
             <div className="grid grid-cols-2 gap-3">
-              <StaffPerformerSelect label="Completed by" value={completedBy} onChange={setCompletedBy} onRosterIdChange={setStaffRosterId} />
-              {canAdmin && <div className="space-y-1"><Label className="text-xs">Manager note</Label><Input value={managerNote} onChange={e => setManagerNote(e.target.value)} placeholder="Optional" className="h-8 text-sm" /></div>}
+              <StaffPerformerSelect label="Completed by" value={completedBy} onChange={edit(setCompletedBy)} onRosterIdChange={edit(setStaffRosterId)} />
+              {canAdmin && <div className="space-y-1"><Label className="text-xs">Manager note</Label><Input value={managerNote} onChange={e => edit(setManagerNote)(e.target.value)} placeholder="Optional" className="h-8 text-sm" /></div>}
             </div>
             {progress.remaining > 0 && progress.answered > 0 && (
               <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={passRemaining}>Mark the {progress.remaining} remaining as Pass</Button>
@@ -2156,6 +2263,9 @@ function KitchenChecklistCard({
               <Button size="sm" onClick={() => save(true)} disabled={saving || !progress.ready} className="flex-1">Submit checklist</Button>
             </div>
           </div>
+        )}
+        {submitted && draft?.get() && hasAnswers(draft.get()!.items) && (
+          <p className="text-xs text-amber-700 mb-3">This checklist is already submitted. Your unsaved ticks are kept: choose another site or date to use them.</p>
         )}
         {submitted && existing?.completedBy && <div className="border-t pt-3"><p className="text-xs text-muted-foreground">Completed by: <span className="font-medium">{existing.completedBy}</span></p></div>}
         {existing?.id && <div className="border-t mt-3 pt-3"><RecordSignedBy recordType="daily_checklist" recordId={existing.id} className="mb-2" /><CheckPhotoUploader entityType="daily_checklist" entityId={existing.id} compact /></div>}
@@ -2184,19 +2294,23 @@ function KitchenChecklistCard({
 function DailyChecksTab() {
   const { activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
-  const { data: sites = [] } = useListSites();
+  const { sites, siteId: selectedSiteId, setSiteId, ready: siteReady } = useChecklistSite();
   const today = new Date().toISOString().slice(0, 10);
   const _qs = new URLSearchParams(window.location.search);
   const [date, setDate] = useState(_qs.get("date") ?? today);
-  const [siteId, setSiteId] = useState<string>(_qs.get("siteId") ?? "__none__");
   const [amRows, setAmRows] = useState<KCLRecord[]>([]);
   const [pmRows, setPmRows] = useState<KCLRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  // Unsaved ticks per checklist, kept while the site or date changes.
+  const [drafts] = useState(createChecklistDraftStore);
+  const loadSeq = useRef(0);
 
-  const selectedSiteId = siteId === "__none__" ? null : Number(siteId);
   const selectedSiteName = sites.find(s => s.id === selectedSiteId)?.name;
 
   const load = useCallback(async () => {
+    if (!siteReady) return;
+    // A slower answer for the previous site or date must not replace this one.
+    const seq = ++loadSeq.current;
     setLoading(true);
     const params = new URLSearchParams({ date });
     if (selectedSiteId) params.set("siteId", String(selectedSiteId));
@@ -2204,10 +2318,13 @@ function DailyChecksTab() {
       apiFetch(`/daily-track-am?${params}`),
       apiFetch(`/daily-track-pm?${params}`),
     ]);
-    if (amRes.ok) setAmRows(await amRes.json());
-    if (pmRes.ok) setPmRows(await pmRes.json());
+    const am = amRes.ok ? await amRes.json() : null;
+    const pm = pmRes.ok ? await pmRes.json() : null;
+    if (seq !== loadSeq.current) return;
+    if (am) setAmRows(am);
+    if (pm) setPmRows(pm);
     setLoading(false);
-  }, [date, selectedSiteId, activeClientId]);
+  }, [date, selectedSiteId, siteReady, activeClientId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -2224,16 +2341,7 @@ function DailyChecksTab() {
           <Label className="text-xs">Date</Label>
           <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="h-9" />
         </div>
-        <div className="space-y-1 flex-1 min-w-[180px]">
-          <Label className="text-xs">Site</Label>
-          <Select value={siteId} onValueChange={setSiteId}>
-            <SelectTrigger className="h-9"><SelectValue placeholder="Select site…" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">No site filter</SelectItem>
-              {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+        <ChecklistSiteSelect sites={sites} value={selectedSiteId} onChange={setSiteId} />
         <div className="flex items-end">
           <Button variant="outline" size="sm" onClick={load} className="h-9 gap-1.5">
             <RotateCcw className={cn("w-3.5 h-3.5", loading && "animate-spin")} /> Refresh
@@ -2241,12 +2349,12 @@ function DailyChecksTab() {
         </div>
       </div>
 
-      {loading ? (
+      {loading || !siteReady ? (
         <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <KitchenChecklistCard type="kitchen_opening" siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getAm("kitchen_opening")} onSaved={load} canAdmin={canAdmin} />
-          <KitchenChecklistCard type="kitchen_closing" siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getPm("kitchen_closing")} onSaved={load} canAdmin={canAdmin} />
+          <KitchenChecklistCard type="kitchen_opening" siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getAm("kitchen_opening")} onSaved={load} canAdmin={canAdmin} draft={drafts.slot("kitchen_opening")} />
+          <KitchenChecklistCard type="kitchen_closing" siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getPm("kitchen_closing")} onSaved={load} canAdmin={canAdmin} draft={drafts.slot("kitchen_closing")} />
         </div>
       )}
     </div>
@@ -2306,6 +2414,12 @@ export default function KitchenPage() {
   const _initTab = (new URLSearchParams(window.location.search).get("tab") as ActiveTab | null) ?? "diary";
   const [activeTab, setActiveTab] = useState<ActiveTab>(TABS.some(t => t.id === _initTab) ? _initTab : "diary");
   const [checkStatus, setCheckStatus] = useState<KitchenCheckStatus[]>([]);
+  const [openDay, setOpenDay] = useState<KitchenDiaryOpenDay | undefined>(undefined);
+  const openDiaryDay = (date: string, siteId: number | null) => {
+    setActiveTab("diary");
+    setOpenDay({ date, siteId, at: Date.now() });
+    window.setTimeout(() => document.getElementById("kitchen-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
 
   const loadStatus = useCallback(async () => {
     try {
@@ -2375,6 +2489,8 @@ export default function KitchenPage() {
           </div>
         </div>
 
+        <KitchenMonthSummary onOpenDay={openDiaryDay} />
+
         {/* Check status cards */}
         {checkStatus.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
@@ -2405,7 +2521,7 @@ export default function KitchenPage() {
         )}
 
         {/* Tab bar */}
-        <div className="flex flex-wrap gap-1 p-1 bg-muted/50 rounded-xl w-full sm:w-auto sm:inline-flex border border-border/50">
+        <div id="kitchen-tabs" className="flex flex-wrap gap-1 p-1 bg-muted/50 rounded-xl w-full sm:w-auto sm:inline-flex border border-border/50">
           {TABS.map(tab => {
             const Icon = tab.icon;
             return (
@@ -2428,7 +2544,7 @@ export default function KitchenPage() {
 
         {/* Tab content */}
         {activeTab === "checks"   && <DailyChecksTab />}
-        {activeTab === "diary"    && <DailyDiaryTab />}
+        {activeTab === "diary"    && <DailyDiaryTab openDay={openDay} />}
         {activeTab === "weekly"   && <WeeklyReviewTab />}
         {activeTab === "probe"    && <ProbeCheckTab defaultProbeNamesJson={foodSafetyConfig?.food_probe_names} />}
         {activeTab === "cleaning" && <CleaningScheduleTab />}

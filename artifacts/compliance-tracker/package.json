@@ -14,6 +14,9 @@
     "test:nav-groups": "node tests/nav-groups.test.mjs",
     "test:sort-options": "node tests/sort-options.test.mjs",
     "test:word-doc": "node tests/word-doc.test.mjs",
+    "test:setup-info-sheets": "node tests/setup-info-sheets.test.mjs",
+    "test:list-kinds": "node tests/list-kinds.test.mjs",
+    "test:upload-lists-browser": "node tests/upload-lists-browser.test.mjs",
     "test:new-release-reload": "node tests/new-release-reload.test.mjs",
     "test:select-item-values": "node tests/select-item-values.test.mjs",
     "test:sidebar-browser": "node tests/sidebar-browser.test.mjs",
@@ -35,6 +38,7 @@
     "test:file-drop-browser": "node tests/file-drop-browser.test.mjs",
     "test:camera-capture-browser": "node tests/camera-capture-browser.test.mjs",
     "test:import-file-types-browser": "node tests/import-file-types-browser.test.mjs",
+    "test:certificate-reader-browser": "node tests/certificate-reader-browser.test.mjs",
     "test:feedback-inbox-browser": "node tests/feedback-inbox-browser.test.mjs",
     "test:required-track-photos-browser": "node tests/required-track-photos-browser.test.mjs",
     "test:recovery-code-browser": "node tests/recovery-code-browser.test.mjs",
@@ -66,6 +70,7 @@
     "test:induction-print": "node tests/induction-print.test.mjs",
     "test:daily-track-month-status": "node tests/daily-track-month-status.test.mjs",
     "test:daily-checklist-card-browser": "node tests/daily-checklist-card-browser.test.mjs",
+    "test:daily-checklist-site-browser": "node tests/daily-checklist-site-browser.test.mjs",
     "test:daily-track-month-browser": "node tests/daily-track-month-browser.test.mjs",
     "test:dashboard-site-switch-browser": "node tests/dashboard-site-switch-browser.test.mjs",
     "test:staff-kiosk-token": "node tests/staff-kiosk-token.test.mjs",
@@ -149,6 +154,7 @@
   },
   "dependencies": {
     "@e965/xlsx": "^0.20.3",
-    "@sentry/react": "^10.70.0"
+    "@sentry/react": "^10.70.0",
+    "pdf-lib": "^1.17.1"
   }
 }

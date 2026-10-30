@@ -96,6 +96,9 @@ jobs:
       - name: GreenTrack NSTS sprayer test schedule
         run: pnpm --filter @workspace/api-zod run test:nsts-sprayer-tests
 
+      - name: LegionellaTrack condition questions (sediment, biofilm)
+        run: pnpm --filter @workspace/api-zod run test:legionella-condition
+
       - name: Build web app
         env:
           PORT: "5173"
@@ -124,6 +127,11 @@ jobs:
         run: pnpm --filter @workspace/compliance-tracker run test:sort-options
       - name: Old Word (.doc) import reading test
         run: pnpm --filter @workspace/compliance-tracker run test:word-doc
+      - name: Upload your lists sorting test
+        run: pnpm --filter @workspace/compliance-tracker run test:list-kinds
+
+      - name: Setup "What we need from you" workbooks match the import templates
+        run: pnpm --filter @workspace/compliance-tracker run test:setup-info-sheets
 
       - name: Reload after a new release test
         run: pnpm --filter @workspace/compliance-tracker run test:new-release-reload
@@ -287,6 +295,9 @@ jobs:
       - name: Pricing AI requests (pure)
         run: pnpm --filter @workspace/api-server run test:ai-pricing
 
+      - name: Saved form option lists get new default trades (pure)
+        run: pnpm --filter @workspace/api-server run test:form-option-defaults
+
       - name: AI allowance rollover ledger (pure)
         run: pnpm --filter @workspace/api-server run test:ai-credit
 
@@ -387,6 +398,9 @@ jobs:
       - name: FireTrack drill time, evacuation, staff present and drill attendance tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:fire-drill-records
 
+      - name: FireTrack sleeping accommodation, per-site escape routes and night porter fire walks tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:night-fire-walks
+
       - name: FireTrack retired checks and in-house completion tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:fire-retired-checks
 
@@ -411,17 +425,21 @@ jobs:
       - name: Recorded checks are signed with a drawn signature (production schema base)
         run: pnpm --filter @workspace/api-server run test:record-signatures
 
+      - name: A fail on any track asks for its corrective action (production schema base)
+        run: pnpm --filter @workspace/api-server run test:corrective-actions
+
       - name: Equipment list and QR label tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:equipment-labels
 
       # KitchenTrack numeric controls: the shared rule model and country
       # presets, then hold-time boundaries, retries and the corrective-action
       # follow-up, each on its own fresh database.
-      - name: KitchenTrack hold-time, temperature-action and "Say it" tests
+      - name: KitchenTrack hold-time, temperature-action, month summary and "Say it" tests
         run: |
           pnpm --filter @workspace/api-zod run test:kitchen-temperature
           pnpm --filter @workspace/api-zod run test:kitchen-temperature-guidance
           pnpm --filter @workspace/api-server run test:kitchen-hold-controls
           pnpm --filter @workspace/api-server run test:kitchen-temperature-actions
           pnpm --filter @workspace/api-server run test:kitchen-mobile-replay
+          pnpm --filter @workspace/api-server run test:kitchen-month-summary
           pnpm --filter @workspace/api-server run test:voice-log

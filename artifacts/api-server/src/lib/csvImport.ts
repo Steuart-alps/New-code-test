@@ -1,6 +1,7 @@
 /**
  * Register CSV imports (PATTrack appliances, RoomTrack rooms, contractors,
- * FireTrack call points).
+ * FireTrack call points, KitchenTrack ingredients from suppliers' allergen
+ * information, LegionellaTrack outlets and tanks).
  *
  * Mirrors the staff-roster reconciliation: the browser reads the spreadsheet
  * (Excel or CSV) and sends its header row and cell text; the API maps the
@@ -10,8 +11,10 @@
  * Everything in this file is pure so it can be unit tested without a database.
  */
 import { PAT_APPLIANCE_TYPES } from "@workspace/db/schema";
+import { ALLERGEN_KEYS } from "./allergenRecipes";
+import { ALLERGEN_COLUMN_LABELS, ALLERGEN_COLUMN_PREFIXES, allergensInText, parseAllergenCell } from "./allergenImport";
 
-export const CSV_IMPORT_TYPES = ["pat-appliances", "room-track-rooms", "contractors", "fire-call-points"] as const;
+export const CSV_IMPORT_TYPES = ["pat-appliances", "room-track-rooms", "contractors", "fire-call-points", "allergen-ingredients", "legionella-outlets"] as const;
 export type CsvImportType = (typeof CSV_IMPORT_TYPES)[number];
 
 export function isCsvImportType(value: unknown): value is CsvImportType {
@@ -22,13 +25,17 @@ export const CSV_IMPORT_MAX_ROWS = 1000;
 export const CSV_IMPORT_MAX_COLUMNS = 40;
 export const CSV_IMPORT_MAX_CELL_LENGTH = 2000;
 
-type ColumnKind = "text" | "email" | "date" | "list";
+type ColumnKind = "text" | "email" | "date" | "list" | "allergen";
 
 export interface CsvImportColumn {
   key: string;
   label: string;
   /** Normalised header spellings accepted for this column (see normaliseHeader). */
   aliases: string[];
+  /** Also matches a header that starts with one of these (allergen columns). */
+  prefixes?: string[];
+  /** Accepted but left out of the downloadable template. */
+  notInTemplate?: true;
   required?: boolean;
   max: number;
   kind?: ColumnKind;
@@ -69,7 +76,50 @@ export const CSV_IMPORT_COLUMNS: Record<CsvImportType, CsvImportColumn[]> = {
     { key: "location", label: "Location", aliases: ["location", "callpointlocation", "where", "area", "position", "description"], max: 200, example: "Reception, main entrance" },
     { key: "site", label: "Site", aliases: ["site", "sitename"], max: 200, example: "" },
   ],
+  // Suppliers' allergen information: a column per allergen (Y / N / May), or
+  // "Contains" and "May contain" lists (lib/allergenImport.ts). A blank Site
+  // means the ingredient can be used at every site.
+  "allergen-ingredients": [
+    { key: "name", label: "Ingredient", aliases: ["ingredient", "ingredientname", "product", "productname", "productdescription", "item", "itemname", "name", "description"], required: true, max: 200, example: "Plain flour" },
+    { key: "supplier", label: "Supplier", aliases: ["supplier", "suppliername", "brand", "manufacturer"], max: 200, example: "Brakes" },
+    { key: "productCode", label: "Product code", aliases: ["productcode", "code", "sku", "itemcode", "productno", "productnumber", "supplierscode", "suppliercode", "barcode", "ean"], max: 100, example: "FL123" },
+    ...ALLERGEN_KEYS.map((key): CsvImportColumn => ({
+      key: `allergen_${key}`, label: ALLERGEN_COLUMN_LABELS[key], aliases: [], prefixes: ALLERGEN_COLUMN_PREFIXES[key],
+      max: 50, kind: "allergen", example: key === "gluten" ? "Y" : key === "soya" ? "May" : "N",
+    })),
+    { key: "contains", label: "Contains", aliases: ["contains", "allergens", "containsallergens", "allergenscontained", "allergencontains"], max: 1000, notInTemplate: true, example: "" },
+    { key: "mayContain", label: "May contain", aliases: ["maycontain", "maycontaintraces", "traces", "maycontainallergens", "precautionaryallergens", "crosscontamination", "crosscontact"], max: 1000, notInTemplate: true, example: "" },
+    { key: "site", label: "Site", aliases: ["site", "sitename"], max: 200, example: "" },
+    { key: "notes", label: "Notes", aliases: ["notes", "note", "comments"], max: 2000, example: "" },
+  ],
+  // Outlets go on the site's monitored outlet list; cold water tanks and
+  // calorifiers go on the equipment list, where tank checks name them.
+  "legionella-outlets": [
+    { key: "name", label: "Outlet or tank", aliases: ["outletortank", "name", "outlet", "outletname", "sentineloutlet", "sentinel", "outletref", "outletreference", "tank", "tankname", "asset", "assetname", "reference", "ref"], required: true, max: 200, example: "Ladies toilets, basin 1" },
+    { key: "type", label: "Type", aliases: ["type", "outlettype", "kind", "category", "hotorcold", "hotcold"], required: true, max: 100, example: "Hot" },
+    { key: "location", label: "Location", aliases: ["location", "where", "area", "room", "position", "description"], max: 200, example: "Clubhouse ground floor" },
+    { key: "site", label: "Site", aliases: ["site", "sitename"], max: 200, example: "" },
+  ],
 };
+
+export type LegionellaListType = "hot" | "cold" | "tmv" | "little_used" | "cold_water_tank" | "calorifier";
+export const LEGIONELLA_LIST_TYPE_WORDS = "Hot, Cold, TMV, Little used, Cold water tank or Calorifier";
+
+/**
+ * A LegionellaTrack list's Type cell: an outlet type, or a cold water tank or
+ * calorifier (which go on the equipment list). Null when it is not one.
+ */
+export function legionellaListType(value: string | null | undefined): LegionellaListType | null {
+  const v = normaliseHeader(value ?? "");
+  if (!v) return null;
+  if (/tank|cwst|cistern/.test(v)) return "cold_water_tank";
+  if (/calorifier|cylinder/.test(v)) return "calorifier";
+  if (/tmv|mix|blend|thermostatic/.test(v)) return "tmv";
+  if (/littleused|infrequent|lowuse|rarelyused|seldom|flush/.test(v)) return "little_used";
+  if (v.startsWith("hot") || v === "h") return "hot";
+  if (v.startsWith("cold") || v === "c") return "cold";
+  return null;
+}
 
 /** The natural key each register is matched on, for the template help text. */
 export const CSV_IMPORT_KEYS: Record<CsvImportType, string> = {
@@ -77,6 +127,8 @@ export const CSV_IMPORT_KEYS: Record<CsvImportType, string> = {
   "room-track-rooms": "Site + room number",
   contractors: "Email",
   "fire-call-points": "Site + call point",
+  "allergen-ingredients": "Site + ingredient name",
+  "legionella-outlets": "Site + name (outlets), or site + name + type (tanks and calorifiers)",
 };
 
 export const normaliseHeader = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -111,7 +163,8 @@ export function mapImportRows(type: CsvImportType, input: CsvImportInput): Mappe
   const ignoredHeaders: string[] = [];
   input.headers.forEach((header, index) => {
     const normalised = normaliseHeader(header);
-    const column = columns.find((candidate) => candidate.aliases.includes(normalised));
+    const column = columns.find((candidate) => candidate.aliases.includes(normalised))
+      ?? (normalised ? columns.find((candidate) => candidate.prefixes?.some((prefix) => normalised.startsWith(prefix))) : undefined);
     if (!column) {
       if (header.trim()) ignoredHeaders.push(header.trim());
       return;
@@ -122,6 +175,9 @@ export function mapImportRows(type: CsvImportType, input: CsvImportInput): Mappe
   });
   for (const column of columns) {
     if (column.required && !headerIndex.has(column.key)) fileErrors.push(`Missing required column "${column.label}"`);
+  }
+  if (type === "allergen-ingredients" && !columns.some((column) => (column.kind === "allergen" || column.key === "contains") && headerIndex.has(column.key))) {
+    fileErrors.push("Add the allergen information: a column for each allergen (Y, N or May), or a \"Contains\" column");
   }
   if (input.rows.length > CSV_IMPORT_MAX_ROWS) fileErrors.push(`The file has ${input.rows.length} rows; the maximum is ${CSV_IMPORT_MAX_ROWS}`);
   if (fileErrors.length) return { rows: [], fileErrors, ignoredHeaders };
@@ -150,6 +206,12 @@ export function mapImportRows(type: CsvImportType, input: CsvImportInput): Mappe
       if (column.kind === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
         errors.push(`${column.label} "${value}" is not a valid email address`);
       }
+      if (column.kind === "allergen") {
+        const cell = parseAllergenCell(value);
+        if (!cell) errors.push(`${column.label} "${value}" is not understood (use Y, N or May)`);
+        values[column.key] = cell;
+        continue;
+      }
       if (column.kind === "date") {
         const iso = parseImportDate(value);
         if (!iso) {
@@ -168,6 +230,27 @@ export function mapImportRows(type: CsvImportType, input: CsvImportInput): Mappe
       else errors.push(`Appliance type "${values.applianceType}" is not recognised (use one of: ${PAT_APPLIANCE_TYPES.join(", ")})`);
     }
     if (type === "contractors" && values.email) values.email = values.email.toLowerCase();
+    if (type === "allergen-ingredients") {
+      // One "contains" and one "may contain" list from the matrix and the
+      // list columns together, in the regulated order.
+      const contains = new Set<string>();
+      const mayContain = new Set<string>();
+      for (const key of ALLERGEN_KEYS) {
+        const cell = values[`allergen_${key}`];
+        if (cell === "contains") contains.add(key);
+        if (cell === "may") mayContain.add(key);
+      }
+      for (const [field, set, label] of [["contains", contains, "Contains"], ["mayContain", mayContain, "May contain"]] as const) {
+        const named = allergensInText(values[field] ?? "");
+        named.keys.forEach((key) => set.add(key));
+        for (const name of named.unknown) errors.push(`${label}: "${name}" is not one of the 14 allergens`);
+      }
+      // A row with nothing filled in is not "free from all 14": say so.
+      const answered = ALLERGEN_KEYS.some((key) => values[`allergen_${key}`] !== null) || values.contains !== null || values.mayContain !== null;
+      if (!answered) errors.push("No allergen information on this row: fill in Y, N or May for each allergen, or write None under Contains");
+      values.contains = ALLERGEN_KEYS.filter((key) => contains.has(key)).join(";");
+      values.mayContain = ALLERGEN_KEYS.filter((key) => mayContain.has(key) && !contains.has(key)).join(";");
+    }
     rows.push({ row: index + 2, values, errors });
   });
   return { rows, fileErrors, ignoredHeaders };
@@ -221,7 +304,7 @@ export function csvCell(value: string): string {
 
 /** Downloadable template: the header row plus one example row. */
 export function importTemplateCsv(type: CsvImportType): string {
-  const columns = CSV_IMPORT_COLUMNS[type];
+  const columns = CSV_IMPORT_COLUMNS[type].filter((column) => !column.notInTemplate);
   const header = columns.map((column) => csvCell(column.label)).join(",");
   const example = columns.map((column) => csvCell(column.example)).join(",");
   return `﻿${header}\r\n${example}\r\n`;
