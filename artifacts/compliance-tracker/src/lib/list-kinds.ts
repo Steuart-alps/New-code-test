@@ -10,15 +10,16 @@ export type ListKind = "pat-appliances" | "room-track-rooms" | "contractors" | "
 /**
  * The tab each list has in the setup wizard's "What we need from you"
  * workbooks (src/lib/setup-info-sheets.ts); its import reads that tab.
+ * LegionellaTrack's workbook counts outlets rather than listing them, so its
+ * outlet and tank list has no tab.
  */
-export const WORKBOOK_TABS: Record<ListKind, string> = {
+export const WORKBOOK_TABS: Partial<Record<ListKind, string>> = {
   "pat-appliances": "Appliances",
   "room-track-rooms": "Rooms",
   contractors: "Contractors",
   "fire-call-points": "Call points",
   "greentrack-equipment": "Equipment",
   "staff-roster": "Staff roster",
-  "legionella-outlets": "Outlets and tanks",
 };
 
 export const LIST_KINDS: Record<ListKind, { label: string; noun: string; service: string | null; headings: string[]; fileName: RegExp }> = {

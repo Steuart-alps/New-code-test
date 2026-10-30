@@ -72,7 +72,7 @@ export function UploadLists() {
         // A setup "What we need from you" workbook has several tabs: the
         // list is the tab named for it, which its import reads too.
         const tabs = await spreadsheetTabNames(file);
-        const workbookKind = kinds.find(candidate => tabs.some(tab => tab.trim().toLowerCase() === WORKBOOK_TABS[candidate].toLowerCase()));
+        const workbookKind = kinds.find(candidate => tabs.some(tab => tab.trim().toLowerCase() === WORKBOOK_TABS[candidate]?.toLowerCase()));
         const sheet = await readSpreadsheet(file, workbookKind ? { sheet: WORKBOOK_TABS[workbookKind] } : {});
         const kind = workbookKind ?? guessListKind(sheet.headers, file.name, kinds);
         update(item.id, kind
