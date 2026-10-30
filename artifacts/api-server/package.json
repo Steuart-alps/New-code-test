@@ -39,6 +39,7 @@
     "test:voice-log": "bash tests/run-fresh-schema.sh tests/voice-log.mjs",
     "test:kitchen-inspection-export": "bash tests/run-fresh-schema.sh tests/kitchen-inspection-export.mjs",
     "test:kitchen-status-site-scope": "bash tests/run-fresh-schema.sh tests/kitchen-status-site-scope.mjs",
+    "test:kitchen-month-summary": "bash tests/run-fresh-schema.sh tests/kitchen-month-summary.mjs",
     "test:dashboard-accuracy": "bash tests/run-fresh-schema.sh tests/dashboard-accuracy.mjs",
     "test:today-by-department": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/today-by-department.mjs",
     "test:dashboard-accuracy:pushed": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/dashboard-accuracy.mjs",

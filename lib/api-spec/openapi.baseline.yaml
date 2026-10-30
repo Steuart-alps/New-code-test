@@ -4782,6 +4782,42 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /food-safety/month-summary:
+    get:
+      operationId: getFoodSafetyMonthSummary
+      tags: [food-safety]
+      summary: KitchenTrack month summary for Owners and Managers
+      description: >-
+        For every site the user can see: diary days recorded, in draft, closed and missed
+        (counted up to yesterday, from the site's first diary record), and the KitchenTrack
+        actions raised in the month and still open.
+      parameters:
+        - in: query
+          name: month
+          description: The month as YYYY-MM. Defaults to the business's current month.
+          schema:
+            type: string
+            pattern: "^[0-9]{4}-[0-9]{2}$"
+      responses:
+        "200":
+          description: The month's summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KitchenMonthSummary"
+        "400":
+          description: Invalid month
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Only Owners and Managers see the summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /food-safety/missing-dates:
     get:
       operationId: getFoodSafetyMissingDates
@@ -11917,6 +11953,89 @@ components:
           items:
             type: string
             format: date
+
+    KitchenMonthSummarySite:
+      type: object
+      required: [siteId, siteName, startedOn, daysCounted, recordedDays, draftDays, closedDays, missedDays, missedDates, failedReadings, actionsRaised, actionsOpen]
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
+        startedOn:
+          type: string
+          format: date
+          nullable: true
+          description: The site's first diary record; days before it are not counted.
+        daysCounted:
+          type: integer
+        recordedDays:
+          type: integer
+        draftDays:
+          type: integer
+        closedDays:
+          type: integer
+        missedDays:
+          type: integer
+        missedDates:
+          type: array
+          items:
+            type: string
+            format: date
+        failedReadings:
+          type: integer
+        actionsRaised:
+          type: integer
+        actionsOpen:
+          type: integer
+
+    KitchenMonthSummary:
+      type: object
+      required: [month, from, through, today, sites, totals]
+      properties:
+        month:
+          type: string
+        from:
+          type: string
+          format: date
+        through:
+          type: string
+          format: date
+          nullable: true
+          description: The last day counted (yesterday, or the month's last day). Null when no day has finished yet.
+        today:
+          type: string
+          format: date
+        sites:
+          type: array
+          items:
+            $ref: "#/components/schemas/KitchenMonthSummarySite"
+        totals:
+          type: object
+          required: [daysCounted, recordedDays, draftDays, closedDays, missedDays, failedReadings, actionsRaised, actionsResolved, actionsOpen, actionsOverdue]
+          properties:
+            daysCounted:
+              type: integer
+            recordedDays:
+              type: integer
+            draftDays:
+              type: integer
+            closedDays:
+              type: integer
+            missedDays:
+              type: integer
+            failedReadings:
+              type: integer
+            actionsRaised:
+              type: integer
+            actionsResolved:
+              type: integer
+            actionsOpen:
+              type: integer
+            actionsOverdue:
+              type: integer
 
     FoodSafetyMonthlySummary:
       type: object

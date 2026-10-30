@@ -6642,6 +6642,51 @@ export const GetFoodSafetySummaryResponse = zod.object({
 
 
 /**
+ * For every site the user can see: diary days recorded, in draft, closed and missed (counted up to yesterday, from the site's first diary record), and the KitchenTrack actions raised in the month and still open.
+ * @summary KitchenTrack month summary for Owners and Managers
+ */
+export const getFoodSafetyMonthSummaryQueryMonthRegExp = new RegExp('^[0-9]{4}-[0-9]{2}$');
+
+
+export const GetFoodSafetyMonthSummaryQueryParams = zod.object({
+  "month": zod.coerce.string().regex(getFoodSafetyMonthSummaryQueryMonthRegExp).optional().describe('The month as YYYY-MM. Defaults to the business\'s current month.')
+})
+
+export const GetFoodSafetyMonthSummaryResponse = zod.object({
+  "month": zod.string(),
+  "from": zod.date(),
+  "through": zod.date().nullable().describe('The last day counted (yesterday, or the month\'s last day). Null when no day has finished yet.'),
+  "today": zod.date(),
+  "sites": zod.array(zod.object({
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "startedOn": zod.date().nullable().describe('The site\'s first diary record; days before it are not counted.'),
+  "daysCounted": zod.number(),
+  "recordedDays": zod.number(),
+  "draftDays": zod.number(),
+  "closedDays": zod.number(),
+  "missedDays": zod.number(),
+  "missedDates": zod.array(zod.date()),
+  "failedReadings": zod.number(),
+  "actionsRaised": zod.number(),
+  "actionsOpen": zod.number()
+})),
+  "totals": zod.object({
+  "daysCounted": zod.number(),
+  "recordedDays": zod.number(),
+  "draftDays": zod.number(),
+  "closedDays": zod.number(),
+  "missedDays": zod.number(),
+  "failedReadings": zod.number(),
+  "actionsRaised": zod.number(),
+  "actionsResolved": zod.number(),
+  "actionsOpen": zod.number(),
+  "actionsOverdue": zod.number()
+})
+})
+
+
+/**
  * @summary List missing and unsubmitted food safety diary dates in a bounded range
  */
 export const GetFoodSafetyMissingDatesQueryParams = zod.object({
