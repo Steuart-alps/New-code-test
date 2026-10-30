@@ -69,7 +69,7 @@ export function TrackContractorChecks({ module, siteId }: { module: string; site
   const now = Date.now();
   const siteName = new Map((sites ?? []).map((site) => [site.id, site.name]));
   const showSite = siteId === undefined && (sites?.length ?? 0) > 1;
-  const rows = types.flatMap((type) => {
+  const allRows = types.flatMap((type) => {
     const checks = items.filter((item) => normalise(item.title) === normalise(type.title)
       && (siteId === undefined || item.siteId == null || item.siteId === siteId));
     if (!checks.length) {
@@ -82,6 +82,11 @@ export function TrackContractorChecks({ module, siteId }: { module: string; site
     }
     return checks.map((item) => ({ type, item, notNeeded: false }));
   });
+  // Lines marked N/A on the Contractors page are hidden until added back there.
+  const rows = allRows.filter((row) => !row.notNeeded);
+  const hidden = allRows.length - rows.length;
+  const setUpLink = (key: string) =>
+    `/contractors?${new URLSearchParams({ visit: key, ...(siteId !== undefined ? { site: String(siteId) } : {}) })}`;
 
   return (
     <Card className="p-4" data-testid={`track-contractor-checks-${module}`}>
@@ -95,7 +100,7 @@ export function TrackContractorChecks({ module, siteId }: { module: string; site
         </div>
       </div>
       <ul className="space-y-2">
-        {rows.map(({ type, item, notNeeded }) => {
+        {rows.map(({ type, item }) => {
           if (!item) {
             const style = RAG_STYLES.grey;
             return (
@@ -103,9 +108,9 @@ export function TrackContractorChecks({ module, siteId }: { module: string; site
                 data-testid="contractor-check-row" data-rag="grey">
                 <div className="min-w-0">
                   <p className="text-sm font-medium">{type.label}</p>
-                  <p className={cn("text-xs", style.word)}>{notNeeded ? "No contractor needed" : "Not set up yet"}</p>
+                  <p className={cn("text-xs", style.word)}>Not set up yet: choose a contractor, or N/A if none is needed</p>
                 </div>
-                {!notNeeded && <Link href="/contractors" className="text-xs text-primary font-medium hover:underline">Set it up →</Link>}
+                <Link href={setUpLink(type.key)} className="text-xs text-primary font-medium hover:underline">Set it up →</Link>
               </li>
             );
           }
@@ -138,6 +143,13 @@ export function TrackContractorChecks({ module, siteId }: { module: string; site
           );
         })}
       </ul>
+      {rows.length === 0 && <p className="text-sm text-muted-foreground">No contractor checks needed here.</p>}
+      {hidden > 0 && (
+        <p className="text-xs text-muted-foreground mt-2" data-testid="contractor-checks-hidden">
+          {hidden} marked N/A (no contractor needed) and hidden.{" "}
+          <Link href="/contractors" className="text-primary font-medium hover:underline">Add back on the Contractors page</Link>
+        </p>
+      )}
     </Card>
   );
 }
