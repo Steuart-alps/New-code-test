@@ -9,6 +9,7 @@ import { READABLE_LIST, isPhotoOrPdf, listFileBody, useListReading } from "@/com
 import { MachineImportDialog } from "@/pages/green-track";
 import { RosterImportDialog } from "@/components/roster-import-dialog";
 import { TrackSetupDialog } from "@/components/track-setup-dialog";
+import { AlpsAssistOffer } from "@/components/alps-assist-offer";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
@@ -146,6 +147,8 @@ export function UploadLists() {
   return (
     <>
       <div className="max-w-3xl space-y-4">
+        {/* Rather not do it yourself? The paid setup service comes first. */}
+        <AlpsAssistOffer />
         <p className="text-sm text-muted-foreground">
           Drop all your existing lists here at once: {kinds.map(kind => LIST_KINDS[kind].noun).join(", ")}.
           ComplyTrack works out which list each file is, then you check and import each one. Nothing is saved until you confirm it.

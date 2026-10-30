@@ -141,7 +141,7 @@ function AiNote({ ai }: { ai?: SetupAi }) {
   );
 }
 
-function SetupServiceOffer({ request, onRequest }: {
+export function SetupServiceOffer({ request, onRequest }: {
   request: SetupAssistRequest | null;
   onRequest: (details: { phone: string; notes: string }) => Promise<void>;
 }) {
