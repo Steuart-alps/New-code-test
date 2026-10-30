@@ -146,6 +146,62 @@ export function setRecordSignatureHandler(handler: RecordSignatureHandler | null
   _recordSignatureHandler = handler;
 }
 
+export type CorrectiveActionFailure = { key: string; label: string };
+
+export type CorrectiveActionRequest = {
+  method: string;
+  url: string;
+  /** The server's explanation, suitable for showing to the user. */
+  message: string;
+  /** What failed: one corrective action is asked for each. */
+  failures: CorrectiveActionFailure[];
+};
+
+/** Resolves to the corrective action for each failure key, or null when the user cancelled. */
+export type CorrectiveActionHandler = (info: CorrectiveActionRequest) => Promise<Record<string, string> | null>;
+
+let _correctiveActionHandler: CorrectiveActionHandler | null = null;
+
+/** Header carrying the corrective actions for a check with a fail (URI-encoded JSON). */
+export const CORRECTIVE_ACTIONS_HEADER = "X-Corrective-Actions";
+/** Error code the API sends (HTTP 428) when a check with a fail needs its corrective action. */
+export const CORRECTIVE_ACTION_REQUIRED_CODE = "CORRECTIVE_ACTION_REQUIRED";
+
+/**
+ * Register a handler that asks what was done about each fail on a check
+ * being saved. When a mutation is answered 428 with code
+ * CORRECTIVE_ACTION_REQUIRED, the handler is called; returned answers retry
+ * the same request once with the `X-Corrective-Actions` header, while null
+ * leaves the original 428 error in place. Pass `null` to clear.
+ */
+export function setCorrectiveActionHandler(handler: CorrectiveActionHandler | null): void {
+  _correctiveActionHandler = handler;
+}
+
+/** The server's message and failures when an error body asks for corrective actions, else null. */
+export function correctiveActionRequiredInfo(data: unknown): { message: string; failures: CorrectiveActionFailure[] } | null {
+  if (!data || typeof data !== "object") return null;
+  if ((data as Record<string, unknown>).code !== CORRECTIVE_ACTION_REQUIRED_CODE) return null;
+  const raw = (data as Record<string, unknown>).failures;
+  const failures = Array.isArray(raw)
+    ? raw.flatMap((item) => {
+      const key = getStringField(item, "key");
+      const label = getStringField(item, "label");
+      return key && label ? [{ key, label }] : [];
+    })
+    : [];
+  if (!failures.length) return null;
+  return {
+    message: getStringField(data, "error") ?? "Say what you did about each fail before saving.",
+    failures,
+  };
+}
+
+/** The header value carrying corrective actions. */
+export function correctiveActionsHeaderValue(answers: Record<string, string>): string {
+  return encodeURIComponent(JSON.stringify(answers));
+}
+
 /** The server's message and signer when an error body asks for a signature, else null. */
 export function signatureRequiredInfo(data: unknown): { message: string; signedBy: string | null } | null {
   if (!data || typeof data !== "object") return null;
@@ -592,7 +648,27 @@ export async function customFetch<T = unknown>(
   let retryHeaders = headers;
   let askedSignature = false;
   let askedReason = false;
+  let askedCorrective = false;
   for (;;) {
+    if (response.status === 428 && canResend && !askedCorrective && _correctiveActionHandler !== null
+      && (await response.clone().json().catch(() => null) as { code?: unknown } | null)?.code === CORRECTIVE_ACTION_REQUIRED_CODE) {
+      askedCorrective = true;
+      const failedData = await parseErrorBody(response, method);
+      const info = correctiveActionRequiredInfo(failedData);
+      let answers: Record<string, string> | null = null;
+      if (info) {
+        try {
+          answers = await _correctiveActionHandler({ method, url: requestInfo.url, ...info });
+        } catch {
+          answers = null;
+        }
+      }
+      if (!answers) throw new ApiError(response, failedData, requestInfo);
+      retryHeaders = new Headers(retryHeaders);
+      retryHeaders.set(CORRECTIVE_ACTIONS_HEADER, correctiveActionsHeaderValue(answers));
+      response = await fetch(input, { ...init, method, headers: retryHeaders, credentials: "include" });
+      continue;
+    }
     if (response.status === 428 && canResend && !askedSignature && _recordSignatureHandler !== null) {
       askedSignature = true;
       const unsignedData = await parseErrorBody(response, method);
