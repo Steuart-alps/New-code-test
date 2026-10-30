@@ -508,7 +508,9 @@ export default function DailyTrackPmPage() {
       {loading || !siteReady ? (
         <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        // One checklist per row: the kitchen and premises checks are separate
+        // checks, often by different teams, so they are not shown side by side.
+        <div className="grid grid-cols-1 gap-4 max-w-4xl">
           {mobileSubmission && <MobileChecklistSubmissionCard submission={mobileSubmission} />}
           {visibleTypes.map(type => (
             <ChecklistCard key={type} type={type} siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getChecklist(type)} onSaved={load} canAdmin={canAdmin} draft={drafts.slot(type)} />
