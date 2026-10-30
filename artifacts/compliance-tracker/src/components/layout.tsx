@@ -30,6 +30,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetHeader, SheetDescription } from "@/components/ui/sheet";
 import alpsLogo from "@/assets/alps-logo.png";
 import { ModuleActionsPanel } from "@/components/module-actions-panel";
+import { OpenBusinessBanner, useOpenBusiness } from "@/components/open-business-banner";
 import { SayItButton } from "@/components/say-it-button";
 import { FeedbackDialog } from "@/components/feedback-dialog";
 import { CancellationBanner } from "@/components/cancellation-banner";
@@ -47,7 +48,10 @@ const noSayItRoutes = [
   "/business-dashboard", "/feedback", "/privacy-governance", "/account-security",
 ];
 
-const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
+// Consultant pages that cover every client rather than the one open.
+const noOpenBusinessBannerRoutes = ["/clients", "/portfolio", "/business-dashboard"];
+
+const moduleActionRoutes:{ prefix: string; moduleKey: string }[] = [
   { prefix: "/daily-track-am", moduleKey: "daily_am" },
   { prefix: "/daily-track-pm", moduleKey: "daily_pm" },
   { prefix: "/food-safety", moduleKey: "kitchen" },
@@ -361,7 +365,9 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
   const showSayIt = !noSayItRoutes.some(prefix => location === prefix || location.startsWith(`${prefix}/`));
   const [trackGuidanceDismissed, dismissTrackGuidance] = useTrackGuidanceDismissed(user?.id);
 
-  const primaryColor = client?.primaryColor ?? "#7FA8C9";
+  // A consultant sees the business they have open, not their own.
+  const shownClient = useOpenBusiness() ?? client;
+  const primaryColor = shownClient?.primaryColor ?? "#7FA8C9";
 
   const initials = user?.name
     ? user.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)
@@ -375,13 +381,13 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
       <aside className="hidden md:flex flex-col w-64 bg-sidebar text-sidebar-foreground border-r border-sidebar-border z-20 relative">
         <div className="min-h-[80px] flex items-center px-6 py-4 border-b border-sidebar-border">
           <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity w-full min-w-0">
-            {client?.logoUrl ? (
-              <img src={client.logoUrl} alt={client.name} className="w-8 h-8 object-contain rounded-sm flex-shrink-0" />
+            {shownClient?.logoUrl ? (
+              <img src={shownClient.logoUrl} alt={shownClient.name} className="w-8 h-8 object-contain rounded-sm flex-shrink-0" />
             ) : (
               <ShieldCheck className="w-6 h-6 flex-shrink-0" style={{ color: primaryColor }} />
             )}
             <span className="font-display font-bold text-lg tracking-wide break-words min-w-0 flex-1">
-              {client ? client.name : "ComplyTrack"}
+              {shownClient ? shownClient.name : "ComplyTrack"}
             </span>
           </Link>
         </div>
@@ -546,13 +552,13 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
                   </SheetHeader>
                   <div className="min-h-[80px] flex items-center px-6 py-4 border-b border-sidebar-border">
                     <Link href="/dashboard" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-3 hover:opacity-80 transition-opacity w-full min-w-0">
-                      {client?.logoUrl ? (
-                        <img src={client.logoUrl} alt={client.name} className="w-8 h-8 object-contain rounded-sm flex-shrink-0" />
+                      {shownClient?.logoUrl ? (
+                        <img src={shownClient.logoUrl} alt={shownClient.name} className="w-8 h-8 object-contain rounded-sm flex-shrink-0" />
                       ) : (
                         <ShieldCheck className="w-6 h-6 flex-shrink-0" style={{ color: primaryColor }} />
                       )}
                       <span className="font-display font-bold text-lg tracking-wide break-words min-w-0 flex-1">
-                        {client ? client.name : "ComplyTrack"}
+                        {shownClient ? shownClient.name : "ComplyTrack"}
                       </span>
                     </Link>
                   </div>
@@ -702,6 +708,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
             transition={{ duration: 0.4, ease: "easeOut" }}
             className="max-w-7xl mx-auto space-y-8"
           >
+            {!noOpenBusinessBannerRoutes.includes(location) && <OpenBusinessBanner />}
             <ManagedByBadge />
             <CancellationBanner />
             <StorageLimitBanner />
