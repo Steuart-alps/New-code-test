@@ -856,6 +856,48 @@ paths:
         "204":
           description: Deleted
 
+  /sites/{id}/checklist-due-times:
+    put:
+      operationId: setSiteChecklistDueTimes
+      tags: [sites]
+      summary: Set when the site's opening and closing checks are due, and when their reminders go out
+      description: >
+        Owners, consultants and Managers who can see the site. Times are
+        "HH:MM" on the business's clock; null or blank uses the default
+        (due 06:00 opening, 18:00 closing; reminders 11:00 and 21:00). A
+        field left out keeps its time.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SiteChecklistDueTimesRequest"
+      responses:
+        "200":
+          description: Updated site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Site"
+        "400":
+          description: Not a valid time
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not an Owner, consultant or Manager who can see the site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /contractor-visits:
     get:
       operationId: listContractorVisits
@@ -7947,6 +7989,25 @@ components:
         color:
           type: string
 
+    SiteChecklistDueTimesRequest:
+      type: object
+      properties:
+        openingChecksDue:
+          type: string
+          nullable: true
+          description: '"HH:MM"; null or blank for the default 06:00.'
+        closingChecksDue:
+          type: string
+          nullable: true
+          description: '"HH:MM"; null or blank for the default 18:00.'
+        openingReminderAt:
+          type: string
+          nullable: true
+          description: 'When the reminder about opening checks not yet submitted goes out, "HH:MM"; null or blank for the default 11:00.'
+        closingReminderAt:
+          type: string
+          nullable: true
+          description: 'When the reminder about closing checks not yet submitted goes out, "HH:MM"; null or blank for the default 21:00.'
     Site:
       type: object
       properties:
@@ -7976,6 +8037,22 @@ components:
           type: boolean
           nullable: true
           description: A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.
+        openingChecksDue:
+          type: string
+          nullable: true
+          description: When the site's opening checks are due ("HH:MM" on the business's clock). Null means 06:00.
+        closingChecksDue:
+          type: string
+          nullable: true
+          description: When the site's closing checks are due ("HH:MM" on the business's clock). Null means 18:00.
+        openingReminderAt:
+          type: string
+          nullable: true
+          description: When the reminder about opening checks not yet submitted goes out ("HH:MM"). Null means 11:00.
+        closingReminderAt:
+          type: string
+          nullable: true
+          description: When the reminder about closing checks not yet submitted goes out ("HH:MM"). Null means 21:00.
         createdAt:
           type: string
           format: date-time

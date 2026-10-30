@@ -9,7 +9,10 @@ import {
   getClientId,
   canAccessClient,
   getActiveDepartmentId,
+  requireRole,
+  denyViewers,
 } from "../middleware/requireAuth";
+import { parseChecklistDueTime } from "../lib/checklistDueTimes";
 import { seedSiteStarterChecks } from "../lib/seedStarterContent";
 import { syncClientSubscriptionQuantity, queueSiteAddedCharge } from "../lib/billing";
 import { filterName } from "../lib/contentFilter";
@@ -226,6 +229,45 @@ router.patch("/sites/:id", requireAuth, requireClientAdmin, async (req, res) => 
   if ("departmentId" in req.body) updates.departmentId = departmentId;
 
   const [updated] = await db.update(sitesTable).set(updates)
+    .where(and(eq(sitesTable.id, id), eq(sitesTable.clientId, existing.clientId))).returning();
+  res.json(updated);
+});
+
+/**
+ * When the site's opening and closing checks are due ("HH:MM"; null or blank
+ * for the default 06:00 / 18:00), and when the reminder about checks still not
+ * submitted goes out (default 11:00 / 21:00). Owners, consultants and the
+ * Managers who can see the site set them (lib/checklistDueTimes.ts).
+ */
+router.put("/sites/:id/checklist-due-times", requireAuth, denyViewers, requireRole("consultant", "client_admin", "client_manager"), async (req, res) => {
+  const id = parsePositiveSafeInteger(req.params.id);
+  if (id === null) {
+    res.status(400).json({ error: "Invalid site id" });
+    return;
+  }
+  const [existing] = await db.select().from(sitesTable).where(eq(sitesTable.id, id));
+  if (!existing) {
+    res.status(404).json({ error: "Site not found" });
+    return;
+  }
+  if (!canAccessClient(req, existing.clientId) || !(await siteVisibleToDepartment(existing, getActiveDepartmentId(req)))) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const time = (key: "openingChecksDue" | "closingChecksDue" | "openingReminderAt" | "closingReminderAt") =>
+    key in body ? parseChecklistDueTime(body[key]) : existing[key];
+  const times = {
+    openingChecksDue: time("openingChecksDue"),
+    closingChecksDue: time("closingChecksDue"),
+    openingReminderAt: time("openingReminderAt"),
+    closingReminderAt: time("closingReminderAt"),
+  };
+  if (Object.values(times).includes("invalid")) {
+    res.status(400).json({ error: "Enter times as hours and minutes, such as 06:00" });
+    return;
+  }
+  const [updated] = await db.update(sitesTable).set({ ...(times as Record<keyof typeof times, string | null>), updatedAt: new Date() })
     .where(and(eq(sitesTable.id, id), eq(sitesTable.clientId, existing.clientId))).returning();
   res.json(updated);
 });

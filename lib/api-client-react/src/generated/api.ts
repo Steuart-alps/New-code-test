@@ -278,6 +278,7 @@ import type {
   SetupTeamAloneResult,
   SignTrainingRecordRequest,
   Site,
+  SiteChecklistDueTimesRequest,
   StorageStatus,
   StorageUsage,
   TestBusinessDeletionRequest,
@@ -2823,6 +2824,79 @@ export const useDeleteSite = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteSiteMutationOptions(options));
+    }
+
+export const getSetSiteChecklistDueTimesUrl = (id: number,) => {
+
+
+
+
+  return `/api/sites/${id}/checklist-due-times`
+}
+
+/**
+ * Owners, consultants and Managers who can see the site. Times are "HH:MM" on the business's clock; null or blank uses the default (due 06:00 opening, 18:00 closing; reminders 11:00 and 21:00). A field left out keeps its time.
+ * @summary Set when the site's opening and closing checks are due, and when their reminders go out
+ */
+export const setSiteChecklistDueTimes = async (id: number,
+    siteChecklistDueTimesRequest: SiteChecklistDueTimesRequest, options?: RequestInit): Promise<Site> => {
+
+  return customFetch<Site>(getSetSiteChecklistDueTimesUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(siteChecklistDueTimesRequest)
+  }
+);}
+
+
+
+
+
+export const getSetSiteChecklistDueTimesMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setSiteChecklistDueTimes>>, TError,{id: number;data: BodyType<SiteChecklistDueTimesRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setSiteChecklistDueTimes>>, TError,{id: number;data: BodyType<SiteChecklistDueTimesRequest>}, TContext> => {
+
+const mutationKey = ['setSiteChecklistDueTimes'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setSiteChecklistDueTimes>>, {id: number;data: BodyType<SiteChecklistDueTimesRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  setSiteChecklistDueTimes(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetSiteChecklistDueTimesMutationResult = NonNullable<Awaited<ReturnType<typeof setSiteChecklistDueTimes>>>
+    export type SetSiteChecklistDueTimesMutationBody = BodyType<SiteChecklistDueTimesRequest>
+    export type SetSiteChecklistDueTimesMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Set when the site's opening and closing checks are due, and when their reminders go out
+ */
+export const useSetSiteChecklistDueTimes = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setSiteChecklistDueTimes>>, TError,{id: number;data: BodyType<SiteChecklistDueTimesRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setSiteChecklistDueTimes>>,
+        TError,
+        {id: number;data: BodyType<SiteChecklistDueTimesRequest>},
+        TContext
+      > => {
+      return useMutation(getSetSiteChecklistDueTimesMutationOptions(options));
     }
 
 export const getListContractorVisitsUrl = () => {
