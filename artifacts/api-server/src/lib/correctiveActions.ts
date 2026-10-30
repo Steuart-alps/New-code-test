@@ -170,7 +170,15 @@ function fireFailures(body: Record<string, unknown>): Failure[] {
       key: `route:${index}`, label: `Escape route ${route.name}: ${route.status}`, sourceKind,
     }));
   }
-  return failedIf(body.result === "fail", { key: "check", label: `${label} failed`, sourceKind });
+  // The alarm panel form has its own "Actions taken" box.
+  let given: string | null = null;
+  try {
+    const notes = typeof body.notes === "string" ? JSON.parse(body.notes) : null;
+    if (notes?._type === "alarm_panel") given = text(notes.actionsTaken) || null;
+  } catch {
+    // Plain-text notes.
+  }
+  return failedIf(body.result === "fail", { key: "check", label: `${label} failed`, sourceKind, given });
 }
 
 /**
