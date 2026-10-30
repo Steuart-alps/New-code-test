@@ -117,6 +117,23 @@ const TEMP_PLACEHOLDER: Partial<Record<LegionellaCheckType, string>> = {
   cold_nonsent_temp:  "e.g. 18.0  (target ≤20°C)",
 };
 
+// Each check type is done on different plant, so the location example matches it.
+const LOCATION_PLACEHOLDER: Record<LegionellaCheckType, string> = {
+  calorifier_temp:       "e.g. Plant room, calorifier 1",
+  hot_sentinel_temp:     "e.g. 2nd floor bathroom, hot tap (furthest from calorifier)",
+  hot_nonsent_temp:      "e.g. Ground floor male toilets, hot tap 3",
+  cold_tank_temp:        "e.g. Roof void, main cold water tank",
+  cold_sentinel_temp:    "e.g. Kitchen, cold tap (nearest the tank)",
+  cold_nonsent_temp:     "e.g. Ground floor male toilets, cold tap 3",
+  cold_tank_inspection:  "e.g. Roof void, main cold water tank",
+  cold_tank_clean:       "e.g. Roof void, main cold water tank",
+  calorifier_inspection: "e.g. Plant room, calorifier 1",
+  calorifier_clean:      "e.g. Plant room, calorifier 1",
+  shower_clean:          "e.g. Room 12 en-suite shower",
+  tmv_service:           "e.g. Accessible toilet basin TMV",
+  outlet_flush:          "e.g. Spare room 7, basin and shower",
+};
+
 function ResultBadge({ result }: { result: string }) {
   if (result === "pass") {
     return (
@@ -1180,8 +1197,8 @@ function RecordCheckDialog({
           )}
 
           <div className="space-y-1.5">
-            <Label>Location / Outlet</Label>
-            <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Ground floor male toilets, tap 3" />
+            <Label>Location</Label>
+            <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder={LOCATION_PLACEHOLDER[checkType]} />
           </div>
 
           <div className="space-y-1.5">
@@ -1346,8 +1363,9 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
           />
 
           <div className="space-y-1.5">
-            <Label>Location / Outlet</Label>
-            <Input value={location} onChange={(e) => setLocation(e.target.value)} />
+            <Label>Location</Label>
+            <Input value={location} onChange={(e) => setLocation(e.target.value)}
+              placeholder={LOCATION_PLACEHOLDER[check.checkType as LegionellaCheckType]} />
           </div>
 
           <div className="space-y-1.5">
