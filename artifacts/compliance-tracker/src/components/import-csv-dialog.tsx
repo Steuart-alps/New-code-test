@@ -15,7 +15,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 
 export type ImportCsvType = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "allergen-ingredients";
 
-const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string; required: string; optional: string; matching: string; template: string; sheet: string }> = {
+const IMPORTS: Record<ImportCsvType, {
+  title: string; noun: string; one: string; required: string; optional: string; matching: string; template: string; sheet: string;
+  /** What a blank cell does, when it is not "leaves the detail unchanged". */
+  blankCells?: string;
+}> = {
   "pat-appliances": {
     title: "Upload appliance register",
     noun: "appliances",
@@ -67,6 +71,7 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     matching: "Use the supplier's own allergen sheet as it is: long headings such as \"Cereals containing gluten\" are recognised. Rows match existing ingredients by site and name; changed allergens update every dish using the ingredient, with a change log entry. Check every allergen against the supplier's information before you import.",
     template: "kitchentrack-supplier-allergens-template",
     sheet: "Allergens",
+    blankCells: "A blank allergen cell means the ingredient does not contain it; other blank cells leave existing details unchanged.",
   },
 };
 
@@ -233,7 +238,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, 
           <div className="space-y-1 rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
             <p><span className="font-medium text-foreground">Required column{config.required.includes(",") ? "s" : ""}:</span> {config.required}</p>
             <p><span className="font-medium text-foreground">Optional:</span> {config.optional}</p>
-            <p>Put the column headings in the first row. {config.matching} Blank cells leave existing details unchanged. Sites are matched by name. Up to 1,000 rows per file.</p>
+            <p>Put the column headings in the first row. {config.matching} {config.blankCells ?? "Blank cells leave existing details unchanged."} Sites are matched by name. Up to 1,000 rows per file.</p>
             <p className="flex flex-wrap items-center gap-x-2">
               <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => void downloadTemplate("xlsx")} data-testid={`button-download-${type}-template`}>
                 <Download className="mr-1 h-3.5 w-3.5" /> Download the Excel template

@@ -1522,13 +1522,13 @@ export function DailyDiaryTab() {
                 {!isSubmitted && (
                   <Button variant="outline" size="sm"
                     onClick={() => { newRow.expect(); setColdFood([...coldFood, { unit: "", tempAm: "", tempPm: "", correctiveAction: "" }]); }}>
-                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
+                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add line
                   </Button>
                 )}
               </div>
             </CardHeader>
             <CardContent className="p-0 overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[640px]">
                 <thead className="bg-muted/40 border-b border-border">
                   <tr>
                     <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Unit</th>
@@ -1545,7 +1545,7 @@ export function DailyDiaryTab() {
                       <tr key={i} className="hover:bg-muted/10">
                         <td className="px-3 py-1.5">
                           <Input value={row.unit} disabled={isSubmitted} onChange={e => upd("unit", e.target.value)}
-                            className="h-7 text-xs rounded-sm" placeholder="Fridge 1" />
+                            className="h-7 text-xs rounded-sm min-w-[120px]" placeholder="Fridge 1" />
                         </td>
                         <td className="px-3 py-1.5">
                           <Input value={row.tempAm} disabled={isSubmitted} onChange={e => upd("tempAm", e.target.value)}
@@ -1751,7 +1751,7 @@ export function DailyDiaryTab() {
               </div>
             </CardHeader>
             <CardContent className="p-0 overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[600px]">
                 <thead className="bg-muted/40 border-b border-border">
                   <tr>
                     <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Food Item</th>

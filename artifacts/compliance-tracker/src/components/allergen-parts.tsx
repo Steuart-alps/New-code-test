@@ -193,9 +193,9 @@ export function AllergenMatrix({ dishes }: {
       <table className="text-xs border-collapse min-w-[760px] w-full">
         <thead className="bg-muted/40">
           <tr>
-            <th scope="col" className="text-left font-medium p-2 border-b border-border align-bottom min-w-[150px]">Dish / product</th>
+            <th scope="col" className="sticky left-0 z-10 bg-muted text-left font-medium p-2 border-b border-r border-border align-bottom min-w-[130px]">Dish / product</th>
             {ALLERGENS.map((a) => (
-              <th key={a.key} scope="col" title={a.label} className="p-1 border-b border-l border-border align-bottom font-medium w-11">
+              <th key={a.key} scope="col" title={a.label} className="p-1 border-b border-l border-border align-top font-medium w-11">
                 <div className="flex flex-col items-center gap-1">
                   <AllergenIcon allergen={a.key} size={26} />
                   <span className="[writing-mode:vertical-rl] rotate-180 whitespace-nowrap text-[11px]">{a.short}</span>
@@ -207,7 +207,7 @@ export function AllergenMatrix({ dishes }: {
         <tbody>
           {dishes.map((dish) => (
             <tr key={dish.id} className="border-t border-border">
-              <th scope="row" className="text-left font-medium p-2">
+              <th scope="row" className="sticky left-0 z-10 bg-background text-left font-medium p-2 border-r border-border">
                 {dish.name}
                 {dish.description && <div className="font-normal text-muted-foreground">{dish.description}</div>}
               </th>

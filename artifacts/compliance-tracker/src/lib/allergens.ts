@@ -162,7 +162,7 @@ export function renderChartHtml(charts: PrintableChart[], businessName: string):
       @page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172033;margin:0;font-size:10pt}
       h1{font-size:18pt;margin:0 0 2px}h2{font-size:12pt;margin:14px 0 4px}.sub{margin:0 0 8px;color:#52606d}
       table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #7b8794;padding:4px;text-align:center;vertical-align:middle}
-      th.dish,td.dish{text-align:left;width:24%}th.allergen{height:122px;vertical-align:bottom;font-size:8.5pt;padding:3px 1px}
+      th.dish,td.dish{text-align:left;width:24%}th.allergen{height:122px;vertical-align:top;font-size:8.5pt;padding:4px 1px}
       th.allergen svg{display:block;margin:0 auto 4px}th.allergen span{writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;display:inline-block}
       td.yes{font-weight:bold;font-size:12pt;background:#fde2e1;color:#8a1c1c}td.may{font-weight:bold;background:#fff4d6;color:#8a4b00}
       .desc{font-size:8pt;color:#52606d}.ppds{font-size:8pt;color:#8a4b00;margin-top:2px}
