@@ -1007,7 +1007,10 @@ function RecordCheckDialog({
   // only one tank (or calorifier) has it chosen already.
   useEffect(() => {
     if (!open || !allUnits) return;
-    if (equipment && !siteUnits.some(u => u.id === equipment.id)) pickUnit(null);
+    // A tank the list doesn't show (outside the user's view) is kept unless the
+    // check type no longer takes a tank.
+    const known = allUnits.some(u => u.id === equipment?.id);
+    if (equipment && (!legionellaUnitType(checkType) || (known && !siteUnits.some(u => u.id === equipment.id)))) pickUnit(null);
     else if (!equipment && !preset && siteUnits.length === 1) pickUnit(siteUnits[0]);
   }, [open, allUnits, siteUnitIds, equipment?.id]);
 
@@ -1167,7 +1170,14 @@ function RecordCheckDialog({
             </div>
           )}
 
-          <LegionellaUnitPicker checkType={checkType} siteId={selectedSite} units={siteUnits} value={equipment?.id ?? null} onChange={pickUnit} />
+          {equipment && !siteUnits.some(u => u.id === equipment.id) ? (
+            <div className="flex items-center justify-between gap-2 rounded-sm border bg-muted/40 px-3 py-2 text-sm">
+              <span>Recording for <span className="font-medium">{equipment.name}</span></span>
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => pickUnit(null)}>Not this item</Button>
+            </div>
+          ) : (
+            <LegionellaUnitPicker checkType={checkType} siteId={selectedSite} units={siteUnits} value={equipment?.id ?? null} onChange={pickUnit} />
+          )}
 
           <div className="space-y-1.5">
             <Label>Location / Outlet</Label>
