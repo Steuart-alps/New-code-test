@@ -11,7 +11,7 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { foodSafetyRecordsTable, appSettingsTable, sitesTable, auditEventsTable } from "@workspace/db/schema";
 import { eq, and, sql, inArray, isNull } from "drizzle-orm";
-import { requireAuth, getActiveDepartmentId, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
+import { requireAuth, getActiveDepartmentId, getClientId, denyViewers, requireClientAdmin, requireRole } from "../middleware/requireAuth";
 import { sitesTableVisibleTo } from "../lib/departmentSites";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { defaultFoodJurisdiction } from "../lib/foodJurisdiction";
@@ -1033,6 +1033,116 @@ router.get("/missing-dates", requireAuth, async (req, res) => {
   }
 
   res.json({ from, to, siteId, missingDates, draftDates, nonOperatingDates });
+});
+
+// GET /api/food-safety/month-summary[?month=YYYY-MM]
+// The "This month" panel for Owners and Managers: for every site they can see,
+// diary days recorded, still in draft, closed and missed (counted up to
+// yesterday, from the site's first diary record), plus the KitchenTrack
+// actions raised in the month and how many are still open.
+router.get("/month-summary", requireAuth, requireRole("consultant", "client_admin", "client_manager"), async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
+
+  const today = await getAccountToday(clientId);
+  const rawMonth = (req.query as { month?: unknown }).month;
+  const month = rawMonth === undefined ? today.slice(0, 7) : rawMonth;
+  if (typeof month !== "string" || !isCalendarDate(`${month}-01`)) {
+    return void res.status(400).json({ error: "month must be YYYY-MM" });
+  }
+  const from = `${month}-01`;
+  const [year, monthNumber] = month.split("-").map(Number);
+  const nextMonth = new Date(Date.UTC(year, monthNumber, 1)).toISOString().slice(0, 10);
+  const monthEnd = addDays(nextMonth, -1);
+  // Today's diary is still being filled in, so it is never counted as missed.
+  const yesterday = addDays(today, -1);
+  const through = monthEnd < yesterday ? monthEnd : yesterday;
+
+  // Units: every visible site, or the whole-business diary when there are none.
+  const departmentId = getActiveDepartmentId(req);
+  const siteRows = await db.select({ id: sitesTable.id, name: sitesTable.name }).from(sitesTable)
+    .where(and(
+      eq(sitesTable.clientId, clientId),
+      departmentId === null ? undefined : sitesTableVisibleTo(departmentId),
+    ))
+    .orderBy(sitesTable.name, sitesTable.id);
+  const units: { id: number | null; name: string | null }[] = siteRows.length ? siteRows : [{ id: null, name: null }];
+  const siteIds = siteRows.map(site => site.id);
+  const diaryScope = siteIds.length ? inArray(foodSafetyRecordsTable.siteId, siteIds) : isNull(foodSafetyRecordsTable.siteId);
+
+  const [firstRecords, records] = await Promise.all([
+    db.select({ siteId: foodSafetyRecordsTable.siteId, first: sql<string>`MIN(${foodSafetyRecordsTable.recordDate})::text` })
+      .from(foodSafetyRecordsTable)
+      .where(and(eq(foodSafetyRecordsTable.clientId, clientId), diaryScope))
+      .groupBy(foodSafetyRecordsTable.siteId),
+    db.select({
+      siteId: foodSafetyRecordsTable.siteId,
+      recordDate: foodSafetyRecordsTable.recordDate,
+      submittedAt: foodSafetyRecordsTable.submittedAt,
+    }).from(foodSafetyRecordsTable)
+      .where(and(
+        eq(foodSafetyRecordsTable.clientId, clientId), diaryScope,
+        sql`${foodSafetyRecordsTable.recordDate} >= ${from}`,
+        sql`${foodSafetyRecordsTable.recordDate} <= ${through}`,
+      )),
+  ]);
+
+  // Actions raised this month (UTC days) and every action still open. A
+  // Manager sees only their sites' actions; whole-business ones are for Owners.
+  const actionScope = siteIds.length
+    ? (departmentId === null ? sql`AND (site_id IN (${sql.join(siteIds.map(id => sql`${id}`), sql`, `)}) OR site_id IS NULL)` : sql`AND site_id IN (${sql.join(siteIds.map(id => sql`${id}`), sql`, `)})`)
+    : sql`AND site_id IS NULL`;
+  const actionRows = (await db.execute(sql`
+    SELECT site_id,
+      COUNT(*) FILTER (WHERE created_at >= ${from}::date AND created_at < ${nextMonth}::date)::int AS raised,
+      COUNT(*) FILTER (WHERE created_at >= ${from}::date AND created_at < ${nextMonth}::date AND source_kind LIKE 'kitchen_temperature_%')::int AS failed_readings,
+      COUNT(*) FILTER (WHERE created_at >= ${from}::date AND created_at < ${nextMonth}::date AND status = 'resolved')::int AS resolved,
+      COUNT(*) FILTER (WHERE status <> 'resolved')::int AS open_now,
+      COUNT(*) FILTER (WHERE status <> 'resolved' AND due_date < ${today}::date)::int AS overdue_now
+    FROM track_actions
+    WHERE client_id = ${clientId} AND module = 'kitchen' ${actionScope}
+    GROUP BY site_id
+  `)).rows as Array<{ site_id: number | null; raised: number; failed_readings: number; resolved: number; open_now: number; overdue_now: number }>;
+
+  const sites = await Promise.all(units.map(async (unit) => {
+    const startedOn = firstRecords.find(row => row.siteId === unit.id)?.first ?? null;
+    const start = startedOn && startedOn > from ? startedOn : from;
+    const counting = !!startedOn && start <= through;
+    const closed = counting ? await loadClosedDays(clientId, unit.id, start, through) : new Map<string, ClosedDay>();
+    const unitRecords = new Map(records.filter(row => row.siteId === unit.id && row.recordDate >= start).map(row => [row.recordDate, row]));
+    let daysCounted = 0, recordedDays = 0, draftDays = 0, closedDays = 0;
+    const missedDates: string[] = [];
+    for (let date = start; counting && date <= through; date = addDays(date, 1)) {
+      daysCounted++;
+      const record = unitRecords.get(date);
+      if (record?.submittedAt) recordedDays++;
+      else if (record) draftDays++;
+      else if (closed.has(date)) closedDays++;
+      else missedDates.push(date);
+    }
+    const actions = actionRows.find(row => (row.site_id === null ? null : Number(row.site_id)) === unit.id);
+    return {
+      siteId: unit.id, siteName: unit.name, startedOn,
+      daysCounted, recordedDays, draftDays, closedDays, missedDays: missedDates.length, missedDates,
+      failedReadings: actions?.failed_readings ?? 0,
+      actionsRaised: actions?.raised ?? 0,
+      actionsOpen: actions?.open_now ?? 0,
+    };
+  }));
+  const sum = (pick: (row: (typeof actionRows)[number]) => number) => actionRows.reduce((total, row) => total + Number(pick(row)), 0);
+  const total = (key: "daysCounted" | "recordedDays" | "draftDays" | "closedDays" | "missedDays") => sites.reduce((n, site) => n + site[key], 0);
+  res.json({
+    month, from, through: through >= from ? through : null, today, sites,
+    totals: {
+      daysCounted: total("daysCounted"), recordedDays: total("recordedDays"), draftDays: total("draftDays"),
+      closedDays: total("closedDays"), missedDays: total("missedDays"),
+      failedReadings: sum(row => row.failed_readings),
+      actionsRaised: sum(row => row.raised),
+      actionsResolved: sum(row => row.resolved),
+      actionsOpen: sum(row => row.open_now),
+      actionsOverdue: sum(row => row.overdue_now),
+    },
+  });
 });
 
 // POST /api/food-safety[?siteId=N]

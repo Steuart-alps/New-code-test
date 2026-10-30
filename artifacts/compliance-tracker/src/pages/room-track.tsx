@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppLayout } from "@/components/layout";
 import { ImportCsvButton } from "@/components/import-csv-dialog";
 import { apiFetch } from "@/lib/api";
@@ -18,6 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { BedDouble, CheckCircle2, CheckSquare, ClipboardCheck, Loader2, Pencil, Plus, Archive, AlertCircle, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 import { RecordSignedBy } from "@/components/record-signature";
 
 type CheckValues = { clean: boolean; tidy: boolean; toStandard: boolean };
@@ -76,11 +77,15 @@ function RoomDialog({ room, sites, open, onOpenChange, onSaved }: {
 }) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
+  // A new room starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
   const [form, setForm] = useState(() => ({
     roomNumber: room ? roomNumber(room) : "",
     name: room?.name ?? "",
     floor: room?.floor ?? "",
-    siteId: room && roomSiteId(room) ? String(roomSiteId(room)) : "__none__",
+    siteId: room
+      ? roomSiteId(room) ? String(roomSiteId(room)) : "__none__"
+      : workingSiteId ? String(workingSiteId) : "__none__",
     notes: room?.notes ?? "",
   }));
   const update = (key: keyof typeof form, value: string) => setForm(current => ({ ...current, [key]: value }));
@@ -148,7 +153,7 @@ export default function RoomTrackPage() {
   const { toast } = useToast();
   const { data: sites = [] } = useListSites();
   const [date, setDate] = useState(today);
-  const [siteId, setSiteId] = useState("__all__");
+  const [siteId, setSiteId] = useSiteFilter("__all__");
   const [rooms, setRooms] = useState<Room[]>([]);
   const [checks, setChecks] = useState<RoomCheck[]>([]);
   const [loading, setLoading] = useState(true);
@@ -162,7 +167,10 @@ export default function RoomTrackPage() {
     if (Number.isSafeInteger(id) && id > 0) setOnlyRoomId(id);
   }, []);
 
+  // A slower answer for the previous site or date must not replace this one.
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -175,11 +183,12 @@ export default function RoomTrackPage() {
       if (!roomsResponse.ok) throw new Error((await roomsResponse.json().catch(() => ({}))).error ?? "Unable to load rooms");
       if (!checksResponse.ok) throw new Error((await checksResponse.json().catch(() => ({}))).error ?? "Unable to load room checks");
       const [roomData, checkData] = await Promise.all([roomsResponse.json(), checksResponse.json()]);
+      if (seq !== loadSeq.current) return;
       setRooms(roomData);
       setChecks(checkData);
     } catch (error: any) {
-      toast({ title: "Couldn't load RoomTrack", description: error.message, variant: "destructive" });
-    } finally { setLoading(false); }
+      if (seq === loadSeq.current) toast({ title: "Couldn't load RoomTrack", description: error.message, variant: "destructive" });
+    } finally { if (seq === loadSeq.current) setLoading(false); }
   }, [date, siteId, toast]);
 
   useEffect(() => { load(); }, [load]);
@@ -247,7 +256,9 @@ export default function RoomTrackPage() {
             <Button variant="outline" size="sm" onClick={() => setOnlyRoomId(null)}>Show every room</Button>
           </div>
         )}
-        {loading ? <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : shownRooms.length === 0 ? (
+        {/* Only the first load replaces the cards with a spinner: on a site or
+            date change they stay mounted, so unsaved ticks aren't lost. */}
+        {loading && rooms.length === 0 ? <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : shownRooms.length === 0 ? (
           <div className="rounded-sm border border-dashed p-12 text-center"><BedDouble className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" /><p className="text-sm font-medium text-muted-foreground">No active rooms for this selection</p>{canAdmin && <Button variant="outline" size="sm" className="mt-4" onClick={() => { setEditingRoom(null); setDialogOpen(true); }}>Add the first room</Button>}</div>
         ) : <div className="grid gap-4 lg:grid-cols-2">{shownRooms.map(room => {
           const check = checks.find(item => checkRoomId(item) === room.id);
@@ -268,7 +279,10 @@ function RoomCheckCard({ room, check, spoken, defaultCheckedBy, disabled, canAdm
   const [notes, setNotes] = useState(check?.notes ?? "");
   const [checkedByRosterId, setCheckedByRosterId] = useState<number | null>((check as any)?.checkedByRosterId ?? null);
   const [checkedBy, setCheckedBy] = useState(check ? checkBy(check) ?? "" : defaultCheckedBy);
-  useEffect(() => { setValues(checkValues(check)); setNotes(check?.notes ?? ""); setCheckedBy(check ? checkBy(check) ?? "" : defaultCheckedBy); }, [check, defaultCheckedBy]);
+  // Reset only when the stored check itself changes (saved, or another day's
+  // record), not when a reload hands over an identical copy.
+  const stored = check ? JSON.stringify([check.id, checkValues(check), check.notes ?? "", checkBy(check) ?? ""]) : "";
+  useEffect(() => { setValues(checkValues(check)); setNotes(check?.notes ?? ""); setCheckedBy(check ? checkBy(check) ?? "" : defaultCheckedBy); }, [stored, defaultCheckedBy]);
   // Ticks said to Say it are added to the card, to check and save.
   useEffect(() => {
     if (!spoken) return;

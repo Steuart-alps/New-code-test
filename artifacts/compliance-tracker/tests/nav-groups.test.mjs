@@ -81,7 +81,7 @@ assert.ok(userItems.includes("Calendar") && adminItems.includes("Calendar"), "Ev
 const membership = groups => Object.fromEntries(groups.map(g => [g.id, g.items.map(i => i.href)]));
 assert.deepEqual(membership(adminGroups), {
   core: ["/dashboard", "/portfolio"],
-  setup: ["/settings", "/sites", "/users", "/staff-roster", "/equipment"],
+  setup: ["/settings", "/sites", "/users", "/staff-roster", "/upload-lists", "/equipment"],
   compliance: ["/external", "/contractors", "/calendar", "/compliance-hub"],
   safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh-track", "/asbestos"],
   "food-water": ["/kitchen", "/allergens", "/aqua-track", "/hot-tub"],

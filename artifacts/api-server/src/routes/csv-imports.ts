@@ -1,22 +1,27 @@
 import { Router, type Request, type RequestHandler } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, requireUserManager, getClientId, denyViewers, getActiveDepartmentId, isDepartmentLead } from "../middleware/requireAuth";
-import { requireService } from "../lib/services";
+import { getEntitledServices, isEntitled, requireService, type ServiceKey } from "../lib/services";
 import { filterName } from "../lib/contentFilter";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { siteVisibleSql } from "../lib/departmentSites";
 import { getAccountToday } from "../lib/accountClock";
 import { ReportReadingError, reportReadingConfigured, UnreadableReportError } from "../lib/reportReading";
 import { readApplianceList, REGISTER_READING_MAX_BYTES, registerReadingMonthlyLimit } from "../lib/registerReading";
-import { isListReadingKind, readList, type ListReadingKind } from "../lib/listReading";
+import { isListReadingKind, readList, SORTABLE_LIST_KINDS, sortList, type ListReadingKind, type SortableListKind } from "../lib/listReading";
 import { AiUnavailableError, claimAiUse, getAiStatus, settleAiUse } from "../lib/aiAllowance";
+import { allergenIngredientChangesTable, allergenIngredientsTable } from "@workspace/db/schema";
+import { pushIngredientChange, sameSet } from "../lib/allergenRecipes";
+import { ALLERGEN_COLUMN_LABELS } from "../lib/allergenImport";
 import {
   CSV_IMPORT_MAX_CELL_LENGTH,
   CSV_IMPORT_MAX_COLUMNS,
   CSV_IMPORT_MAX_ROWS,
   importTemplateCsv,
+  legionellaListType,
+  LEGIONELLA_LIST_TYPE_WORDS,
   mapImportRows,
   normaliseHeader,
   normaliseKey,
@@ -48,12 +53,19 @@ const importBody = z.object({
   siteId: z.number().int().positive().nullable().optional(),
 });
 
-// PATTrack lets staff add appliances, so department managers may import into
+// PATTrack lets staff add appliances (and KitchenTrack staff ingredients), so
+// department managers may import into
 // their own department's sites; RoomTrack rooms, contractors and FireTrack call
 // points are admin-only registers, exactly as their single-record routes are.
 const requirePatImporter: RequestHandler = (req, res, next) => {
   const user = req.currentUser;
   if (user && (user.role === "client_admin" || user.role === "consultant" || isDepartmentLead(user))) return next();
+  res.status(403).json({ error: "Manager access required" });
+};
+
+const requireLegionellaImporter: RequestHandler = (req, res, next) => {
+  const role = req.currentUser?.role;
+  if (role === "client_admin" || role === "consultant" || role === "client_manager") return next();
   res.status(403).json({ error: "Manager access required" });
 };
 
@@ -287,23 +299,26 @@ async function planContractors(tx: Tx, clientId: number, rows: MappedRow[]): Pro
   });
 }
 
+/** A blank Site cell means the site chosen on the page, or the only site. */
+async function blankSiteFor(
+  tx: Tx, clientId: number, departmentId: number | null, defaultSiteId: number | null | undefined,
+): Promise<{ siteId: number | null; error?: string }> {
+  const siteRows = rowsOf(await tx.execute(sql`SELECT id FROM sites WHERE client_id = ${clientId}`));
+  const siteAllowed = await departmentSiteCheck(tx, clientId, departmentId);
+  if (defaultSiteId != null) {
+    return siteRows.some((row) => Number(row.id) === defaultSiteId) && siteAllowed(defaultSiteId)
+      ? { siteId: defaultSiteId } : { siteId: null, error: "The chosen site is not one of this business's sites" };
+  }
+  if (siteRows.length > 1) return { siteId: null, error: "Site is required: this business has more than one site" };
+  const onlySite = siteRows.length ? Number(siteRows[0].id) : null;
+  return siteAllowed(onlySite) ? { siteId: onlySite } : { siteId: null, error: "The site is outside your department" };
+}
+
 async function planFireCallPoints(
   tx: Tx, clientId: number, departmentId: number | null, userId: number, defaultSiteId: number | null | undefined, rows: MappedRow[],
 ): Promise<PlannedRow[]> {
   const resolveSite = await siteResolver(tx, clientId, departmentId);
-  const siteRows = rowsOf(await tx.execute(sql`SELECT id FROM sites WHERE client_id = ${clientId}`));
-  const siteAllowed = await departmentSiteCheck(tx, clientId, departmentId);
-  // A blank Site cell means the site chosen on the page, or the only site.
-  let blankSite: { siteId: number | null; error?: string };
-  if (defaultSiteId != null) {
-    blankSite = siteRows.some((row) => Number(row.id) === defaultSiteId) && siteAllowed(defaultSiteId)
-      ? { siteId: defaultSiteId } : { siteId: null, error: "The chosen site is not one of this business's sites" };
-  } else if (siteRows.length > 1) {
-    blankSite = { siteId: null, error: "Site is required: this business has more than one site" };
-  } else {
-    const onlySite = siteRows.length ? Number(siteRows[0].id) : null;
-    blankSite = siteAllowed(onlySite) ? { siteId: onlySite } : { siteId: null, error: "The site is outside your department" };
-  }
+  const blankSite = await blankSiteFor(tx, clientId, departmentId, defaultSiteId);
   const existing = rowsOf(await tx.execute(sql`
     SELECT id, site_id, name, location, archived_at IS NOT NULL AS archived
     FROM fire_call_points WHERE client_id = ${clientId} ORDER BY id FOR UPDATE
@@ -348,6 +363,180 @@ async function planFireCallPoints(
   });
 }
 
+const LEGIONELLA_TYPE_LABELS: Record<string, string> = {
+  hot: "Hot outlet", cold: "Cold outlet", tmv: "TMV outlet", little_used: "Little-used outlet", calorifier: "Calorifier",
+  cold_water_tank: "Cold water tank",
+};
+
+/**
+ * LegionellaTrack outlets, tanks and calorifiers, named by the business.
+ * Outlets match the site's outlet list by name and type (a basin's hot and
+ * cold taps share a name); tanks and calorifiers match the site's equipment
+ * list by name and kind. Matches only update the location.
+ */
+async function planLegionellaOutlets(
+  tx: Tx, clientId: number, departmentId: number | null, userId: number, defaultSiteId: number | null | undefined, rows: MappedRow[],
+): Promise<PlannedRow[]> {
+  const resolveSite = await siteResolver(tx, clientId, departmentId);
+  const blankSite = await blankSiteFor(tx, clientId, departmentId, defaultSiteId);
+  const outlets = rowsOf(await tx.execute(sql`
+    SELECT id, site_id, name, type, location, active FROM legionella_sentinel_outlets WHERE client_id = ${clientId} ORDER BY id FOR UPDATE
+  `));
+  const units = rowsOf(await tx.execute(sql`
+    SELECT id, site_id, name, type, location, active FROM equipment_items
+    WHERE client_id = ${clientId} AND type IN ('cold_water_tank', 'calorifier') ORDER BY id FOR UPDATE
+  `));
+  const duplicate = duplicateGuard();
+  return rows.map((input): PlannedRow => {
+    const v = input.values;
+    const type = legionellaListType(v.type);
+    const label = [v.name, type ? LEGIONELLA_TYPE_LABELS[type] : v.type, v.location].filter(Boolean).join(" · ") || `Row ${input.row}`;
+    const errors = [...input.errors];
+    if (v.type && !type) errors.push(`Type "${v.type}" is not one of ${LEGIONELLA_LIST_TYPE_WORDS}`);
+    const site = v.site ? resolveSite(v.site) : blankSite;
+    if (site.error) errors.push(site.error);
+    if (errors.length || !type) return { row: input.row, action: "error", label, reasons: errors };
+
+    const isUnit = type === "cold_water_tank" || type === "calorifier";
+    const repeated = duplicate(`${site.siteId ?? ""}|${type}|${normaliseKey(v.name)}`, input.row);
+    if (repeated) return { row: input.row, action: "error", label, reasons: [repeated] };
+    const pool = (isUnit ? units : outlets).filter((item) => item.type === type);
+    const matches = pool.filter((item) => Number(item.site_id ?? 0) === Number(site.siteId ?? 0)
+      && normaliseKey(item.name) === normaliseKey(v.name));
+    const match = matches.find((item) => item.active);
+    if (!match) {
+      if (matches.length) {
+        return { row: input.row, action: "skip", label, reasons: [isUnit
+          ? "Matches an archived item; restore it under Equipment & QR labels instead"
+          : "Matches a removed outlet; add it back on LegionellaTrack instead"] };
+      }
+      return {
+        row: input.row, action: "create", label, reasons: [],
+        write: async (t) => {
+          if (isUnit) {
+            await t.execute(sql`
+              INSERT INTO equipment_items (client_id, site_id, name, type, location, created_by)
+              VALUES (${clientId}, ${site.siteId}, ${v.name}, ${type}, ${v.location}, ${userId})
+            `);
+            return;
+          }
+          // New outlets join the end of their site's list, in file order.
+          await t.execute(sql`
+            INSERT INTO legionella_sentinel_outlets (client_id, site_id, name, type, location, sort_order)
+            VALUES (${clientId}, ${site.siteId}, ${v.name}, ${type}, ${v.location},
+              (SELECT coalesce(max(sort_order), 0) + 1 FROM legionella_sentinel_outlets
+               WHERE client_id = ${clientId} AND site_id IS NOT DISTINCT FROM ${site.siteId}::integer))
+          `);
+        },
+      };
+    }
+    const changes = changedFields([["location", match.location, v.location ?? undefined]]);
+    if (!changes.length) return { row: input.row, action: "skip", label, reasons: ["Already listed with the same details"] };
+    const table = isUnit ? sql`equipment_items` : sql`legionella_sentinel_outlets`;
+    return {
+      row: input.row, action: "update", label, reasons: [`Updates ${changes.join(", ")}`],
+      write: async (t) => { await t.execute(sql`
+        UPDATE ${table} SET location = ${v.location ?? match.location}, updated_at = now()
+        WHERE id = ${match.id} AND client_id = ${clientId}
+      `); },
+    };
+  });
+}
+
+/** "Milk, Eggs" for a change summary. */
+const allergenNames = (keys: string[]) => keys.map((key) => ALLERGEN_COLUMN_LABELS[key as keyof typeof ALLERGEN_COLUMN_LABELS] ?? key).join(", ");
+const IMPORT_REASON = "Supplier allergen information imported";
+
+/**
+ * KitchenTrack ingredients from suppliers' allergen information. Rows match
+ * an ingredient by site (blank = every site) and name. Changed allergens are
+ * pushed to every dish using the ingredient with a change log entry, exactly
+ * as an edit on the Ingredients tab does; the preview lists what changes.
+ */
+async function planAllergenIngredients(
+  tx: Tx, clientId: number, departmentId: number | null, user: { id: number; name: string | null }, today: string, rows: MappedRow[],
+): Promise<PlannedRow[]> {
+  const resolveSite = await siteResolver(tx, clientId, departmentId);
+  // Ingredients first (FOR UPDATE), then their dishes: lib/allergenRecipes.ts lock order.
+  const existing = rowsOf(await tx.execute(sql`
+    SELECT id, site_id, name, supplier, product_code, contains, may_contain, notes
+    FROM allergen_ingredients WHERE client_id = ${clientId} AND deleted_at IS NULL ORDER BY id FOR UPDATE
+  `));
+  const duplicate = duplicateGuard();
+  const listOf = (value: string | null) => (value ? value.split(";").filter(Boolean) : []);
+  return rows.map((input): PlannedRow => {
+    const v = input.values;
+    const label = [v.name, v.supplier].filter(Boolean).join(" · ") || `Row ${input.row}`;
+    const errors = [...input.errors];
+    const site = resolveSite(v.site);
+    if (site.error) errors.push(site.error);
+    if (errors.length) return { row: input.row, action: "error", label, reasons: errors };
+
+    const repeated = duplicate(`${site.siteId ?? ""}|${normaliseKey(v.name)}`, input.row);
+    if (repeated) return { row: input.row, action: "error", label, reasons: [repeated] };
+    const contains = listOf(v.contains);
+    const mayContain = listOf(v.mayContain);
+    const summary = `${contains.length ? `contains ${allergenNames(contains)}` : "contains none of the 14"}${mayContain.length ? `; may contain ${allergenNames(mayContain)}` : ""}`;
+    const matches = existing.filter((item) => Number(item.site_id ?? 0) === Number(site.siteId ?? 0) && normaliseKey(item.name) === normaliseKey(v.name));
+    if (matches.length > 1) return { row: input.row, action: "error", label, reasons: ["Matches more than one ingredient with this name; rename one first"] };
+    const match = matches[0];
+    if (!match) {
+      return {
+        row: input.row, action: "create", label, reasons: [`New ingredient: ${summary}`],
+        write: async (t) => {
+          const [created] = await t.insert(allergenIngredientsTable).values({
+            clientId, siteId: site.siteId, name: v.name!, supplier: v.supplier, productCode: v.productCode,
+            contains, mayContain, notes: v.notes, lastCheckedAt: today, checkedBy: user.name, createdBy: user.id,
+          }).returning({ id: allergenIngredientsTable.id });
+          await t.insert(allergenIngredientChangesTable).values({
+            clientId, ingredientId: created.id, changeType: "created", containsAfter: contains, mayContainAfter: mayContain,
+            reason: IMPORT_REASON, changedBy: user.id, changedByName: user.name,
+          });
+        },
+      };
+    }
+    const before = { contains: (match.contains ?? []) as string[], mayContain: (match.may_contain ?? []) as string[] };
+    const allergensChanged = !sameSet(before.contains, contains) || !sameSet(before.mayContain, mayContain);
+    const details = changedFields([
+      ["supplier", match.supplier, v.supplier ?? undefined], ["product code", match.product_code, v.productCode ?? undefined],
+      ["notes", match.notes, v.notes ?? undefined],
+    ]);
+    if (!allergensChanged && !details.length) return { row: input.row, action: "skip", label, reasons: ["Already listed with the same allergens"] };
+    const reasons: string[] = [];
+    if (allergensChanged) {
+      const added = contains.filter((key) => !before.contains.includes(key));
+      const removed = before.contains.filter((key) => !contains.includes(key));
+      const mayAdded = mayContain.filter((key) => !before.mayContain.includes(key));
+      const mayRemoved = before.mayContain.filter((key) => !mayContain.includes(key));
+      reasons.push(`Allergens change: ${[
+        added.length ? `now contains ${allergenNames(added)}` : "", removed.length ? `no longer contains ${allergenNames(removed)}` : "",
+        mayAdded.length ? `may contain ${allergenNames(mayAdded)}` : "", mayRemoved.length ? `no longer "may contain" ${allergenNames(mayRemoved)}` : "",
+      ].filter(Boolean).join("; ")}. Dishes using it are updated.`);
+    }
+    if (details.length) reasons.push(`Updates ${details.join(", ")}`);
+    return {
+      row: input.row, action: "update", label, reasons,
+      write: async (t) => {
+        const id = Number(match.id);
+        await t.update(allergenIngredientsTable).set({
+          supplier: v.supplier ?? match.supplier, productCode: v.productCode ?? match.product_code, notes: v.notes ?? match.notes,
+          ...(allergensChanged ? { contains, mayContain, lastCheckedAt: today, checkedBy: user.name } : {}),
+          updatedAt: new Date(),
+        }).where(and(eq(allergenIngredientsTable.id, id), eq(allergenIngredientsTable.clientId, clientId)));
+        if (!allergensChanged) return;
+        const dishesUpdated = await pushIngredientChange(t, {
+          clientId, ingredientId: id, ingredientName: String(match.name), reason: IMPORT_REASON, userId: user.id, userName: user.name,
+        });
+        await t.insert(allergenIngredientChangesTable).values({
+          clientId, ingredientId: id, changeType: "allergens_changed",
+          containsBefore: before.contains, containsAfter: contains, mayContainBefore: before.mayContain, mayContainAfter: mayContain,
+          reason: IMPORT_REASON, dishesUpdated, changedBy: user.id, changedByName: user.name,
+        });
+      },
+    };
+  });
+}
+
 function handleImport(type: CsvImportType): RequestHandler {
   return async (req: Request, res) => {
     const clientId = getClientId(req);
@@ -374,7 +563,12 @@ function handleImport(type: CsvImportType): RequestHandler {
           ? await planRooms(tx, clientId, departmentId, req.currentUser!.id, mapped.rows)
           : type === "fire-call-points"
             ? await planFireCallPoints(tx, clientId, departmentId, req.currentUser!.id, parsed.data.siteId, mapped.rows)
-            : await planContractors(tx, clientId, mapped.rows);
+            : type === "legionella-outlets"
+              ? await planLegionellaOutlets(tx, clientId, departmentId, req.currentUser!.id, parsed.data.siteId, mapped.rows)
+            : type === "allergen-ingredients"
+              ? await planAllergenIngredients(tx, clientId, departmentId,
+                { id: req.currentUser!.id, name: req.currentUser!.name ?? null }, await getAccountToday(clientId), mapped.rows)
+              : await planContractors(tx, clientId, mapped.rows);
       const summary = {
         total: planned.length,
         create: planned.filter((row) => row.action === "create").length,
@@ -420,6 +614,8 @@ const REGISTER_READS_SETTING = "patRegisterReads";
  */
 const REGISTER_READING_ESTIMATE_PENCE = 15;
 const LIST_READING_ESTIMATE_PENCE = 2;
+/** Sorting a file only asks which list it is, so it costs far less than reading it. */
+const LIST_SORTING_ESTIMATE_PENCE = 1;
 class RegisterReadLimitError extends Error {}
 
 async function importableSites(clientId: number, departmentId: number | null) {
@@ -518,7 +714,8 @@ router.post("/imports/pat-appliances/read", requireAuth, denyViewers, requirePat
 // roster (lib/listReading.ts). Readings share the PAT monthly count, so
 // REGISTER_READING_MONTHLY_LIMIT is the number of lists a business may have
 // read a month across all imports. Each kind keeps its import's own access
-// rule: owners and consultants, with the track switched on.
+// rule: owners and consultants (managers for the roster and KitchenTrack
+// ingredients), with the track switched on.
 const LIST_READING_ACCESS: Record<ListReadingKind, RequestHandler[]> = {
   "room-track-rooms": [requireClientAdmin, requireService("roomtrack")],
   contractors: [requireClientAdmin],
@@ -526,6 +723,8 @@ const LIST_READING_ACCESS: Record<ListReadingKind, RequestHandler[]> = {
   "greentrack-equipment": [requireClientAdmin, requireService("greentrack")],
   // Managers too: they upload their site's roster for the monthly roster check.
   "staff-roster": [requireUserManager],
+  "allergen-ingredients": [requirePatImporter, requireService("kitchentrack")],
+  "legionella-outlets": [requireLegionellaImporter, requireService("legionellatrack")],
 };
 
 /** Runs the access rule for the :kind in the path; unknown kinds are 404. */
@@ -574,7 +773,9 @@ router.post("/imports/list-reading/:kind/read", requireAuth, denyViewers, requir
     const result = await readList({ kind, bytes, mimeType: parsed.data.mimeType, fileName: parsed.data.fileName, sites, siteId, trades }, async () => {
       aiUseId = await claimAiUse({
         clientId, userId: req.currentUser?.id ?? null, feature: "list_reading",
-        estimatePence: LIST_READING_ESTIMATE_PENCE, instead: "Upload a spreadsheet instead.",
+        // Allergen information is read on the PAT register's (dearer) model.
+        estimatePence: kind === "allergen-ingredients" ? REGISTER_READING_ESTIMATE_PENCE : LIST_READING_ESTIMATE_PENCE,
+        instead: "Upload a spreadsheet instead.",
       });
       if (!await claimRegisterRead(clientId, month, limit)) {
         throw new RegisterReadLimitError(`This business has had ${limit} lists read this month, the most allowed. Upload a spreadsheet instead, or ask ALPS.`);
@@ -593,6 +794,52 @@ router.post("/imports/list-reading/:kind/read", requireAuth, denyViewers, requir
   }
 });
 
+// ── Sorting a file into the right import ("Upload your lists") ─────────────
+// Which import a photo, scan, PDF or Word list belongs in, among the imports
+// this business has. It uses the AI allowance but not the monthly reading
+// limit: the list is read (and counted) when the person opens it in its import.
+const SORTABLE_LIST_SERVICE: Record<SortableListKind, ServiceKey | null> = {
+  "pat-appliances": "pattrack",
+  "room-track-rooms": "roomtrack",
+  contractors: null,
+  "fire-call-points": "firetrack",
+  "greentrack-equipment": "greentrack",
+  "staff-roster": null,
+};
+
+router.post("/imports/sort-list", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!reportReadingConfigured()) {
+    return res.status(503).json({ error: "Reading photos and documents is not switched on yet. Upload a spreadsheet instead.", code: "REGISTER_READING_UNAVAILABLE" });
+  }
+  const parsed = registerReadBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose a photo, PDF or Word file of your list (8 MB at most)" });
+  const services = await getEntitledServices(clientId);
+  const kinds = SORTABLE_LIST_KINDS.filter((kind) => {
+    const service = SORTABLE_LIST_SERVICE[kind];
+    return service === null || isEntitled(services, service);
+  });
+  let aiUseId: number | null = null;
+  try {
+    const result = await sortList({ bytes: Buffer.from(parsed.data.data, "base64"), mimeType: parsed.data.mimeType, fileName: parsed.data.fileName, kinds }, async () => {
+      aiUseId = await claimAiUse({
+        clientId, userId: req.currentUser?.id ?? null, feature: "list_reading",
+        estimatePence: LIST_SORTING_ESTIMATE_PENCE, instead: "Choose which list it is yourself.",
+      });
+    });
+    if (aiUseId !== null) await settleAiUse(aiUseId, result.usage, true);
+    req.log.info({ clientId, kind: result.kind, model: result.model }, "Import list sorted");
+    res.json({ kind: result.kind });
+  } catch (err) {
+    if (aiUseId !== null) await settleAiUse(aiUseId, null, false);
+    if (err instanceof AiUnavailableError) return res.status(err.status).json({ error: err.message, code: err.code });
+    if (err instanceof UnreadableReportError) return res.status(400).json({ error: err.message });
+    req.log.error({ err }, "Import list sorting failed");
+    res.status(502).json({ error: "ComplyTrack could not sort this file just now. Choose which list it is yourself." });
+  }
+});
+
 router.get("/imports/room-track-rooms/template", requireAuth, requireClientAdmin, requireService("roomtrack"), sendTemplate("room-track-rooms", "roomtrack-rooms-template.csv"));
 router.post("/imports/room-track-rooms", requireAuth, denyViewers, requireClientAdmin, requireService("roomtrack"), handleImport("room-track-rooms"));
 
@@ -600,6 +847,15 @@ router.get("/imports/contractors/template", requireAuth, requireClientAdmin, sen
 router.post("/imports/contractors", requireAuth, denyViewers, requireClientAdmin, handleImport("contractors"));
 
 router.get("/imports/fire-call-points/template", requireAuth, requireClientAdmin, requireService("firetrack"), sendTemplate("fire-call-points", "firetrack-call-points-template.csv"));
+
+// KitchenTrack ingredients from suppliers' allergen information. Managers, as
+// for PATTrack: department managers import into their own sites.
+router.get("/imports/allergen-ingredients/template", requireAuth, requirePatImporter, requireService("kitchentrack"), sendTemplate("allergen-ingredients", "kitchentrack-supplier-allergens-template.csv"));
+router.post("/imports/allergen-ingredients", requireAuth, denyViewers, requirePatImporter, requireService("kitchentrack"), handleImport("allergen-ingredients"));
 router.post("/imports/fire-call-points", requireAuth, denyViewers, requireClientAdmin, requireService("firetrack"), handleImport("fire-call-points"));
+// LegionellaTrack outlets, tanks and calorifiers: Managers too, as they can
+// add each one by hand (outlets on LegionellaTrack, tanks on the equipment list).
+router.get("/imports/legionella-outlets/template", requireAuth, requireLegionellaImporter, requireService("legionellatrack"), sendTemplate("legionella-outlets", "legionellatrack-outlets-and-tanks-template.csv"));
+router.post("/imports/legionella-outlets", requireAuth, denyViewers, requireLegionellaImporter, requireService("legionellatrack"), handleImport("legionella-outlets"));
 
 export default router;

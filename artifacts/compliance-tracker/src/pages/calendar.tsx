@@ -7,6 +7,7 @@ import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { useSiteFilter } from "@/hooks/use-working-site";
 
 type CalendarKind =
   | "compliance_due" | "contractor_visit" | "contractor_insurance" | "contractor_indemnity"
@@ -110,7 +111,7 @@ export default function CalendarPage() {
   const { user, activeClientId } = useAuth();
   const api = useActiveClientApi();
   const [month, setMonth] = useState(() => { const now = new Date(); return { year: now.getFullYear(), month: now.getMonth() }; });
-  const [siteId, setSiteId] = useState("all");
+  const [siteId, setSiteId] = useSiteFilter("all");
   const [sites, setSites] = useState<Site[]>([]);
   const [entries, setEntries] = useState<CalendarEntry[]>([]);
   const [truncated, setTruncated] = useState(false);

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useSiteFilter } from "@/hooks/use-working-site";
 
 interface Site { id: number; name: string }
 
@@ -46,7 +47,7 @@ export function InspectionPackCard() {
   const { user, activeClientId } = useAuth();
   const api = useActiveClientApi();
   const [sites, setSites] = useState<Site[]>([]);
-  const [siteId, setSiteId] = useState("all");
+  const [siteId, setSiteId] = useSiteFilter("all");
   const [{ from, to }, setRange] = useState(() => period("last-month"));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

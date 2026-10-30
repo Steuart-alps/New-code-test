@@ -137,8 +137,9 @@ test("the tank's label records its check against it", async () => {
   await page.getByRole("heading", { name: "Cold water tank 1" }).waitFor({ timeout: 60_000 });
   await page.getByRole("link", { name: "Record temperature" }).click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByText("Recording for").waitFor({ timeout: 30_000 });
-  await dialog.getByText("Cold water tank 1", { exact: true }).waitFor();
+  // The tank is chosen under "Which tank?" (or named above the form when the
+  // user's tank list doesn't show it).
+  await dialog.getByText(/^Cold water tank 1\b/).first().waitFor({ timeout: 30_000 });
 
   await page.goto(`${appOrigin}/q/${codes["Cold water tank 1"]}`);
   await page.getByRole("link", { name: "Report a fault" }).click();

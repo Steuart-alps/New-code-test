@@ -144,8 +144,10 @@ async function openSayIt(page) {
   await page.getByTestId("say-it-button").click();
   const dialog = page.getByTestId("voice-log-dialog");
   await dialog.waitFor();
-  // Two sites: the site is chosen first.
-  assert.equal(await dialog.getByTestId("voice-log-mic").isDisabled(), true, "choose the site before speaking");
+  // Two sites: the dialog starts on the user's working site (here the first),
+  // and can still be changed.
+  await dialog.locator("#voice-log-site").getByText("Harbour Hotel").waitFor();
+  assert.equal(await dialog.getByTestId("voice-log-mic").isDisabled(), false, "ready to speak on the working site");
   await dialog.locator("#voice-log-site").click();
   await page.getByRole("option", { name: "Harbour Hotel" }).click();
   return dialog;

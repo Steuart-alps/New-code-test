@@ -14,6 +14,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
 import { useAppMutations } from "@/hooks/use-app-data";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { AssigneeField, assigneeFields, emptyAssignee, type AssigneeValue } from "@/components/assignee-field";
 import { format } from "date-fns";
 import { ComplianceItem, useListCategories, useListSites, useListContractors } from "@workspace/api-client-react";
@@ -60,6 +61,9 @@ export function ItemFormDialog({
   const { data: categories = [] } = useListCategories();
   const { data: sites = [] } = useListSites();
   const { data: contractors = [] } = useListContractors();
+  // A new check starts on the caller's site, else the user's working site.
+  const workingSiteId = useWorkingSiteId();
+  const newSiteId = defaultSiteId ?? workingSiteId;
 
   // Completing an existing check through this form asks for the date done,
   // like the "Mark done" dialog; the next due date is counted from it.
@@ -93,7 +97,7 @@ export function ItemFormDialog({
       form.reset({
         title: "", description: "", status: "pending", priority: "medium",
         categoryId: defaultCategoryId ?? undefined,
-        siteId: defaultSiteId ? String(defaultSiteId) : undefined,
+        siteId: newSiteId ? String(newSiteId) : undefined,
         contractorId: undefined,
         dueDate: "", leadTimeDays: 7, frequencyMonths: null, notes: "",
       });

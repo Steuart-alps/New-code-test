@@ -2610,6 +2610,76 @@ paths:
         "403":
           description: The site belongs to a department the caller cannot see
 
+  /fire-safety/escape-routes:
+    get:
+      operationId: getFireEscapeRoutes
+      tags: [fire-safety]
+      summary: A site's escape routes, ticked on each escape route sign-off and night fire walk
+      parameters:
+        - in: query
+          name: siteId
+          description: The site. Omit for a business with no sites.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The site's escape routes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireEscapeRouteList"
+        "400":
+          description: The site is not one of this client's sites
+        "403":
+          description: The site belongs to a department the caller cannot see
+    put:
+      operationId: updateFireEscapeRoutes
+      tags: [fire-safety]
+      summary: Replace a site's escape route list (managers)
+      parameters:
+        - in: query
+          name: siteId
+          description: The site. Omit for a business with no sites.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFireEscapeRoutesRequest"
+      responses:
+        "200":
+          description: The saved list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireEscapeRouteList"
+        "400":
+          description: A route has no name, two routes share a name, or the site is not one of this client's sites
+
+  /fire-safety/night-walks:
+    get:
+      operationId: getNightFireWalks
+      tags: [fire-safety]
+      summary: Night porter fire walks (22:00, 02:00, 06:00) for each site with a night porter, tonight and the last six nights
+      parameters:
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Night fire walks by site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NightFireWalks"
+        "400":
+          description: The site is not one of this client's sites
+        "403":
+          description: The site belongs to a department the caller cannot see
+
   /fire-safety/drill-attendance:
     get:
       operationId: getFireDrillAttendance
@@ -2746,6 +2816,100 @@ paths:
               schema:
                 $ref: "#/components/schemas/FireCallPointImportResult"
 
+  /imports/legionella-outlets/template:
+    get:
+      operationId: getLegionellaOutletImportTemplate
+      tags: [legionella]
+      summary: Download the CSV template for uploading LegionellaTrack outlets, tanks and calorifiers (managers)
+      responses:
+        "200":
+          description: CSV template
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /imports/legionella-outlets:
+    post:
+      operationId: importLegionellaOutlets
+      tags: [legionella]
+      summary: Preview or import a spreadsheet of LegionellaTrack outlets, tanks and calorifiers (managers)
+      description: >-
+        The browser sends the spreadsheet's header row and cell text: Name,
+        Type (Hot, Cold, TMV, Little used, Cold water tank or Calorifier),
+        Location and Site. Outlets join the site's outlet list; cold water
+        tanks and calorifiers join the equipment list, where tank checks name
+        them. With preview true (the default) nothing is written; otherwise
+        every row is written in one go, only when no row has an error.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FireCallPointImportRequest"
+      responses:
+        "200":
+          description: What each row did, or would do
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+        "400":
+          description: The file is missing a required column or has no rows
+        "409":
+          description: Nothing was imported because some rows have errors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+
+  /imports/allergen-ingredients/template:
+    get:
+      operationId: getAllergenIngredientImportTemplate
+      tags: [kitchen-allergens]
+      summary: Download the CSV template for importing suppliers' allergen information (managers)
+      responses:
+        "200":
+          description: CSV template
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /imports/allergen-ingredients:
+    post:
+      operationId: importAllergenIngredients
+      tags: [kitchen-allergens]
+      summary: Preview or import suppliers' allergen information as KitchenTrack ingredients (managers)
+      description: >-
+        The browser sends the spreadsheet's header row and cell text: a column
+        per allergen (Y, N or May) or Contains and May contain lists. With
+        preview true (the default) nothing is written; otherwise every row is
+        written in one go, only when no row has an error. Rows match existing
+        ingredients by site and name; changed allergens update every dish
+        using the ingredient, each with a change log entry.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FireCallPointImportRequest"
+      responses:
+        "200":
+          description: What each row did, or would do
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+        "400":
+          description: The file has no allergen columns, no Ingredient column, or no rows
+        "409":
+          description: Nothing was imported because some rows have errors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+
   /billing/ai:
     get:
       operationId: getAiAddon
@@ -2849,7 +3013,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster]
+            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster, allergen-ingredients, legionella-outlets]
       responses:
         "200":
           description: Reading status and the sites the caller can import into
@@ -2868,7 +3032,8 @@ paths:
       description: >-
         Claude reads the file and returns rows in the import's own columns
         (RoomTrack rooms, contractors, FireTrack call points, GreenTrack
-        equipment or the staff roster). Nothing is saved: the browser sends
+        equipment, the staff roster or KitchenTrack suppliers' allergen
+        information). Nothing is saved: the browser sends
         the rows through the import's usual preview. The file is not stored.
         Off until the server has an Anthropic API key; readings share the
         business's monthly number with the PAT register reading.
@@ -2878,7 +3043,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster]
+            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster, allergen-ingredients, legionella-outlets]
       requestBody:
         required: true
         content:
@@ -2902,6 +3067,42 @@ paths:
           description: This business has used its readings for the month, or its AI allowance (code AI_ALLOWANCE_USED)
         "502":
           description: The file could not be read just now
+        "503":
+          description: Reading is not switched on (no Anthropic API key)
+
+  /imports/sort-list:
+    post:
+      operationId: sortImportList
+      tags: [imports]
+      summary: Say which import a photo, scan, PDF or Word list belongs in (owners and consultants)
+      description: >-
+        For "Upload your lists", where many files are dropped at once. Claude
+        only says which of the business's imports the file is (PAT appliances,
+        RoomTrack rooms, contractors, FireTrack call points, GreenTrack
+        equipment or the staff roster); the rows are read later by that
+        import. Uses the AI allowance but not the monthly reading number. The
+        file is not stored. Off until the server has an Anthropic API key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatRegisterReadRequest"
+      responses:
+        "200":
+          description: The import the file belongs in, or null when it is none of them
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportListSortResult"
+        "400":
+          description: The file cannot be read here
+        "402":
+          description: The business does not have the AI features add-on (code AI_ADDON_REQUIRED)
+        "429":
+          description: The business has used its AI allowance (code AI_ALLOWANCE_USED)
+        "502":
+          description: The file could not be sorted just now
         "503":
           description: Reading is not switched on (no Anthropic API key)
 
@@ -4671,6 +4872,42 @@ paths:
                 $ref: "#/components/schemas/FoodSafetyMonthlySummary"
         "400":
           description: Invalid year, month, or site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /food-safety/month-summary:
+    get:
+      operationId: getFoodSafetyMonthSummary
+      tags: [food-safety]
+      summary: KitchenTrack month summary for Owners and Managers
+      description: >-
+        For every site the user can see: diary days recorded, in draft, closed and missed
+        (counted up to yesterday, from the site's first diary record), and the KitchenTrack
+        actions raised in the month and still open.
+      parameters:
+        - in: query
+          name: month
+          description: The month as YYYY-MM. Defaults to the business's current month.
+          schema:
+            type: string
+            pattern: "^[0-9]{4}-[0-9]{2}$"
+      responses:
+        "200":
+          description: The month's summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KitchenMonthSummary"
+        "400":
+          description: Invalid month
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Only Owners and Managers see the summary
           content:
             application/json:
               schema:
@@ -7731,6 +7968,14 @@ components:
         phone:
           type: string
           nullable: true
+        sleepingAccommodation:
+          type: boolean
+          nullable: true
+          description: Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.
+        nightPorter:
+          type: boolean
+          nullable: true
+          description: A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.
         createdAt:
           type: string
           format: date-time
@@ -7761,6 +8006,14 @@ components:
         phone:
           type: string
           nullable: true
+        sleepingAccommodation:
+          type: boolean
+          nullable: true
+          description: Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.
+        nightPorter:
+          type: boolean
+          nullable: true
+          description: A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.
       required:
         - name
 
@@ -7781,6 +8034,14 @@ components:
         phone:
           type: string
           nullable: true
+        sleepingAccommodation:
+          type: boolean
+          nullable: true
+          description: Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.
+        nightPorter:
+          type: boolean
+          nullable: true
+          description: A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.
 
     ContractorVisitType:
       type: object
@@ -9801,7 +10062,10 @@ components:
 
     FireCheckType:
       type: string
-      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel, emergency_lights_annual, alarm_service, extinguisher_service]
+      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel, emergency_lights_annual, alarm_service, extinguisher_service, night_walk]
+      description: >-
+        "fire_walk" is the escape route sign-off (sites with sleeping accommodation). "night_walk" is a night
+        porter's fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see /fire-safety/night-walks).
 
     FireSafetyCheck:
       type: object
@@ -9871,6 +10135,11 @@ components:
           type: boolean
           nullable: true
           description: Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).
+        walkTime:
+          type: string
+          nullable: true
+          enum: ["22:00", "02:00", "06:00"]
+          description: Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on.
         createdAt:
           type: string
           format: date-time
@@ -9951,6 +10220,11 @@ components:
           type: boolean
           nullable: true
           description: Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).
+        walkTime:
+          type: string
+          nullable: true
+          enum: ["22:00", "02:00", "06:00"]
+          description: Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on.
       required:
         - checkType
         - checkDate
@@ -10019,6 +10293,138 @@ components:
           type: boolean
           nullable: true
           description: Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).
+        walkTime:
+          type: string
+          nullable: true
+          enum: ["22:00", "02:00", "06:00"]
+          description: Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on.
+
+    FireEscapeRoute:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          description: e.g. "Final fire exit door route 1" or "Escape stairway 2".
+        location:
+          type: string
+          nullable: true
+          maxLength: 200
+          description: Where it leads, or the assembly point (optional).
+      required:
+        - name
+
+    FireEscapeRouteList:
+      type: object
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        routes:
+          type: array
+          items:
+            $ref: "#/components/schemas/FireEscapeRoute"
+        shared:
+          type: boolean
+          description: True when the site has no list of its own yet and these are the business-wide routes saved before routes were set per site.
+      required:
+        - siteId
+        - routes
+        - shared
+
+    UpdateFireEscapeRoutesRequest:
+      type: object
+      properties:
+        routes:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/FireEscapeRoute"
+      required:
+        - routes
+
+    NightFireWalk:
+      type: object
+      properties:
+        date:
+          type: string
+          description: The calendar day the walk falls on (YYYY-MM-DD).
+        time:
+          type: string
+          enum: ["22:00", "02:00", "06:00"]
+        status:
+          type: string
+          enum: [done, failed, due, missed, upcoming, not_needed]
+          description: >-
+            done or failed once recorded (failed = something found); due from its time until an hour after;
+            missed after that; upcoming before its time; not_needed before the site had a night porter.
+        checkId:
+          type: integer
+          nullable: true
+        performedBy:
+          type: string
+          nullable: true
+      required:
+        - date
+        - time
+        - status
+        - checkId
+        - performedBy
+
+    NightFireWalkNight:
+      type: object
+      properties:
+        nightOf:
+          type: string
+          description: The evening the night starts (YYYY-MM-DD); its 02:00 and 06:00 walks fall on the next day.
+        walks:
+          type: array
+          items:
+            $ref: "#/components/schemas/NightFireWalk"
+      required:
+        - nightOf
+        - walks
+
+    NightFireWalkSite:
+      type: object
+      properties:
+        siteId:
+          type: integer
+        siteName:
+          type: string
+        nights:
+          type: array
+          description: Tonight (or the night now ending) first, then the six nights before.
+          items:
+            $ref: "#/components/schemas/NightFireWalkNight"
+        missedCount:
+          type: integer
+          description: Walks missed over the nights listed.
+      required:
+        - siteId
+        - siteName
+        - nights
+        - missedCount
+
+    NightFireWalks:
+      type: object
+      properties:
+        walkTimes:
+          type: array
+          items:
+            type: string
+        graceMinutes:
+          type: integer
+          description: A walk counts as missed this many minutes after its time.
+        sites:
+          type: array
+          description: Sites with a night porter that the caller can see.
+          items:
+            $ref: "#/components/schemas/NightFireWalkSite"
+      required:
+        - walkTimes
+        - graceMinutes
+        - sites
 
     FireDrillAttendee:
       type: object
@@ -10207,6 +10613,16 @@ components:
             items: { type: string }
         unclear: { type: integer, description: "Rows that were hard to read; their Notes start with \"Check:\"" }
       required: [headers, rows, unclear]
+
+    ImportListSortResult:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind:
+          type: [string, "null"]
+          enum: [pat-appliances, room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster, null]
+          description: The import the file belongs in; null when it is none of them
 
     ImportListReadResult:
       type: object
@@ -11633,6 +12049,89 @@ components:
             type: string
             format: date
 
+    KitchenMonthSummarySite:
+      type: object
+      required: [siteId, siteName, startedOn, daysCounted, recordedDays, draftDays, closedDays, missedDays, missedDates, failedReadings, actionsRaised, actionsOpen]
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
+        startedOn:
+          type: string
+          format: date
+          nullable: true
+          description: The site's first diary record; days before it are not counted.
+        daysCounted:
+          type: integer
+        recordedDays:
+          type: integer
+        draftDays:
+          type: integer
+        closedDays:
+          type: integer
+        missedDays:
+          type: integer
+        missedDates:
+          type: array
+          items:
+            type: string
+            format: date
+        failedReadings:
+          type: integer
+        actionsRaised:
+          type: integer
+        actionsOpen:
+          type: integer
+
+    KitchenMonthSummary:
+      type: object
+      required: [month, from, through, today, sites, totals]
+      properties:
+        month:
+          type: string
+        from:
+          type: string
+          format: date
+        through:
+          type: string
+          format: date
+          nullable: true
+          description: The last day counted (yesterday, or the month's last day). Null when no day has finished yet.
+        today:
+          type: string
+          format: date
+        sites:
+          type: array
+          items:
+            $ref: "#/components/schemas/KitchenMonthSummarySite"
+        totals:
+          type: object
+          required: [daysCounted, recordedDays, draftDays, closedDays, missedDays, failedReadings, actionsRaised, actionsResolved, actionsOpen, actionsOverdue]
+          properties:
+            daysCounted:
+              type: integer
+            recordedDays:
+              type: integer
+            draftDays:
+              type: integer
+            closedDays:
+              type: integer
+            missedDays:
+              type: integer
+            failedReadings:
+              type: integer
+            actionsRaised:
+              type: integer
+            actionsResolved:
+              type: integer
+            actionsOpen:
+              type: integer
+            actionsOverdue:
+              type: integer
+
     FoodSafetyMonthlySummary:
       type: object
       required:
@@ -11944,6 +12443,16 @@ components:
         performedBy:
           type: string
           nullable: true
+        equipmentId:
+          type: integer
+          nullable: true
+          description: The named cold water tank or calorifier (equipment list item) the check was made on.
+        findings:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+          description: Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
         createdAt:
           type: string
           format: date-time
@@ -11996,6 +12505,12 @@ components:
           type: integer
           nullable: true
           description: A cold water tank or calorifier on the equipment list (its site must match siteId).
+        findings:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+          description: Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
       required:
         - checkType
         - checkDate
@@ -12025,6 +12540,16 @@ components:
         performedBy:
           type: string
           nullable: true
+        equipmentId:
+          type: integer
+          nullable: true
+          description: Move the check to another named tank or calorifier at the same site.
+        findings:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+          description: Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
 
     LegionellaStatus:
       type: object

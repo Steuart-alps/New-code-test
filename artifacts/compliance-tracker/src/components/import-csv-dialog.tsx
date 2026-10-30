@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Download, FileSpreadsheet, Loader2, Upload, X } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
@@ -13,9 +13,13 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-export type ImportCsvType = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points";
+export type ImportCsvType = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "allergen-ingredients" | "legionella-outlets";
 
-const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string; required: string; optional: string; matching: string; template: string }> = {
+const IMPORTS: Record<ImportCsvType, {
+  title: string; noun: string; one: string; required: string; optional: string; matching: string; template: string; sheet: string;
+  /** What a blank cell does, when it is not "leaves the detail unchanged". */
+  blankCells?: string;
+}> = {
   "pat-appliances": {
     title: "Upload appliance register",
     noun: "appliances",
@@ -24,6 +28,8 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     optional: "Asset tag, Appliance type, Site, Location, Notes",
     matching: "Rows match existing appliances by asset tag, or by name, site and location when there is no asset tag.",
     template: "pattrack-appliances-template",
+    // The tab of the same name in a setup "What we need from you" workbook.
+    sheet: "Appliances",
   },
   "room-track-rooms": {
     title: "Import rooms from a spreadsheet",
@@ -33,6 +39,7 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     optional: "Room name, Floor, Site, Notes",
     matching: "Rows match existing rooms by site and room number.",
     template: "roomtrack-rooms-template",
+    sheet: "Rooms",
   },
   contractors: {
     title: "Import contractors from a spreadsheet",
@@ -42,6 +49,7 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     optional: "Company, Phone, Address, Trades (separate with ;), Gas Safe number, Public liability expiry (DD/MM/YYYY), Notes",
     matching: "Rows match existing contractors by email address.",
     template: "contractors-template",
+    sheet: "Contractors",
   },
   "fire-call-points": {
     title: "Upload call points",
@@ -51,6 +59,31 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     optional: "Location, Site (leave blank for the site chosen here)",
     matching: "List them in the order you want them tested: new call points join the end of the rotation in file order. Rows match existing call points by site and call point name.",
     template: "firetrack-call-points-template",
+    sheet: "Call points",
+  },
+  // A supplier's allergen matrix or product list (api-server lib/allergenImport.ts).
+  "allergen-ingredients": {
+    title: "Import suppliers' allergen information",
+    noun: "ingredients",
+    one: "ingredient",
+    required: "Ingredient, and either a column for each allergen (Y, N or May) or a Contains column",
+    optional: "Supplier, Product code, May contain, Site (blank = every site), Notes",
+    matching: "Use the supplier's own allergen sheet as it is: long headings such as \"Cereals containing gluten\" are recognised. Rows match existing ingredients by site and name; changed allergens update every dish using the ingredient, with a change log entry. Check every allergen against the supplier's information before you import.",
+    template: "kitchentrack-supplier-allergens-template",
+    sheet: "Allergens",
+    blankCells: "A blank allergen cell means the ingredient does not contain it; other blank cells leave existing details unchanged.",
+  },
+  // Outlets join the site's outlet list; tanks and calorifiers the equipment
+  // list (api-server routes/csv-imports.ts planLegionellaOutlets).
+  "legionella-outlets": {
+    title: "Upload outlets and tanks",
+    noun: "outlets and tanks",
+    one: "outlet or tank",
+    required: "Outlet or tank (its name), Type (Hot, Cold, TMV, Little used, Cold water tank or Calorifier)",
+    optional: "Location, Site (leave blank for the site chosen here)",
+    matching: "Use your own names, such as \"Ladies toilets, basin 1\" or \"Tank 1 (roof void)\". A tap with hot and cold is two rows. Rows match what is already listed by site and name.",
+    template: "legionellatrack-outlets-and-tanks-template",
+    sheet: "Outlets and tanks",
   },
 };
 
@@ -70,10 +103,12 @@ const ACTION_STYLE: Record<RowAction, { label: string; className: string }> = {
   error: { label: "Error", className: "bg-rose-50 text-rose-800 border-rose-200" },
 };
 
-export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }: {
+export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, initialFile }: {
   type: ImportCsvType; open: boolean; onOpenChange: (open: boolean) => void; onImported?: () => void;
   /** FireTrack call points: the site for rows whose Site cell is blank. */
   siteId?: number | null;
+  /** A file chosen before the dialog opened ("Upload your lists"), checked as soon as it opens. */
+  initialFile?: File | null;
 }) {
   const config = IMPORTS[type];
   const { activeClientId } = useAuth();
@@ -89,6 +124,14 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"reading" | "reading-list" | "preview" | "import" | null>(null);
   usePastedFile(open && busy === null && !result?.committed, selected => dropped(selected));
+  // Once the AI status is known, so a photo can go to the reader.
+  const startedWith = useRef<File | null>(null);
+  useEffect(() => {
+    if (!open) { startedWith.current = null; return; }
+    if (!initialFile || !reading.loaded || startedWith.current === initialFile) return;
+    startedWith.current = initialFile;
+    dropped(initialFile);
+  }, [open, initialFile, reading.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function reset() {
     setFile(null); setSheet(null); setResult(null); setError(null); setBusy(null); setReadFromList(null);
@@ -112,7 +155,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
     setFile(selected);
     setBusy("reading");
     try {
-      const data = await readSpreadsheet(selected);
+      const data = await readSpreadsheet(selected, { sheet: config.sheet });
       if (!data.headers.length || !data.rows.length) throw new Error("The file has no rows below the header row");
       setSheet(data);
       setBusy("preview");
@@ -207,7 +250,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
           <div className="space-y-1 rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
             <p><span className="font-medium text-foreground">Required column{config.required.includes(",") ? "s" : ""}:</span> {config.required}</p>
             <p><span className="font-medium text-foreground">Optional:</span> {config.optional}</p>
-            <p>Put the column headings in the first row. {config.matching} Blank cells leave existing details unchanged. Sites are matched by name. Up to 1,000 rows per file.</p>
+            <p>Put the column headings in the first row. {config.matching} {config.blankCells ?? "Blank cells leave existing details unchanged."} Sites are matched by name. Up to 1,000 rows per file.</p>
             <p className="flex flex-wrap items-center gap-x-2">
               <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => void downloadTemplate("xlsx")} data-testid={`button-download-${type}-template`}>
                 <Download className="mr-1 h-3.5 w-3.5" /> Download the Excel template
@@ -302,8 +345,8 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
 
 /**
  * "Import spreadsheet" button plus its dialog, for register pages. Hidden for users
- * the API would refuse: viewers, and staff other than PATTrack department
- * managers.
+ * the API would refuse: viewers, and staff other than department managers
+ * (PATTrack appliances and KitchenTrack ingredients only).
  */
 export function ImportCsvButton({ type, onImported, className, siteId, label = "Import spreadsheet" }: {
   type: ImportCsvType; onImported?: () => void; className?: string; siteId?: number | null; label?: string;
@@ -311,7 +354,10 @@ export function ImportCsvButton({ type, onImported, className, siteId, label = "
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const isAdmin = user?.role === "consultant" || user?.role === "client_admin";
-  const allowed = isAdmin || (type === "pat-appliances" && (user?.role === "client_manager" || (user?.role === "client_staff" && user.isDepartmentManager === true)));
+  // PATTrack appliances and KitchenTrack ingredients: managers too.
+  const managersToo = type === "pat-appliances" || type === "allergen-ingredients";
+  const allowed = isAdmin || (managersToo && (user?.role === "client_manager" || (user?.role === "client_staff" && user.isDepartmentManager === true)))
+    || (type === "legionella-outlets" && user?.role === "client_manager");
   if (!allowed) return null;
   return (
     <>

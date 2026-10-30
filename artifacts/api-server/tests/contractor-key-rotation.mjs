@@ -44,7 +44,11 @@ test("rotated contractor drafts retain their exact approved content and working 
       assert.equal(issue.status, 201);
       let row;
       if (mode === "portal") {
-        const portal = `https://example.test/contractor-portal/${randomBytes(32).toString("hex")}`;
+        // A real, current portal link: sending checks the link is still the
+        // contractor's live one, so a made-up URL would be cancelled.
+        const link = await owner.request("POST", `/contractors/${contractor.data.id}/portal-link`, {});
+        assert.equal(link.status, 201, JSON.stringify(link.data));
+        const portal = link.data.portalUrl;
         const encoded = encryptTokenPayload({ portal });
         const preview = { subject: "Portal reminder", html: '<a href="{{PORTAL_URL}}">Open portal</a>', text: "{{PORTAL_URL}}" };
         row = (await db.execute(sql`

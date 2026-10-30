@@ -1,8 +1,9 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { takeLinkParams } from "@/lib/deep-link";
 import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -493,7 +494,8 @@ function MachineDialog({
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
   const isEdit = !!machine;
-  const blank = { name: "", type: "other", make: "", model: "", serialNo: "", year: "", regNo: "", siteId: "", active: true, notes: "", sprayerCategory: "", purchaseDate: "" };
+  const workingSiteId = useWorkingSiteId();
+  const blank = { name: "", type: "other", make: "", model: "", serialNo: "", year: "", regNo: "", siteId: workingSiteId ? String(workingSiteId) : "", active: true, notes: "", sprayerCategory: "", purchaseDate: "" };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
 
@@ -722,8 +724,8 @@ async function downloadMachineListTemplate(siteName: string) {
   ]);
 }
 
-function MachineImportDialog({
-  open, onClose, sites, defaultSiteId, onImported,
+export function MachineImportDialog({
+  open, onClose, sites, defaultSiteId, onImported, initialFile,
 }: {
   open: boolean;
   onClose: () => void;
@@ -731,6 +733,8 @@ function MachineImportDialog({
   /** The Template's default site; rows that name no site go here unless changed. */
   defaultSiteId: number | null;
   onImported: () => void;
+  /** A file chosen before the dialog opened ("Upload your lists"), read as soon as it opens. */
+  initialFile?: File | null;
 }) {
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
@@ -789,9 +793,9 @@ function MachineImportDialog({
     }
     let table: string[][];
     try {
-      // Excel or CSV, read in the browser from the first sheet.
+      // Excel or CSV, read in the browser (the Equipment tab of a setup workbook).
       const { readSpreadsheet } = await import("@/lib/spreadsheet");
-      const sheet = await readSpreadsheet(file);
+      const sheet = await readSpreadsheet(file, { sheet: "Equipment" });
       table = sheet.headers.length ? [sheet.headers, ...sheet.rows].map(row => row.map(cell => cell.trim())).filter(row => row.some(Boolean)) : [];
     } catch (err) {
       toast({ title: "Could not read file", description: err instanceof Error && err.message ? err.message : "Make sure it is an Excel (.xlsx or .xls) or CSV file.", variant: "destructive" });
@@ -805,6 +809,13 @@ function MachineImportDialog({
   };
 
   usePastedFile(open && !readingList && !importing, file => void handleFile(file));
+  const startedWith = useRef<File | null>(null);
+  useEffect(() => {
+    if (!open) { startedWith.current = null; return; }
+    if (!initialFile || !reading.loaded || startedWith.current === initialFile) return;
+    startedWith.current = initialFile;
+    void handleFile(initialFile);
+  }, [open, initialFile, reading.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleImport = async () => {
     setImporting(true);
@@ -2276,12 +2287,15 @@ export default function GreenTrackPage() {
 
   const { data: greenConfig } = useGetGreenTrackConfig();
   const showFuelTab = greenConfig?.green_show_fuel !== "false";
-  // The Template's default site (where the shed is), else the only site.
+  // The Template's default site (where the shed is), else the site the user
+  // is working at, else the only site.
+  const workingSiteId = useWorkingSiteId();
   const defaultSiteId = useMemo(() => {
     const chosen = Number(greenConfig?.green_default_site_id || 0);
     if (sites.some(site => site.id === chosen)) return chosen;
+    if (workingSiteId && sites.some(site => site.id === workingSiteId)) return workingSiteId;
     return sites.length === 1 ? sites[0].id : null;
-  }, [greenConfig?.green_default_site_id, sites]);
+  }, [greenConfig?.green_default_site_id, sites, workingSiteId]);
 
   const TABS: { key: Tab; label: string; icon: any; count?: number }[] = [
     { key: "daily",    label: "Daily checks", icon: Sunrise },
@@ -2432,7 +2446,7 @@ export default function GreenTrackPage() {
             ))}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {activeTab !== "actions" && activeTab !== "daily" && <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input value={search} onChange={e => setSearch(e.target.value)}

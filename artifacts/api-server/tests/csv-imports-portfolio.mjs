@@ -227,6 +227,12 @@ async function contractorImports(owner, manager, viewer) {
   check("list reading: viewer cannot read a list", (await viewer("POST", "/imports/list-reading/contractors/read", list)).status === 403);
   check("list reading: PATTrack and unknown imports are not served here",
     (await owner("GET", "/imports/list-reading/pat-appliances")).status === 404 && (await owner("GET", "/imports/list-reading/nothing")).status === 404);
+
+  // Sorting a file into its import ("Upload your lists"): owners and consultants only.
+  const sortOff = await owner("POST", "/imports/sort-list", list);
+  check("list sorting: refused while reading is off", sortOff.status === 503 && sortOff.data?.code === "REGISTER_READING_UNAVAILABLE", JSON.stringify(sortOff.data));
+  check("list sorting: a department manager is refused", (await manager("POST", "/imports/sort-list", list)).status === 403);
+  check("list sorting: viewer is refused", (await viewer("POST", "/imports/sort-list", list)).status === 403);
 }
 
 async function isolation(owner, ownerClientId, other, otherClientId) {

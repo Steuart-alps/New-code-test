@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { format } from "date-fns";
 import { AppLayout } from "@/components/layout";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
@@ -9,14 +9,16 @@ import { fetchMobileChecklistSubmission, MobileChecklistSubmissionCard, type Mob
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
-import { useListSites } from "@workspace/api-client-react";
+import { useChecklistSite } from "@/hooks/use-checklist-site";
+import { ChecklistSiteSelect } from "@/components/checklist-site-select";
+import { carryAnswers, createChecklistDraftStore, hasAnswers, type ChecklistDraftSlot } from "@/lib/checklist-carry";
+import { useFireWalkChecklistItems, withFireWalkItems } from "@/components/fire-night-walks";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sunset, UtensilsCrossed, Building2, Loader2, Lock, RotateCcw, PenLine, Settings2 } from "lucide-react";
 import { ChecklistTemplateEditor, type TemplateItem } from "./checklist-template-editor";
 import { RecordSignedBy } from "@/components/record-signature";
@@ -48,7 +50,8 @@ const KITCHEN_CLOSING_ITEMS: ChecklistItem[] = [
   { label: "Cooling foods placed into refrigeration correctly", checked: false },
   { label: "Walk-in fridge temperature recorded on All In One Record", checked: false },
   { label: "Under-counter fridge temperature recorded on All In One Record", checked: false },
-  { label: "Freezer temperature recorded on All In One Record", checked: false },
+  { label: "Standalone fridges temperature recorded on All In One Record", checked: false },
+  { label: "Freezers temperature recorded on All In One Record", checked: false },
   // 2. Equipment
   { section: "Equipment", label: "Ovens switched off (unless required overnight)", checked: false },
   { label: "Hobs and grills cleaned and turned off", checked: false },
@@ -169,9 +172,9 @@ const CHECKLIST_LABELS: Record<string, string> = {
 
 // ── Checklist card ────────────────────────────────────────────────────────────
 
-function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdmin }: {
+function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdmin, draft }: {
   type: string; siteId: number | null; siteName?: string; date: string;
-  existing?: Checklist; onSaved: () => void; canAdmin: boolean;
+  existing?: Checklist; onSaved: () => void; canAdmin: boolean; draft?: ChecklistDraftSlot<ChecklistItem>;
 }) {
   const [templateItems, setTemplateItems] = useState<ChecklistItem[] | null>(null);
   const [templateLoading, setTemplateLoading] = useState(true);
@@ -192,28 +195,45 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
     })();
   }, [type, siteId, existing]);
 
-  const effectiveDefault = templateItems
+  // Sites with sleeping accommodation and no night porter walk for fire here.
+  const fireWalkItems = useFireWalkChecklistItems(type, siteId, !existing);
+  const effectiveDefault = withFireWalkItems(templateItems
     ? templateItems.map(i => ({ ...i, checked: false }))
-    : (TEMPLATES[type] ?? []);
+    : (TEMPLATES[type] ?? []), fireWalkItems);
 
   const { user } = useAuth();
   const { toast } = useToast();
-  const [items, setItems] = useState<ChecklistItem[]>(existing?.items ?? effectiveDefault);
-  const [completedBy, setCompletedBy] = useState(existing?.completedBy ?? user?.name ?? "");
-  const [staffRosterId, setStaffRosterId] = useState<number | null>((existing as any)?.staffRosterId ?? null);
-  const [managerNote, setManagerNote] = useState(existing?.managerNote ?? "");
-  const [saving, setSaving] = useState(false);
   const submitted = !!existing?.submittedAt;
+  // Ticks made before the site or date was changed (or before a reload) are
+  // carried onto this card, unless this one is already submitted.
+  const carried = submitted ? undefined : draft?.get();
+  const startItems = () => {
+    const base = existing?.items ?? effectiveDefault;
+    return carried ? carryAnswers(base, carried.items, item => item.label) : base;
+  };
+  const [items, setItems] = useState<ChecklistItem[]>(startItems);
+  const [completedBy, setCompletedBy] = useState(carried?.completedBy || (existing?.completedBy ?? user?.name ?? ""));
+  const [staffRosterId, setStaffRosterId] = useState<number | null>(carried ? carried.staffRosterId : (existing as any)?.staffRosterId ?? null);
+  const [managerNote, setManagerNote] = useState(carried?.managerNote || (existing?.managerNote ?? ""));
+  const [saving, setSaving] = useState(false);
+  const touched = useRef(false);
 
   useEffect(() => {
-    setItems(existing?.items ?? effectiveDefault);
-    setCompletedBy(existing?.completedBy ?? user?.name ?? "");
-    setManagerNote(existing?.managerNote ?? "");
-  }, [existing, type, templateItems]);
+    setItems(startItems());
+    setCompletedBy(carried?.completedBy || (existing?.completedBy ?? user?.name ?? ""));
+    setStaffRosterId(carried ? carried.staffRosterId : (existing as any)?.staffRosterId ?? null);
+    setManagerNote(carried?.managerNote || (existing?.managerNote ?? ""));
+  }, [existing, type, templateItems, fireWalkItems.map(item => item.label).join("\n")]);
 
-  const setResult = (i: number, result: ChecklistResult) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? withResult(item, result) : item)); };
-  const passRemaining = () => { if (submitted) return; setItems(prev => prev.map(item => itemResult(item) ? item : withResult(item, "pass"))); };
-  const setNote = (i: number, note: string) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? { ...item, notes: note } : item)); };
+  useEffect(() => {
+    if (touched.current && !submitted) draft?.set({ items, completedBy, staffRosterId, managerNote });
+  }, [items, completedBy, staffRosterId, managerNote]);
+
+  const edit = <T,>(set: (value: T) => void) => (value: T) => { touched.current = true; set(value); };
+  const setResult = (i: number, result: ChecklistResult) => { if (submitted) return; touched.current = true; setItems(prev => prev.map((item, idx) => idx === i ? withResult(item, result) : item)); };
+  const passRemaining = () => { if (submitted) return; touched.current = true; setItems(prev => prev.map(item => itemResult(item) ? item : withResult(item, "pass"))); };
+
+  const setNote = (i: number, note: string) => { if (submitted) return; touched.current = true; setItems(prev => prev.map((item, idx) => idx === i ? { ...item, notes: note } : item)); };
 
   async function save(submit: boolean) {
     setSaving(true);
@@ -232,6 +252,8 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
         return;
       }
       toast({ title: submit ? "Checklist submitted" : "Draft saved" });
+      touched.current = false;
+      draft?.set(undefined);
       onSaved();
     } catch {
       toast({ title: failedTitle, description: "Check your connection and try again.", variant: "destructive" });
@@ -265,6 +287,10 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
           </div>
         </div>
 
+        {carried && hasAnswers(carried.items) && !touched.current && (
+          <p className="text-xs text-blue-700 mb-3">Your unsaved ticks are filled in below. Save or submit to keep them.</p>
+        )}
+
         {templateLoading && !existing ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
@@ -287,8 +313,8 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
         {!submitted && (
           <div className="space-y-3 border-t pt-3">
             <div className="grid grid-cols-2 gap-3">
-              <StaffPerformerSelect label="Completed by" value={completedBy} onChange={setCompletedBy} onRosterIdChange={setStaffRosterId} />
-              {canAdmin && <div className="space-y-1"><Label className="text-xs">Manager note</Label><Input value={managerNote} onChange={e => setManagerNote(e.target.value)} placeholder="Optional" className="h-8 text-sm" /></div>}
+              <StaffPerformerSelect label="Completed by" value={completedBy} onChange={edit(setCompletedBy)} onRosterIdChange={edit(setStaffRosterId)} />
+              {canAdmin && <div className="space-y-1"><Label className="text-xs">Manager note</Label><Input value={managerNote} onChange={e => edit(setManagerNote)(e.target.value)} placeholder="Optional" className="h-8 text-sm" /></div>}
             </div>
             {progress.remaining > 0 && progress.answered > 0 && (
               <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={passRemaining}>Mark the {progress.remaining} remaining as Pass</Button>
@@ -299,6 +325,9 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
               <Button size="sm" onClick={() => save(true)} disabled={saving || !progress.ready} className="flex-1">Submit checklist</Button>
             </div>
           </div>
+        )}
+        {submitted && draft?.get() && hasAnswers(draft.get()!.items) && (
+          <p className="text-xs text-amber-700 mb-3">This checklist is already submitted. Your unsaved ticks are kept: choose another site or date to use them.</p>
         )}
         {submitted && existing?.completedBy && <div className="border-t pt-3"><p className="text-xs text-muted-foreground">Completed by: <span className="font-medium">{existing.completedBy}</span></p></div>}
         {existing?.id && (
@@ -403,18 +432,19 @@ function ManagerSignoffCard({ siteId, date, existing, onSaved }: {
 export default function DailyTrackPmPage() {
   const { activeClientId, hasService } = useAuth();
   const canAdmin = useCanAdmin();
-  const { data: sites = [] } = useListSites();
+  const { sites, siteId: selectedSiteId, setSiteId, ready: siteReady } = useChecklistSite();
+  // Unsaved ticks per checklist, kept while the site or date changes.
+  const [drafts] = useState(createChecklistDraftStore);
+  const loadSeq = useRef(0);
 
   const today = format(new Date(), "yyyy-MM-dd");
   const _qs = new URLSearchParams(window.location.search);
   const [date, setDate] = useState(_qs.get("date") ?? today);
-  const [siteId, setSiteId] = useState<string>(_qs.get("siteId") ?? "__none__");
   const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [signoff, setSignoff] = useState<ManagerSignoff | undefined>(undefined);
   const [mobileSubmission, setMobileSubmission] = useState<MobileChecklistSubmission | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const selectedSiteId = siteId === "__none__" ? null : Number(siteId);
   const selectedSiteName = sites.find(s => s.id === selectedSiteId)?.name;
   const hasStandaloneDailyTrack = hasService("dailytrack_pm");
   const visibleTypes = [
@@ -423,6 +453,9 @@ export default function DailyTrackPmPage() {
   ];
 
   const load = useCallback(async () => {
+    if (!siteReady) return;
+    // A slower answer for the previous site or date must not replace this one.
+    const seq = ++loadSeq.current;
     setLoading(true);
     const params = new URLSearchParams({ date });
     if (selectedSiteId) params.set("siteId", String(selectedSiteId));
@@ -431,15 +464,18 @@ export default function DailyTrackPmPage() {
       apiFetch(`/daily-track-pm/signoffs?${params}`),
       hasStandaloneDailyTrack ? fetchMobileChecklistSubmission(selectedSiteId, date, "pm") : Promise.resolve(null),
     ]);
-    if (clRes.ok) setChecklists(await clRes.json());
-    if (soRes.ok) {
+    const checklistRows = clRes.ok ? await clRes.json() : null;
+    const signoffRows = soRes.ok ? await soRes.json() as ManagerSignoff[] : null;
+    if (seq !== loadSeq.current) return;
+    if (checklistRows) setChecklists(checklistRows);
+    if (signoffRows) {
       // Only this site's (or the no-site) sign-off; a submitted one wins.
-      const rows = (await soRes.json() as ManagerSignoff[]).filter(row => (row.siteId ?? null) === selectedSiteId);
+      const rows = signoffRows.filter(row => (row.siteId ?? null) === selectedSiteId);
       setSignoff(rows.find(row => row.submittedAt) ?? rows[0]);
     }
     setMobileSubmission(mobile);
     setLoading(false);
-  }, [date, selectedSiteId, activeClientId, hasStandaloneDailyTrack]);
+  }, [date, selectedSiteId, siteReady, activeClientId, hasStandaloneDailyTrack]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -462,16 +498,7 @@ export default function DailyTrackPmPage() {
           <Label className="text-xs">Date</Label>
           <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="h-9" />
         </div>
-        <div className="space-y-1 flex-1 min-w-[180px]">
-          <Label className="text-xs">Site</Label>
-          <Select value={siteId} onValueChange={setSiteId}>
-            <SelectTrigger className="h-9"><SelectValue placeholder="Select site…" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">No site filter</SelectItem>
-              {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+        <ChecklistSiteSelect sites={sites} value={selectedSiteId} onChange={setSiteId} />
         <div className="flex items-end">
           <Button variant="outline" size="sm" onClick={load} className="h-9 gap-1.5">
             <RotateCcw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
@@ -479,13 +506,13 @@ export default function DailyTrackPmPage() {
         </div>
       </div>
 
-      {loading ? (
+      {loading || !siteReady ? (
         <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {mobileSubmission && <MobileChecklistSubmissionCard submission={mobileSubmission} />}
           {visibleTypes.map(type => (
-            <ChecklistCard key={type} type={type} siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getChecklist(type)} onSaved={load} canAdmin={canAdmin} />
+            <ChecklistCard key={type} type={type} siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getChecklist(type)} onSaved={load} canAdmin={canAdmin} draft={drafts.slot(type)} />
           ))}
           <ManagerSignoffCard siteId={selectedSiteId} date={date} existing={signoff} onSaved={load} />
         </div>
