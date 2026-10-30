@@ -133,6 +133,7 @@ import type {
   GetFireSafetyStatusParams,
   GetFoodSafetyConfigParams,
   GetFoodSafetyMissingDatesParams,
+  GetFoodSafetyMonthSummaryParams,
   GetFoodSafetyRecordByDateParams,
   GetFoodSafetySummaryParams,
   GetGreenTrackPreStartDayParams,
@@ -191,6 +192,7 @@ import type {
   KitchenClosedDaysCreated,
   KitchenClosedDaysInput,
   KitchenClosedDaysList,
+  KitchenMonthSummary,
   LegionellaCheck,
   LegionellaConfig,
   LegionellaStatus,
@@ -15463,6 +15465,91 @@ export function useGetFoodSafetySummary<TData = Awaited<ReturnType<typeof getFoo
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetFoodSafetySummaryQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFoodSafetyMonthSummaryUrl = (params?: GetFoodSafetyMonthSummaryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/food-safety/month-summary?${stringifiedParams}` : `/api/food-safety/month-summary`
+}
+
+/**
+ * For every site the user can see: diary days recorded, in draft, closed and missed (counted up to yesterday, from the site's first diary record), and the KitchenTrack actions raised in the month and still open.
+ * @summary KitchenTrack month summary for Owners and Managers
+ */
+export const getFoodSafetyMonthSummary = async (params?: GetFoodSafetyMonthSummaryParams, options?: RequestInit): Promise<KitchenMonthSummary> => {
+
+  return customFetch<KitchenMonthSummary>(getGetFoodSafetyMonthSummaryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFoodSafetyMonthSummaryQueryKey = (params?: GetFoodSafetyMonthSummaryParams,) => {
+    return [
+    `/api/food-safety/month-summary`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetFoodSafetyMonthSummaryQueryOptions = <TData = Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>, TError = ErrorType<ErrorResponse>>(params?: GetFoodSafetyMonthSummaryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFoodSafetyMonthSummaryQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>> = ({ signal }) => getFoodSafetyMonthSummary(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFoodSafetyMonthSummaryQueryResult = NonNullable<Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>>
+export type GetFoodSafetyMonthSummaryQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary KitchenTrack month summary for Owners and Managers
+ */
+
+export function useGetFoodSafetyMonthSummary<TData = Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetFoodSafetyMonthSummaryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFoodSafetyMonthSummaryQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

@@ -42,6 +42,7 @@ import { format } from "date-fns";
 import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer, GripVertical, Sparkles, AlertTriangle, CheckCircle, CheckSquare, Square, Sunrise, Sunset, Building2, RotateCcw, Settings2, Loader2, FileText } from "lucide-react";
 import { DocTrackLibrary } from "./doc-track";
 import { HaccpReviewCard } from "@/components/haccp-review-card";
+import { KitchenMonthSummary } from "@/components/kitchen-month-summary";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { cn } from "@/lib/utils";
@@ -879,7 +880,10 @@ function CorrectiveActionInput({ value, onChange, disabled, needed, line }: {
   );
 }
 
-export function DailyDiaryTab() {
+/** A day picked elsewhere on the page (the month summary's missed days). */
+export type KitchenDiaryOpenDay = { date: string; siteId: number | null; at: number };
+
+export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {}) {
   const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
   // Which site's diary we're viewing/filling. It starts on the user's working
@@ -1104,6 +1108,10 @@ export function DailyDiaryTab() {
     if (decision === "confirm") setPendingScope(next);
     else if (decision === "switch") applyScope(next);
   };
+  useEffect(() => {
+    if (openDay) changeScope({ date: openDay.date, siteId: openDay.siteId });
+    // Only a new pick moves the diary; later renders must not undo the user's own choice.
+  }, [openDay?.at]);
   useEffect(() => {
     if (!isDirty) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
@@ -2406,6 +2414,12 @@ export default function KitchenPage() {
   const _initTab = (new URLSearchParams(window.location.search).get("tab") as ActiveTab | null) ?? "diary";
   const [activeTab, setActiveTab] = useState<ActiveTab>(TABS.some(t => t.id === _initTab) ? _initTab : "diary");
   const [checkStatus, setCheckStatus] = useState<KitchenCheckStatus[]>([]);
+  const [openDay, setOpenDay] = useState<KitchenDiaryOpenDay | undefined>(undefined);
+  const openDiaryDay = (date: string, siteId: number | null) => {
+    setActiveTab("diary");
+    setOpenDay({ date, siteId, at: Date.now() });
+    window.setTimeout(() => document.getElementById("kitchen-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
 
   const loadStatus = useCallback(async () => {
     try {
@@ -2475,6 +2489,8 @@ export default function KitchenPage() {
           </div>
         </div>
 
+        <KitchenMonthSummary onOpenDay={openDiaryDay} />
+
         {/* Check status cards */}
         {checkStatus.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
@@ -2505,7 +2521,7 @@ export default function KitchenPage() {
         )}
 
         {/* Tab bar */}
-        <div className="flex flex-wrap gap-1 p-1 bg-muted/50 rounded-xl w-full sm:w-auto sm:inline-flex border border-border/50">
+        <div id="kitchen-tabs" className="flex flex-wrap gap-1 p-1 bg-muted/50 rounded-xl w-full sm:w-auto sm:inline-flex border border-border/50">
           {TABS.map(tab => {
             const Icon = tab.icon;
             return (
@@ -2528,7 +2544,7 @@ export default function KitchenPage() {
 
         {/* Tab content */}
         {activeTab === "checks"   && <DailyChecksTab />}
-        {activeTab === "diary"    && <DailyDiaryTab />}
+        {activeTab === "diary"    && <DailyDiaryTab openDay={openDay} />}
         {activeTab === "weekly"   && <WeeklyReviewTab />}
         {activeTab === "probe"    && <ProbeCheckTab defaultProbeNamesJson={foodSafetyConfig?.food_probe_names} />}
         {activeTab === "cleaning" && <CleaningScheduleTab />}

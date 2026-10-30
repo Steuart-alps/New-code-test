@@ -428,11 +428,12 @@ jobs:
       # KitchenTrack numeric controls: the shared rule model and country
       # presets, then hold-time boundaries, retries and the corrective-action
       # follow-up, each on its own fresh database.
-      - name: KitchenTrack hold-time, temperature-action and "Say it" tests
+      - name: KitchenTrack hold-time, temperature-action, month summary and "Say it" tests
         run: |
           pnpm --filter @workspace/api-zod run test:kitchen-temperature
           pnpm --filter @workspace/api-zod run test:kitchen-temperature-guidance
           pnpm --filter @workspace/api-server run test:kitchen-hold-controls
           pnpm --filter @workspace/api-server run test:kitchen-temperature-actions
           pnpm --filter @workspace/api-server run test:kitchen-mobile-replay
+          pnpm --filter @workspace/api-server run test:kitchen-month-summary
           pnpm --filter @workspace/api-server run test:voice-log
