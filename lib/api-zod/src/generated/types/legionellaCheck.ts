@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { LegionellaCheckFindings } from './legionellaCheckFindings';
 import type { LegionellaCheckResult } from './legionellaCheckResult';
 import type { LegionellaCheckType } from './legionellaCheckType';
 
@@ -20,6 +21,8 @@ export interface LegionellaCheck {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail. */
+  findings?: LegionellaCheckFindings;
   createdAt: Date;
   updatedAt: Date;
 }

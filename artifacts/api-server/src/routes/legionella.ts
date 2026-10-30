@@ -11,6 +11,7 @@ import { unreadLegionellaOutletUnits } from "../lib/checkReminders";
 import { getAccountToday } from "../lib/accountClock";
 import { siteVisibleSql, sitesTableVisibleTo, siteVisibleToDepartment } from "../lib/departmentSites";
 import { completeLinkedTasksFromCheck, linkedTaskCompletions } from "../lib/trackTaskLink";
+import { legionellaFindingFailures, legionellaFindingsError } from "@workspace/api-zod/legionella-condition";
 
 const router = Router();
 
@@ -160,6 +161,8 @@ const createSchema = z.object({
   outletId: z.number().int().nullable().optional(),
   /** Equipment list item (cold water tank, calorifier) the check was made on. */
   equipmentId: z.number().int().positive().nullable().optional(),
+  /** Condition answers for inspections, cleans and flushes (legionella-condition.ts). */
+  findings: z.record(z.string(), z.string()).nullable().optional(),
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
@@ -332,6 +335,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const data = parsed.data;
   if (data.checkType.endsWith("_temp") && data.temperature == null)
     return res.status(400).json({ error: "Record a temperature before marking this check" });
+  const findingsError = data.findings == null ? null : legionellaFindingsError(data.checkType, data.findings);
+  if (findingsError) return res.status(400).json({ error: findingsError });
   const performer = await resolveStaffPerformer(clientId, data.staffRosterId, data.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
@@ -358,14 +363,17 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const profile = data.siteId == null ? null : await getLegionellaProfile(clientId, data.siteId);
   const breach = legionellaBreach(data.checkType, data.temperature, profile,
     { healthcare: await isHealthcareClient(clientId), location: data.location, tmvOutlet: await isTmvOutlet(clientId, data.outletId) });
+  // Heavy sediment, biofilm, an open lid and the like need action, like a breach.
+  const findingFailures = legionellaFindingFailures(data.checkType, data.findings);
   let inserted;
   try {
     inserted = await db.transaction(async tx => {
       const [row] = await tx.insert(legionellaChecksTable).values({
         clientId, checkType: data.checkType, checkDate: data.checkDate,
-        result: breach ? "fail" : data.result,
+        result: breach || findingFailures.length ? "fail" : data.result,
         temperature: data.temperature != null ? String(data.temperature) : null,
         siteId: data.siteId ?? null, location: data.location ?? null, notes: data.notes ?? null,
+        findings: data.findings ?? null,
         performedBy: performer.performedBy, staffRosterId: performer.staffRosterId,
         equipmentId: data.equipmentId ?? null,
         createdBy: userId,
@@ -375,7 +383,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       if (row && data.outletId) {
         await tx.execute(sql`UPDATE legionella_checks SET outlet_id = ${data.outletId} WHERE id = ${row.id} AND client_id = ${clientId}`);
       }
-      if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, row.id, breach, req.currentUser?.id ?? null, performer.performedBy);
+      if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, row.id, breach, req.currentUser?.id ?? null, performer.performedBy, findingFailures);
       return row;
     });
   } catch (err) {
@@ -714,19 +722,23 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   const nextTemperature = temperature !== undefined ? temperature : (existing.temperature == null ? null : Number(existing.temperature));
   if (existing.checkType.endsWith("_temp") && nextTemperature == null)
     return res.status(400).json({ error: "Record a temperature before marking this check" });
+  const findingsError = parsed.data.findings == null ? null : legionellaFindingsError(existing.checkType, parsed.data.findings);
+  if (findingsError) return res.status(400).json({ error: findingsError });
+  const findingFailures = legionellaFindingFailures(existing.checkType,
+    parsed.data.findings !== undefined ? parsed.data.findings : existing.findings);
   const breach = legionellaBreach(existing.checkType, nextTemperature, profile, {
     healthcare: await isHealthcareClient(clientId),
     location: parsed.data.location !== undefined ? parsed.data.location : existing.location,
     tmvOutlet: await isTmvOutlet(clientId, nextOutletId),
   });
-  updateData.result = breach ? "fail" : (parsed.data.result !== undefined ? parsed.data.result : existing.result);
+  updateData.result = breach || findingFailures.length ? "fail" : (parsed.data.result !== undefined ? parsed.data.result : existing.result);
   const updated = await db.transaction(async tx => {
     const [row] = await tx.update(legionellaChecksTable).set(updateData)
       .where(and(eq(legionellaChecksTable.id, id), eq(legionellaChecksTable.clientId, clientId))).returning();
     if (row && outletChanged) {
       await tx.execute(sql`UPDATE legionella_checks SET outlet_id = ${nextOutletId} WHERE id = ${id} AND client_id = ${clientId}`);
     }
-    if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, id, breach, req.currentUser?.id ?? null, performer.performedBy);
+    if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, id, breach, req.currentUser?.id ?? null, performer.performedBy, findingFailures);
     return row;
   });
 
@@ -824,12 +836,19 @@ function legionellaBreach(checkType: string, temperature: number | null | undefi
   return null;
 }
 
-async function ensureLegionellaAction(tx: any, clientId: number, checkId: number, breach: any | null, userId: number | null, ownerName: string | null) {
+async function ensureLegionellaAction(tx: any, clientId: number, checkId: number, breach: any | null, userId: number | null,
+  ownerName: string | null, findingFailures: string[] = []) {
+  // What was found goes in the corrective action, so whoever picks it up
+  // knows the tank needs a clean or the lid needs refitting.
+  const correctiveAction = findingFailures.length
+    ? `Found: ${findingFailures.join("; ")}. Put this right, then investigate and record remedial controls in the written scheme`
+    : "Investigate and record remedial controls in the written scheme";
   await tx.execute(sql`INSERT INTO compliance_actions
     (client_id, source_track, source_record_id, title, severity, owner_name, corrective_action, evidence_reference, created_by, updated_by, auto_generated)
     SELECT ${clientId}, 'LegionellaTrack', ${String(checkId)}, 'Failed Legionella safety check', 'high',
-      ${ownerName ?? "Duty manager"}, 'Investigate and record remedial controls in the written scheme',
-      ${JSON.stringify({ reportedResult: "fail", breachedRange: breach?.limits ?? null, observedTemperature: breach?.temperature ?? null })},
+      ${ownerName ?? "Duty manager"}, ${correctiveAction},
+      ${JSON.stringify({ reportedResult: "fail", breachedRange: breach?.limits ?? null, observedTemperature: breach?.temperature ?? null,
+        ...(findingFailures.length ? { conditionFindings: findingFailures } : {}) })},
       ${userId}, ${userId}, true
     WHERE NOT EXISTS (SELECT 1 FROM compliance_actions WHERE client_id = ${clientId}
       AND source_track = 'LegionellaTrack' AND source_record_id = ${String(checkId)})

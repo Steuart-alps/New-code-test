@@ -12229,6 +12229,12 @@ components:
         performedBy:
           type: string
           nullable: true
+        findings:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+          description: Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
         createdAt:
           type: string
           format: date-time
@@ -12281,6 +12287,12 @@ components:
           type: integer
           nullable: true
           description: A cold water tank or calorifier on the equipment list (its site must match siteId).
+        findings:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+          description: Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
       required:
         - checkType
         - checkDate
@@ -12310,6 +12322,12 @@ components:
         performedBy:
           type: string
           nullable: true
+        findings:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+          description: Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
 
     LegionellaStatus:
       type: object

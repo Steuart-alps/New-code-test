@@ -77,8 +77,37 @@ const run = async () => {
   check("unsafe Legionella POST fails", legionella.status === 201 && legionella.data?.result === "fail", legionella.status);
   const hotTub = await request("POST", "/hot-tub", { checkType: "water_chemistry", checkDate: day, result: "pass", phValue: 8.2, sanitiserLevel: 2, temperature: 41, siteId, performedBy: "Integration tester" });
   check("unsafe Hot Tub POST fails", hotTub.status === 201 && hotTub.data?.result === "fail", hotTub.status);
+  // Condition answers: sediment, biofilm, lid and screens on a tank inspection.
+  const cleanTank = { sediment: "slight", biofilm: "none", waterSurface: "clear", debris: "none", corrosion: "none",
+    lid: "yes", screens: "yes", insulation: "yes" };
+  const tankCheck = (findings, extra = {}) => request("POST", "/legionella", {
+    checkType: "cold_tank_inspection", checkDate: day, result: "pass", siteId, performedBy: "Integration tester", findings, ...extra,
+  });
+  const goodTank = await tankCheck(cleanTank);
+  check("a tank inspection with a little sediment passes and keeps its answers", goodTank.status === 201 &&
+    goodTank.data?.result === "pass" && goodTank.data?.findings?.sediment === "slight", JSON.stringify(goodTank.data));
+  const partTank = await tankCheck({ sediment: "none" });
+  check("a tank inspection with unanswered questions is refused", partTank.status === 400, partTank.status);
+  const oddTank = await tankCheck({ ...cleanTank, sediment: "loads" });
+  check("an unknown answer is refused", oddTank.status === 400, oddTank.status);
+  const tempFindings = await request("POST", "/legionella", { checkType: "cold_tank_temp", checkDate: day, result: "pass", temperature: 12, siteId, findings: { water: "clear" } });
+  check("temperature checks take no condition answers", tempFindings.status === 400, tempFindings.status);
+  const dirtyTank = await tankCheck({ ...cleanTank, sediment: "heavy", biofilm: "found" });
+  check("heavy sediment and biofilm turn a pass into a fail", dirtyTank.status === 201 && dirtyTank.data?.result === "fail", JSON.stringify(dirtyTank.data));
+  const editedGood = await request("PUT", `/legionella/${goodTank.data?.id}`, { findings: { ...cleanTank, lid: "no" }, result: "pass" });
+  check("editing the answers to a loose lid fails the check", editedGood.status === 200 && editedGood.data?.result === "fail" &&
+    editedGood.data?.findings?.lid === "no", JSON.stringify(editedGood.data));
+  const flushFound = await request("POST", "/legionella", { checkType: "outlet_flush", checkDate: day, result: "pass", siteId,
+    outletId: littleUsed.data?.id, performedBy: "Integration tester", findings: { water: "cleared" } });
+  check("a flush that ran clear after discolouring passes", flushFound.status === 201 && flushFound.data?.result === "pass", JSON.stringify(flushFound.data));
+  const noAnswers = await tankCheck(undefined);
+  check("older apps can still save an inspection without answers", noAnswers.status === 201 && noAnswers.data?.result === "pass"
+    && noAnswers.data?.findings == null, JSON.stringify(noAnswers.data));
   const actions = await request("GET", "/compliance-hub/actions");
   const rows = actions.data ?? [];
+  const tankAction = rows.find(a => a.sourceTrack === "LegionellaTrack" && a.sourceRecordId === String(dirtyTank.data?.id));
+  check("the tank's action says what was found", /Sediment or debris on the tank floor: A lot/.test(tankAction?.correctiveAction ?? "")
+    && /biofilm/i.test(tankAction?.correctiveAction ?? ""), JSON.stringify(tankAction));
   check("both actions persist with owners", actions.status === 200 &&
     rows.some(a => a.sourceTrack === "LegionellaTrack" && a.sourceRecordId === String(legionella.data?.id) && a.ownerName) &&
     rows.some(a => a.sourceTrack === "HotTubTrack" && a.sourceRecordId === String(hotTub.data?.id) && a.ownerName), JSON.stringify(rows));
