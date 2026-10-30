@@ -2816,6 +2816,53 @@ paths:
               schema:
                 $ref: "#/components/schemas/FireCallPointImportResult"
 
+  /imports/allergen-ingredients/template:
+    get:
+      operationId: getAllergenIngredientImportTemplate
+      tags: [kitchen-allergens]
+      summary: Download the CSV template for importing suppliers' allergen information (managers)
+      responses:
+        "200":
+          description: CSV template
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /imports/allergen-ingredients:
+    post:
+      operationId: importAllergenIngredients
+      tags: [kitchen-allergens]
+      summary: Preview or import suppliers' allergen information as KitchenTrack ingredients (managers)
+      description: >-
+        The browser sends the spreadsheet's header row and cell text: a column
+        per allergen (Y, N or May) or Contains and May contain lists. With
+        preview true (the default) nothing is written; otherwise every row is
+        written in one go, only when no row has an error. Rows match existing
+        ingredients by site and name; changed allergens update every dish
+        using the ingredient, each with a change log entry.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FireCallPointImportRequest"
+      responses:
+        "200":
+          description: What each row did, or would do
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+        "400":
+          description: The file has no allergen columns, no Ingredient column, or no rows
+        "409":
+          description: Nothing was imported because some rows have errors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+
   /billing/ai:
     get:
       operationId: getAiAddon
@@ -2919,7 +2966,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster]
+            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster, allergen-ingredients]
       responses:
         "200":
           description: Reading status and the sites the caller can import into
@@ -2938,7 +2985,8 @@ paths:
       description: >-
         Claude reads the file and returns rows in the import's own columns
         (RoomTrack rooms, contractors, FireTrack call points, GreenTrack
-        equipment or the staff roster). Nothing is saved: the browser sends
+        equipment, the staff roster or KitchenTrack suppliers' allergen
+        information). Nothing is saved: the browser sends
         the rows through the import's usual preview. The file is not stored.
         Off until the server has an Anthropic API key; readings share the
         business's monthly number with the PAT register reading.
@@ -2948,7 +2996,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster]
+            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster, allergen-ingredients]
       requestBody:
         required: true
         content:

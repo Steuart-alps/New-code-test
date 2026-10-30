@@ -203,6 +203,7 @@
     "test:fix-track-assign-contractor": "bash tests/run-fresh-schema.sh tests/fix-track-assign-contractor.mjs",
     "test:contractor-sign-in": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/contractor-sign-in.mjs",
     "test:record-signatures": "FRESH_SCHEMA_BASE=push FRESH_SCHEMA_RECORD_SIGNATURES=1 bash tests/run-fresh-schema.sh tests/record-signatures.mjs",
+    "test:corrective-actions": "FRESH_SCHEMA_BASE=push FRESH_SCHEMA_RECORD_SIGNATURES=1 FRESH_SCHEMA_CORRECTIVE_ACTIONS=1 bash tests/run-fresh-schema.sh tests/corrective-actions.mjs",
     "test:contractor-token-security": "bash tests/run-fresh-schema.sh tests/contractor-token-security.mjs",
     "test:contractor-approval-inbox-browser": "bash tests/run-contractor-approval-inbox-browser.sh",
     "test:equipment-qr-browser": "FRESH_SCHEMA_BROWSER_POLICY=1 FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh ../compliance-tracker/tests/equipment-qr-browser.test.mjs",

@@ -6,9 +6,22 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { ensureOk } from "@/components/register-shared";
-import { ALLERGENS, ALLERGEN_SHORT } from "@/lib/allergens";
+import { ALLERGENS, ALLERGEN_LABEL, ALLERGEN_SHORT } from "@/lib/allergens";
+import { allergenIconSvg } from "@/lib/allergen-icons";
+import { cn } from "@/lib/utils";
 
 // Pieces shared by the allergen dishes, ingredients and charts tabs.
+
+/**
+ * An allergen's pictogram (lib/allergen-icons.ts). Decorative unless `title`
+ * is given; give it when the name is not written next to the icon.
+ */
+export function AllergenIcon({ allergen, size = 20, title, className }: {
+  allergen: string; size?: number; title?: string; className?: string;
+}) {
+  // The SVG is a fixed string from allergen-icons.ts, never user text.
+  return <span className={cn("inline-flex shrink-0", className)} dangerouslySetInnerHTML={{ __html: allergenIconSvg(allergen, size, title) }} />;
+}
 
 /**
  * One row per allergen with "Contains" and "May contain" ticks. Ticking
@@ -40,7 +53,9 @@ export function AllergenTicks({ contains, mayContain, onChange, idPrefix }: {
         <tbody>
           {ALLERGENS.map((a) => (
             <tr key={a.key} className="border-t border-border">
-              <td className="p-2">{a.label}</td>
+              <td className="p-2">
+                <span className="inline-flex items-center gap-2"><AllergenIcon allergen={a.key} size={22} />{a.label}</span>
+              </td>
               <td className="p-2 text-center">
                 <Checkbox id={`${idPrefix}-c-${a.key}`} aria-label={`Contains ${a.label}`}
                   checked={contains.includes(a.key)} onCheckedChange={(checked) => set(a.key, "contains", checked === true)} />
@@ -66,9 +81,15 @@ export function AllergenBadges({ contains, mayContain, emptyText = "None of the 
   if (contains.length === 0 && mayContain.length === 0) return <span className="text-xs text-muted-foreground">{emptyText}</span>;
   return (
     <div className="flex flex-wrap gap-1">
-      {contains.map((k) => <Badge key={k} variant="outline" className="text-[11px] border-red-200 bg-red-50 text-red-700">{ALLERGEN_SHORT[k] ?? k}</Badge>)}
+      {contains.map((k) => (
+        <Badge key={k} variant="outline" className="text-[11px] border-red-200 bg-red-50 text-red-700 gap-1 pl-0.5" title={`Contains ${ALLERGEN_LABEL[k] ?? k}`}>
+          <AllergenIcon allergen={k} size={16} />{ALLERGEN_SHORT[k] ?? k}
+        </Badge>
+      ))}
       {mayContain.map((k) => (
-        <Badge key={`m-${k}`} variant="outline" className="text-[11px] border-amber-300 bg-amber-50 text-amber-800">May: {ALLERGEN_SHORT[k] ?? k}</Badge>
+        <Badge key={`m-${k}`} variant="outline" className="text-[11px] border-amber-300 bg-amber-50 text-amber-800 gap-1 pl-0.5" title={`May contain ${ALLERGEN_LABEL[k] ?? k}`}>
+          <AllergenIcon allergen={k} size={16} />May: {ALLERGEN_SHORT[k] ?? k}
+        </Badge>
       ))}
     </div>
   );
@@ -155,5 +176,56 @@ export function AllergenChangeLogDialog({ title, path, removedText, normalise, o
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * On-screen allergen chart in the Food Standards Agency's layout: dishes down
+ * the side, the 14 allergens across with their pictograms. The printed chart
+ * (renderChartHtml in lib/allergens.ts) has the same layout.
+ */
+export function AllergenMatrix({ dishes }: {
+  dishes: { id: number; name: string; description?: string | null; allergens: string[]; mayContain?: string[] | null }[];
+}) {
+  if (dishes.length === 0) return <p className="text-sm text-muted-foreground">No dishes on this chart yet.</p>;
+  return (
+    <div className="overflow-x-auto rounded-md border border-border">
+      <table className="text-xs border-collapse min-w-[760px] w-full">
+        <thead className="bg-muted/40">
+          <tr>
+            <th scope="col" className="sticky left-0 z-10 bg-muted text-left font-medium p-2 border-b border-r border-border align-bottom min-w-[130px]">Dish / product</th>
+            {ALLERGENS.map((a) => (
+              <th key={a.key} scope="col" title={a.label} className="p-1 border-b border-l border-border align-top font-medium w-11">
+                <div className="flex flex-col items-center gap-1">
+                  <AllergenIcon allergen={a.key} size={26} />
+                  <span className="[writing-mode:vertical-rl] rotate-180 whitespace-nowrap text-[11px]">{a.short}</span>
+                </div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {dishes.map((dish) => (
+            <tr key={dish.id} className="border-t border-border">
+              <th scope="row" className="sticky left-0 z-10 bg-background text-left font-medium p-2 border-r border-border">
+                {dish.name}
+                {dish.description && <div className="font-normal text-muted-foreground">{dish.description}</div>}
+              </th>
+              {ALLERGENS.map((a) => {
+                const contains = dish.allergens.includes(a.key);
+                const may = !contains && (dish.mayContain ?? []).includes(a.key);
+                return (
+                  <td key={a.key} className={cn("text-center border-l border-border font-bold",
+                    contains && "bg-red-50 text-red-700", may && "bg-amber-50 text-amber-800")}
+                    aria-label={contains ? `Contains ${a.label}` : may ? `May contain ${a.label}` : `No ${a.label}`}>
+                    {contains ? "✔" : may ? "M" : ""}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

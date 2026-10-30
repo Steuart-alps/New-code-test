@@ -419,6 +419,9 @@ jobs:
       - name: Recorded checks are signed with a drawn signature (production schema base)
         run: pnpm --filter @workspace/api-server run test:record-signatures
 
+      - name: A fail on any track asks for its corrective action (production schema base)
+        run: pnpm --filter @workspace/api-server run test:corrective-actions
+
       - name: Equipment list and QR label tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:equipment-labels
 

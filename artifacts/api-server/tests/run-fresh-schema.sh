@@ -92,6 +92,11 @@ fi
 if [ "${FRESH_SCHEMA_RECORD_SIGNATURES:-}" = "1" ]; then
   server_policy+=(ENFORCE_RECORD_SIGNATURES=1)
 fi
+# FRESH_SCHEMA_CORRECTIVE_ACTIONS=1 makes the server ask what was done about
+# each fail on a recorded check, as in production.
+if [ "${FRESH_SCHEMA_CORRECTIVE_ACTIONS:-}" = "1" ]; then
+  server_policy+=(ENFORCE_CORRECTIVE_ACTIONS=1)
+fi
 if [ "${FRESH_SCHEMA_BROWSER_POLICY:-}" = "1" ]; then
   server_policy+=(ENFORCE_CSRF=1 ENFORCE_MANDATORY_2FA=1 PUBLIC_APP_URL="http://127.0.0.1:$port")
   suite_browser+=(FRESH_SCHEMA_BROWSER_POLICY=1)
