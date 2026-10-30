@@ -39,6 +39,7 @@ const CSV_IMPORTS: Partial<Record<ListKind, ImportCsvType>> = {
   "room-track-rooms": "room-track-rooms",
   contractors: "contractors",
   "fire-call-points": "fire-call-points",
+  "legionella-outlets": "legionella-outlets",
 };
 
 /** The page body, without the app frame (also used by its browser test). */

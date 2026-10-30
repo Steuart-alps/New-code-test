@@ -2816,6 +2816,53 @@ paths:
               schema:
                 $ref: "#/components/schemas/FireCallPointImportResult"
 
+  /imports/legionella-outlets/template:
+    get:
+      operationId: getLegionellaOutletImportTemplate
+      tags: [legionella]
+      summary: Download the CSV template for uploading LegionellaTrack outlets, tanks and calorifiers (managers)
+      responses:
+        "200":
+          description: CSV template
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /imports/legionella-outlets:
+    post:
+      operationId: importLegionellaOutlets
+      tags: [legionella]
+      summary: Preview or import a spreadsheet of LegionellaTrack outlets, tanks and calorifiers (managers)
+      description: >-
+        The browser sends the spreadsheet's header row and cell text: Name,
+        Type (Hot, Cold, TMV, Little used, Cold water tank or Calorifier),
+        Location and Site. Outlets join the site's outlet list; cold water
+        tanks and calorifiers join the equipment list, where tank checks name
+        them. With preview true (the default) nothing is written; otherwise
+        every row is written in one go, only when no row has an error.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FireCallPointImportRequest"
+      responses:
+        "200":
+          description: What each row did, or would do
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+        "400":
+          description: The file is missing a required column or has no rows
+        "409":
+          description: Nothing was imported because some rows have errors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+
   /imports/allergen-ingredients/template:
     get:
       operationId: getAllergenIngredientImportTemplate
@@ -2966,7 +3013,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster, allergen-ingredients]
+            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster, allergen-ingredients, legionella-outlets]
       responses:
         "200":
           description: Reading status and the sites the caller can import into
@@ -2996,7 +3043,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster, allergen-ingredients]
+            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster, allergen-ingredients, legionella-outlets]
       requestBody:
         required: true
         content:

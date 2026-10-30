@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import { apiFetch } from "@/lib/api";
@@ -39,7 +39,7 @@ import { format } from "date-fns";
 import { Droplets, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX, Filter, Pencil, Trash2, Lock, ThermometerSun, Settings, X, XCircle, ShieldAlert, Footprints } from "lucide-react";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { cn } from "@/lib/utils";
-import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { useAuth, useCanAdmin, useCanManageUsers } from "@/context/auth-context";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { WalkRoundDialog, type WalkRoundPoint } from "@/components/walk-round-dialog";
@@ -48,6 +48,7 @@ import { useSiteFilterId, useWorkingSiteId } from "@/hooks/use-working-site";
 import { sortByLabel } from "@/lib/sort-options";
 import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import { RecordSignedBy } from "@/components/record-signature";
+import { ImportCsvButton } from "@/components/import-csv-dialog";
 import {
   LegionellaConditionQuestions, LegionellaFindingsSummary, legionellaFindingsComplete, legionellaFindingsPayload,
 } from "@/components/legionella-condition-questions";
@@ -694,6 +695,7 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
   const workingSiteId = useWorkingSiteId();
   const { data: sites } = useListSites();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const refresh = async () => {
     setLoading(true);
@@ -776,16 +778,25 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
             </CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">Monitoring points and frequency should match this site's risk assessment and written scheme.</p>
           </div>
-          {canAdmin && (
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => { setWalkSite(workingSiteId ?? undefined); setWalkRoundOpen(true); }} data-testid="button-walk-round-outlets">
-                <Footprints className="w-3.5 h-3.5 mr-1.5" /> Walk round and speak
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
-                <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Outlet
-              </Button>
-            </div>
-          )}
+          <div className="flex flex-wrap justify-end gap-2">
+            {/* Outlets, tanks and calorifiers from the business's own list or risk assessment. */}
+            <ImportCsvButton
+              type="legionella-outlets"
+              siteId={siteId ?? workingSiteId ?? null}
+              label="Upload a list"
+              onImported={() => { refresh(); queryClient.invalidateQueries({ queryKey: ["equipment"] }); }}
+            />
+            {canAdmin && (
+              <>
+                <Button variant="outline" size="sm" onClick={() => { setWalkSite(workingSiteId ?? undefined); setWalkRoundOpen(true); }} data-testid="button-walk-round-outlets">
+                  <Footprints className="w-3.5 h-3.5 mr-1.5" /> Walk round and speak
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
+                  <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Outlet
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="p-4">
@@ -979,9 +990,18 @@ function RecordCheckDialog({
   const { data: allUnits } = useLegionellaUnits();
   const siteUnits = siteUnitsFor(allUnits, checkType, selectedSite);
   const siteUnitIds = siteUnits.map(u => u.id).join(",");
+  // The location a picked tank filled in, cleared again when the tank is dropped.
+  const unitLocation = useRef<string | null>(null);
   const pickUnit = (unit: LegionellaUnit | null) => {
     setEquipment(unit ? { id: unit.id, name: unit.name } : null);
-    if (unit) setLocation(unit.location ?? unit.name);
+    if (unit) {
+      unitLocation.current = unit.location ?? unit.name;
+      setLocation(unitLocation.current);
+    } else {
+      const filled = unitLocation.current;
+      unitLocation.current = null;
+      setLocation(current => (filled !== null && current === filled ? "" : current));
+    }
   };
   // A tank from another site or of the wrong kind is dropped; a site with
   // only one tank (or calorifier) has it chosen already.
@@ -1343,6 +1363,7 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
 export default function LegionellaPage() {
   const { hasService } = useAuth();
   const canAdmin = useCanAdmin();
+  const canManageOutlets = useCanManageUsers();
   const hasLegionellatrack = hasService("legionellatrack");
 
   const [filterType, setFilterType] = useState<LegionellaCheckType | "">("");
@@ -1558,7 +1579,8 @@ export default function LegionellaPage() {
         ))}
 
         {/* Sentinel Outlets — per-outlet monthly tracking */}
-        <SentinelOutletsPanel canAdmin={canAdmin} siteId={filterSite} openOutletId={scanOutletId} />
+        {/* Managers name their sites' outlets too, as the outlet routes allow. */}
+        <SentinelOutletsPanel canAdmin={canManageOutlets} siteId={filterSite} openOutletId={scanOutletId} />
 
         {(overdueStatuses.length > 0 || dueSoonStatuses.length > 0) && (
           <div className="space-y-3">

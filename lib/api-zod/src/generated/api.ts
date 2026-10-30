@@ -4175,6 +4175,44 @@ export const ImportFireCallPointsResponse = zod.object({
 
 
 /**
+ * @summary Download the CSV template for uploading LegionellaTrack outlets, tanks and calorifiers (managers)
+ */
+export const GetLegionellaOutletImportTemplateResponse = zod.unknown()
+
+
+/**
+ * The browser sends the spreadsheet's header row and cell text: Name, Type (Hot, Cold, TMV, Little used, Cold water tank or Calorifier), Location and Site. Outlets join the site's outlet list; cold water tanks and calorifiers join the equipment list, where tank checks name them. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error.
+ * @summary Preview or import a spreadsheet of LegionellaTrack outlets, tanks and calorifiers (managers)
+ */
+export const ImportLegionellaOutletsBody = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "preview": zod.boolean().optional(),
+  "siteId": zod.number().nullish().describe('The site for rows whose Site cell is blank.')
+})
+
+export const ImportLegionellaOutletsResponse = zod.object({
+  "preview": zod.boolean(),
+  "committed": zod.boolean(),
+  "summary": zod.object({
+  "total": zod.number(),
+  "create": zod.number(),
+  "update": zod.number(),
+  "skip": zod.number(),
+  "error": zod.number()
+}),
+  "rows": zod.array(zod.object({
+  "row": zod.number(),
+  "action": zod.enum(['create', 'update', 'skip', 'error']),
+  "label": zod.string(),
+  "reasons": zod.array(zod.string())
+})),
+  "ignoredHeaders": zod.array(zod.string()),
+  "error": zod.string().optional()
+})
+
+
+/**
  * @summary Download the CSV template for importing suppliers' allergen information (managers)
  */
 export const GetAllergenIngredientImportTemplateResponse = zod.unknown()
@@ -4365,7 +4403,7 @@ export const ReadPatRegisterListResponse = zod.object({
  * @summary Whether ComplyTrack can read a photo or document list for an import, and this month's use
  */
 export const GetImportListReadingParams = zod.object({
-  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster', 'allergen-ingredients'])
+  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster', 'allergen-ingredients', 'legionella-outlets'])
 })
 
 export const getImportListReadingResponseAiPercentUsedMin = 0;
@@ -4404,7 +4442,7 @@ export const GetImportListReadingResponse = zod.object({
  * @summary Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
  */
 export const ReadImportListParams = zod.object({
-  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster', 'allergen-ingredients'])
+  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster', 'allergen-ingredients', 'legionella-outlets'])
 })
 
 export const readImportListBodyFileNameMax = 255;

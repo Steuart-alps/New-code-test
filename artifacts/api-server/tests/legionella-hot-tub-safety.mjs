@@ -122,6 +122,39 @@ const run = async () => {
   check("calorifier checks are not held up by the tanks", calorifier.status === 201, calorifier.status);
   const moved = await request("PUT", `/legionella/${named.data?.id}`, { equipmentId: tankA.data?.id });
   check("a check can be moved to the other tank", moved.status === 200 && moved.data?.equipmentId === tankA.data?.id, JSON.stringify(moved.data));
+  // A spreadsheet of the site's own outlets, tanks and calorifiers.
+  const listSite = await request("POST", "/sites", { name: `Outlet list ${Date.now()}`, seedStarterChecks: false });
+  const outletList = (preview, rows) => request("POST", "/imports/legionella-outlets", {
+    headers: ["Outlet", "Type", "Location", "Site"], rows, preview, siteId: listSite.data?.id,
+  });
+  const listRows = [
+    ["Ladies basin 1", "Hot", "Clubhouse ground floor", ""],
+    ["Ladies basin 1", "Cold", "Clubhouse ground floor", ""],
+    ["Mens shower", "Little used", "Changing room", ""],
+    ["Assisted bath", "TMV", "", ""],
+    ["Tank 1", "Cold water storage tank", "Roof void", ""],
+    ["Tank 2", "CWST", "Plant room", ""],
+    ["Main calorifier", "Hot water cylinder", "Boiler room", ""],
+  ];
+  const listPreview = await outletList(true, listRows);
+  check("an outlet and tank list previews without saving", listPreview.status === 200 && listPreview.data?.summary?.create === 7
+    && listPreview.data?.committed === false, JSON.stringify(listPreview.data));
+  const badType = await outletList(true, [["Kitchen sink", "Warm", "", ""]]);
+  check("an unknown type is an error row", badType.data?.summary?.error === 1 && /not one of/.test(badType.data?.rows?.[0]?.reasons?.[0] ?? ""), JSON.stringify(badType.data));
+  const listImport = await outletList(false, listRows);
+  check("the list imports", listImport.status === 200 && listImport.data?.committed === true, JSON.stringify(listImport.data));
+  const listedOutlets = ((await request("GET", "/legionella/outlet-status")).data ?? []).filter(o => o.siteId === listSite.data?.id);
+  check("hot and cold taps at one basin become two outlets", listedOutlets.filter(o => o.name === "Ladies basin 1").map(o => o.type).sort().join(",") === "cold,hot"
+    && listedOutlets.some(o => o.name === "Mens shower" && o.type === "little_used") && listedOutlets.some(o => o.name === "Assisted bath" && o.type === "tmv"),
+    JSON.stringify(listedOutlets));
+  const listedUnits = ((await request("GET", `/equipment?siteId=${listSite.data?.id}`)).data ?? []);
+  check("tanks and the calorifier join the equipment list with their names", listedUnits.filter(u => u.type === "cold_water_tank").map(u => u.name).sort().join(",") === "Tank 1,Tank 2"
+    && listedUnits.some(u => u.type === "calorifier" && u.name === "Main calorifier" && u.location === "Boiler room"), JSON.stringify(listedUnits));
+  const listAgain = await outletList(true, [["Tank 1", "Tank", "Loft", ""], ["Ladies basin 1", "Hot", "Clubhouse ground floor", ""]]);
+  check("uploading again updates a location and skips what is unchanged", listAgain.data?.summary?.update === 1 && listAgain.data?.summary?.skip === 1
+    && listAgain.data?.summary?.create === 0, JSON.stringify(listAgain.data));
+  const listedTankCheck = await tankCheck(cleanTank, { siteId: listSite.data?.id });
+  check("an imported pair of tanks makes tank checks say which", listedTankCheck.status === 400, listedTankCheck.status);
   const actions = await request("GET", "/compliance-hub/actions");
   const rows = actions.data ?? [];
   const tankAction = rows.find(a => a.sourceTrack === "LegionellaTrack" && a.sourceRecordId === String(dirtyTank.data?.id));
