@@ -133,7 +133,7 @@ const assigneeRequests = [];
 // Contractor visit types (artifacts/api-server/src/lib/contractorVisits.ts)
 // and their compliance checks: one with a certificate outstanding (red), one
 // due within 30 days (amber), one done in house (green), one with no check
-// that is marked "No contractor needed".
+// that is marked "No contractor needed" (N/A), so hidden.
 const CONTRACTOR_TYPES = [
   { key: "fire:alarm_service", module: "fire", trackLabel: "FireTrack", title: "Fire Alarm Maintenance", label: "Fire alarm service (6-monthly)", description: "", dueFrom: "check" },
   { key: "fire:extinguisher_service", module: "fire", trackLabel: "FireTrack", title: "Fire Extinguishers Maintenance", label: "Fire extinguisher service (annual)", description: "", dueFrom: "check" },
@@ -448,7 +448,7 @@ try {
   const contractorCard = page.getByTestId("track-contractor-checks-fire");
   await contractorCard.waitFor();
   const contractorRows = contractorCard.getByTestId("contractor-check-row");
-  assert.equal(await contractorRows.count(), 4, "one row per fire contractor check, none for other tracks or other checks");
+  assert.equal(await contractorRows.count(), 3, "one row per fire contractor check, none for other tracks, other checks or N/A ones");
   const rowFor = (label) => contractorRows.filter({ hasText: label });
   assert.equal(await rowFor("Fire alarm service").getAttribute("data-rag"), "red");
   assert.match(await rowFor("Fire alarm service").innerText(), /Certificate outstanding[\s\S]*Contractor: Alarm Co/);
@@ -456,8 +456,8 @@ try {
   assert.equal(await rowFor("Fire extinguisher service").getAttribute("data-rag"), "amber", "a business-wide check counts at the site");
   assert.equal(await rowFor("Emergency lighting 3-hour test").getAttribute("data-rag"), "green");
   assert.match(await rowFor("Emergency lighting 3-hour test").innerText(), /in house by Sam Patel/);
-  assert.equal(await rowFor("Fire risk assessment review").getAttribute("data-rag"), "grey");
-  assert.match(await rowFor("Fire risk assessment review").innerText(), /No contractor needed/, "as marked on the Contractors page");
+  assert.equal(await rowFor("Fire risk assessment review").count(), 0, "a line marked N/A on the Contractors page is hidden");
+  assert.match(await contractorCard.getByTestId("contractor-checks-hidden").innerText(), /1 marked N\/A[\s\S]*Add back on the Contractors page/);
   await contractorCard.scrollIntoViewIfNeeded();
   await shot(page, "7-contractor-checks");
   console.log("ok - FireTrack shows its contractor services red, amber or green from their compliance checks, each opening the check");
