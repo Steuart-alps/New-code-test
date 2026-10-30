@@ -388,9 +388,15 @@ export default function HotTubPage() {
 
   // ── Dialog ─────────────────────────────────────────────────────────────────
 
+  // Tubs at a site. Every check except the risk assessment review is kept per
+  // tub there, so a site with tubs needs the check recorded against one.
+  const tubsAtSite = (siteId: string) => activeTubs.filter(t => siteId !== "" && String(t.siteId) === siteId);
+
   function openAdd() {
     setEditItem(null);
-    setForm({ ...emptyForm(), performedBy: user?.name ?? "", siteId: workingSiteId ? String(workingSiteId) : "" });
+    const siteId = workingSiteId ? String(workingSiteId) : "";
+    const onlyTub = tubsAtSite(siteId).length === 1 ? tubsAtSite(siteId)[0] : null;
+    setForm({ ...emptyForm(), performedBy: user?.name ?? "", siteId, hotTubId: onlyTub ? String(onlyTub.id) : "" });
     setStaffRosterId(null);
     setShowDialog(true);
   }
@@ -460,6 +466,9 @@ export default function HotTubPage() {
     }
     if (form.checkType === "temperature" && !form.temperature) {
       toast({ title: "Temperature reading is required", variant: "destructive" }); return;
+    }
+    if (!editItem && form.checkType !== "risk_assessment" && !form.hotTubId && tubsAtSite(form.siteId).length > 0) {
+      toast({ title: "Choose the tub", description: "This site has tubs, so pick the one this check was for.", variant: "destructive" }); return;
     }
     setSaving(true);
     try {
@@ -546,13 +555,13 @@ export default function HotTubPage() {
   return (
     <AppLayout title="TubTrack">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div>
           <p className="text-sm text-muted-foreground mt-1">
             Hot tub & spa maintenance logbook — record water chemistry and controls from your risk-assessed operating procedure
           </p>
         </div>
-        <div className="flex gap-2 flex-shrink-0">
+        <div className="flex flex-wrap gap-2 sm:flex-shrink-0">
           <Button variant="outline" onClick={handleExportLog} className="gap-2 rounded-sm"
             disabled={isLoading || exportingPdf} aria-busy={exportingPdf}
             title="Download the filtered maintenance log as a PDF file">

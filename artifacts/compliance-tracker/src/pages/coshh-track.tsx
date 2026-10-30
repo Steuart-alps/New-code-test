@@ -542,7 +542,7 @@ export default function CoshhTrackPage() {
         </div>
 
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList>
+          <TabsList className="max-w-full overflow-x-auto justify-start">
             <TabsTrigger value="due">What's due</TabsTrigger>
             <TabsTrigger value="substances">Substances</TabsTrigger>
             <TabsTrigger value="assessments">Assessments ({visibleAssessments.length})</TabsTrigger>

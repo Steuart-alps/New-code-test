@@ -852,11 +852,11 @@ ${rows.map(r => `<tr>
     <AppLayout title="IncidentTrack">
 
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <p className="text-sm text-muted-foreground mt-1">
           Accident & incident logbook — accidents, near misses, dangerous occurrences and RIDDOR reporting
         </p>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex flex-wrap items-center gap-2 sm:flex-shrink-0">
           <Button variant="outline" size="sm" className="gap-2 rounded-sm"
             onClick={handleExportRegister}
             title="Print or save the incident register for HSE audits / insurance">

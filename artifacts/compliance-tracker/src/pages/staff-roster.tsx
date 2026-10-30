@@ -325,7 +325,7 @@ ${rows.map(s => `<tr>
             Manage your staff list — used for document acknowledgements and training records
           </p>
         </div>
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <Button variant="outline" onClick={handlePrintRoster} className="gap-1.5">
             <Printer className="w-4 h-4" /> Print Roster
           </Button>

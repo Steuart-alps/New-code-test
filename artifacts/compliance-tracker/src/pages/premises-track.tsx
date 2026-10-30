@@ -502,7 +502,7 @@ ${sorted.map(r => `<tr>
               <p className="text-xs text-muted-foreground">Digital premises safety logbook</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <FormOptionsEditor
               optionKey="premises_inspection_types"
               title="Inspection types"

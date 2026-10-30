@@ -783,7 +783,7 @@ export function DocTrackLibrary({ kitchen = false }: { kitchen?: boolean }) {
       </div>
 
       {/* Personal sign-offs are available to every account with a roster match. */}
-      <div className="flex gap-1 mb-6 border-b border-border">
+      <div className="flex gap-1 mb-6 border-b border-border overflow-x-auto">
           <button
             onClick={() => { setPageView("library"); load(); }}
             className={cn(
