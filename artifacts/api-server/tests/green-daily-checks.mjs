@@ -204,9 +204,19 @@ try {
   assert.ok(headView.groups.find((g) => g.siteId === golf)?.rows.some((r) => r.name === "Greenkeeping" && r.todo === 1));
   ok("Today by department lists the shed checks and pre-start checks under the Greenkeeping team");
 
-  // ── Reminders: 11:00 opening, 21:00 closing, to the team's Managers ────────
+  // ── Due times: the site's Managers set them, other sites' Managers cannot ───
+  const dueTimes = (as, siteId, body) => as("PUT", `/sites/${siteId}/checklist-due-times`, body);
+  const setDue = expect(await dueTimes(asHead, golf, { openingChecksDue: "5:30", closingChecksDue: "20:00" }), [200], "manager sets golf due times");
+  assert.deepEqual([setDue.openingChecksDue, setDue.closingChecksDue], ["05:30", "20:00"]);
+  expect(await dueTimes(asHead, hotel, { closingChecksDue: "20:00" }), [403], "a site the Manager's department cannot see");
+  expect(await dueTimes(asGreenkeeper, golf, { closingChecksDue: "20:00" }), [403], "staff");
+  expect(await dueTimes(asOther, golf, { closingChecksDue: "20:00" }), [403], "other business");
+  expect(await dueTimes(asOwner, golf, { openingChecksDue: null }), [200], "owner puts opening back to the default");
+  ok("the greenkeeping Manager sets the golf club's due times; Staff and other sites are refused");
+
+  // ── Reminders: once past the due time, to the team's Managers ──────────────
   const runJob = (iso) => runTrackReminderJob({ now: new Date(iso), clientIds: [A, ownerB.clientId], sendPush: async () => 0, skipPurge: true });
-  const shedNotes = () => q(`SELECT user_id, kind, site_id, link_path, title FROM user_notifications
+  const shedNotes = () => q(`SELECT user_id, kind, site_id, link_path, title, body FROM user_notifications
     WHERE client_id = ANY($1) AND kind LIKE 'green_greenkeeping%' ORDER BY id`, [[A, ownerB.clientId]]);
   // 11:30Z is 11:30 (GMT) or 12:30 (BST) in London: the AM window.
   assert.equal((await runJob(`${today}T11:30:00Z`)).errors, 0);
@@ -220,7 +230,8 @@ try {
     { user: headGreenkeeper.userId, kind: "green_greenkeeping_closing", site: golf, link: `/green-track?tab=daily&siteId=${golf}` },
   );
   assert.match(notes[0].title, /Greenkeeping shed closing checks not done — Golf Club/);
-  ok("the closing checklist is chased at 21:00 to the Greenkeeping Manager only");
+  assert.match(notes[0].body, /was due by 20:00/);
+  ok("the closing checklist is chased after its 20:00 due time to the Greenkeeping Manager only");
 
   // ── A failed item becomes a GreenTrack action ──────────────────────────────
   const closing = expect(await asGreenkeeper("POST", "/green-track/shed-checks", {

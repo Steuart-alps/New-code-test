@@ -464,7 +464,8 @@ function startScheduler() {
 
   // In-app reminders (bell + mobile push, never email) to each track's owner
   // for unsubmitted AM/PM checklists and kitchen diaries and overdue checks.
-  // Hourly; each business is evaluated at its own local 09:00/11:00/21:00.
+  // Hourly; each business is evaluated at its own local 09:00 and 21:00, and
+  // each site's opening and closing checklists once their due time has passed.
   schedule("5 * * * *", "track-reminders", logged(
     "Track reminder job complete", () => runTrackReminderJob(),
     (result) => result.notificationsCreated === 0 && result.errors === 0,

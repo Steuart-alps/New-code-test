@@ -6277,6 +6277,10 @@ async function migrateFireCallPoints() {
   await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "night_porter" boolean`);
   await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "night_porter_since" timestamp`);
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "walk_time" text`);
+  // Oct 2026: when each site's opening and closing checks are due ("HH:MM";
+  // blank = 06:00 and 18:00). Mirrors lib/db/src/schema/sites.ts.
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "opening_checks_due" text`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "closing_checks_due" text`);
 }
 
 // Equipment list and QR labels (Oct 2026). Water checks and Compliance Checks

@@ -510,6 +510,7 @@ export * from './setupAssistRequestResult';
 export * from './setupTeamAloneResult';
 export * from './signTrainingRecordRequest';
 export * from './site';
+export * from './siteChecklistDueTimesRequest';
 export * from './storageLimitState';
 export * from './storageStatus';
 export * from './storageUsage';

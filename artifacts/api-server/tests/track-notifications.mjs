@@ -189,7 +189,7 @@ try {
     ok("owner API validates users/sites against the business and enforces roles");
   }
 
-  // ── Reminder job: AM at 11:00 local, deduplicated ────────────────────────
+  // ── Reminder job: AM once the site's opening due time (06:00) has passed ──
   // 2026-10-13 is BST (UTC+1); accounts default to Europe/London.
   const at = (iso) => new Date(iso);
   const pushes = [];
@@ -204,12 +204,12 @@ try {
   // Business B: AM done today on mobile, so nothing is due there.
   await q(`INSERT INTO daily_checklist_submissions (client_id, site_id, checklist_date, type, submitted_at)
            VALUES ($1, $2, '2026-10-12', 'am', now()), ($1, $2, '2026-10-13', 'am', now()),
-                  ($1, $2, '2026-10-14', 'am', now())`, [B, siteB.id]);
+                  ($1, $2, '2026-10-14', 'am', now()), ($1, $2, '2026-10-15', 'am', now())`, [B, siteB.id]);
 
   {
-    const early = await runJob("2026-10-13T07:00:00Z"); // 08:00 London: no phase
+    const early = await runJob("2026-10-13T04:30:00Z"); // 05:30 London: opening checks not due yet
     assert.equal(early.notificationsCreated, 0);
-    const amRun = await runJob("2026-10-13T10:30:00Z"); // 11:30 London
+    const amRun = await runJob("2026-10-13T05:10:00Z"); // 06:10 London: past the 06:00 default
     assert.equal(amRun.errors, 0);
     assert.equal(amRun.notificationsCreated, 2, JSON.stringify(amRun));
     const [staffNote] = await notificationsFor(staff.userId);
@@ -217,6 +217,7 @@ try {
     assert.equal(staffNote.site_id, site1.id);
     assert.equal(staffNote.client_id, A);
     assert.equal(staffNote.title, "AM checklist not done — The Red Lion");
+    assert.equal(staffNote.body, "Today's opening (AM) checklist for The Red Lion was due by 06:00 and hasn't been submitted yet.");
     assert.equal(staffNote.link_path, "/daily-track-am");
     assert.equal(staffNote.dedupe_key, `daily_am:site:${site1.id}:2026-10-13`);
     const [adminNote] = await notificationsFor(admin.userId);
@@ -226,24 +227,44 @@ try {
     assert.equal(pushes.length, 2, "one push per new notification");
     assert.equal(pushes[0].payload.data.route, "/checks/daily");
 
-    const again = await runJob("2026-10-13T11:30:00Z"); // 12:30, still in the window
+    const again = await runJob("2026-10-13T11:30:00Z"); // 12:30, still overdue
     assert.equal(again.notificationsCreated, 0, "deduplicated per owner, kind, site and day");
     assert.equal(pushes.length, 2, "no repeat push");
-    const late = await runJob("2026-10-13T14:30:00Z"); // 15:30: AM window over
+    const late = await runJob("2026-10-13T14:30:00Z"); // 15:30
     assert.equal(late.notificationsCreated, 0);
-    ok("AM reminder: one notification per site owner, deduplicated, pushed once");
+    ok("AM reminder: one notification per site owner once overdue, deduplicated, pushed once");
 
-    // Completing site 2's AM the next day means no reminder for it then.
+    // Owners and Managers set each site's due times; Staff, Viewers and other businesses cannot.
+    const dueTimes = (as, siteId, body) => as("PUT", `/sites/${siteId}/checklist-due-times`, body);
+    const set = await dueTimes(asOwnerA, site1.id, { openingChecksDue: "12:00" });
+    assert.equal(set.status, 200, set.text);
+    assert.equal(set.data.openingChecksDue, "12:00");
+    assert.equal(set.data.closingChecksDue, null, "closing keeps the 18:00 default");
+    assert.equal((await dueTimes(asOwnerA, site1.id, { openingChecksDue: "25:00" })).status, 400);
+    assert.equal((await dueTimes(asOwnerA, site1.id, { closingChecksDue: "6pm" })).status, 400);
+    assert.equal((await dueTimes(asStaff, site1.id, { openingChecksDue: "07:00" })).status, 403);
+    assert.equal((await dueTimes(asViewer, site1.id, { openingChecksDue: "07:00" })).status, 403);
+    assert.equal((await dueTimes(asOwnerB, site1.id, { openingChecksDue: "07:00" })).status, 403);
+    assert.equal((await dueTimes(asOwnerA, siteB.id, { openingChecksDue: "07:00" })).status, 403);
+    const listed = await asOwnerA("GET", "/sites");
+    assert.equal(listed.data.find((site) => site.id === site1.id).openingChecksDue, "12:00");
+    ok("Owners set a site's due times; Staff, Viewers and other businesses are refused");
+
+    // Completing site 2's AM the next day means no reminder for it then; site 1
+    // is now due by 12:00, so it is not chased before then.
     await q(`INSERT INTO daily_checklists (client_id, site_id, checklist_type, check_date, submitted_at)
              VALUES ($1, $2, 'premises_opening', '2026-10-14', now())`, [A, site2.id]);
-    const nextDay = await runJob("2026-10-14T10:05:00Z");
+    const beforeDue = await runJob("2026-10-14T10:05:00Z"); // 11:05 London
+    assert.equal(beforeDue.notificationsCreated, 0, "site 1 is not due until 12:00; site 2 is done");
+    const nextDay = await runJob("2026-10-14T11:05:00Z"); // 12:05 London
     assert.equal(nextDay.notificationsCreated, 1, "only site 1 is outstanding on the 14th");
     const staffNotes = await notificationsFor(staff.userId);
     assert.equal(staffNotes.at(-1).dedupe_key, `daily_am:site:${site1.id}:2026-10-14`);
-    ok("a submitted checklist is not chased; each day gets its own reminder");
+    assert.match(staffNotes.at(-1).body, /was due by 12:00/);
+    ok("a submitted checklist is not chased; each site follows its own due time; each day gets its own reminder");
   }
 
-  // ── PM checklist and kitchen diary at 21:00 local ───────────────────────
+  // ── PM checklist once past 18:00, and the kitchen diary at 21:00 local ──
   {
     await q(`INSERT INTO food_safety_records (client_id, site_id, record_date, submitted_at)
              VALUES ($1, $2, '2026-10-11', now())`, [A, site1.id]);

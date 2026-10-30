@@ -18,6 +18,10 @@ export interface Site {
   sleepingAccommodation?: boolean | null;
   /** A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists. */
   nightPorter?: boolean | null;
+  /** When the site's opening checks are due ("HH:MM" on the business's clock). Null means 06:00. */
+  openingChecksDue?: string | null;
+  /** When the site's closing checks are due ("HH:MM" on the business's clock). Null means 18:00. */
+  closingChecksDue?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -15,7 +15,8 @@ import { getCheckAlerts, RETIRED_FIRE_CHECK_TYPES, type CheckAlert } from "../li
 import { getCoshhDueItems } from "../lib/coshhTrack";
 import { NSTS_TEST_INSPECTION_TYPE, nstsStatus } from "@workspace/api-zod/nsts-sprayer-tests";
 import { getEntitledServices, isEntitled } from "../lib/services";
-import { addCalendarDays, getAccountToday } from "../lib/accountClock";
+import { addCalendarDays, getAccountTimezone, localDateIn } from "../lib/accountClock";
+import { isPastDue, localTimeIn, siteChecklistDueTimes, type SiteChecklistDueTimes } from "../lib/checklistDueTimes";
 import { getDailyChecklistCompletionBySite } from "../lib/dailyChecklistCompletion";
 import { getPickedModules } from "./setup";
 import { siteVisibleSql, visibleSiteIdsSql } from "../lib/departmentSites";
@@ -98,7 +99,13 @@ export interface ChecklistTotals {
    * are true while that checklist is outstanding. Lets the dashboard link
    * straight to each one. Empty while totals are unavailable.
    */
-  outstanding: Array<{ siteId: number; siteName: string; am: boolean; pm: boolean }>;
+  outstanding: Array<{
+    siteId: number; siteName: string; am: boolean; pm: boolean;
+    /** When the site's opening (AM) and closing (PM) checks are due, "HH:MM". */
+    amDue: string; pmDue: string;
+    /** True when that checklist is still to do and its due time has passed. */
+    amOverdue: boolean; pmOverdue: boolean;
+  }>;
 }
 
 type TrackDraft = Omit<TrackSummary, "health">;
@@ -147,7 +154,11 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   const protectedSiteClause = scopedSiteClause(sql`site_id`);
 
   // "Today" is the business's local calendar day (default Europe/London).
-  const today = await getAccountToday(clientId);
+  const timeZone = await getAccountTimezone(clientId);
+  const now = new Date();
+  const today = localDateIn(timeZone, now);
+  // Opening and closing checks are overdue once the site's due time has passed.
+  const localTime = localTimeIn(timeZone, now);
   const in30 = addCalendarDays(today, 30);
 
   const services = await getEntitledServices(clientId);
@@ -196,17 +207,20 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   })());
 
   // ── Sites list (for daily track gap detection) ──────────────────────────────
-  let allSites: { id: number; name: string }[] = [];
+  let allSites: { id: number; name: string; due: SiteChecklistDueTimes }[] = [];
   let sitesAvailable = false;
   try {
     const siteRows = await db.execute(sql`
-      SELECT id, name FROM sites
+      SELECT id, name, opening_checks_due, closing_checks_due FROM sites
       WHERE client_id = ${clientId}
       ${siteId ? sql`AND id = ${siteId}` : sql``}
       ORDER BY name
     `);
     allSites = rows(siteRows)
-      .map((r: any) => ({ id: r.id, name: r.name }))
+      .map((r: any) => ({
+        id: r.id, name: r.name,
+        due: siteChecklistDueTimes({ openingChecksDue: r.opening_checks_due, closingChecksDue: r.closing_checks_due }),
+      }))
       .filter((site) => accessibleSiteIds == null || accessibleSiteIds.includes(site.id));
     sitesAvailable = true;
   } catch (error) {
@@ -250,7 +264,12 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         if (pmEnabled && pmComplete) checklistTotals.completedPmPairs++;
         if ((amEnabled || pmEnabled) && amComplete && pmComplete) checklistTotals.completedSitePairs++;
         if (!amComplete || !pmComplete) {
-          checklistTotals.outstanding.push({ siteId: site.id, siteName: site.name, am: !amComplete, pm: !pmComplete });
+          checklistTotals.outstanding.push({
+            siteId: site.id, siteName: site.name, am: !amComplete, pm: !pmComplete,
+            amDue: site.due.opening, pmDue: site.due.closing,
+            amOverdue: !amComplete && isPastDue(localTime, site.due.opening),
+            pmOverdue: !pmComplete && isPastDue(localTime, site.due.closing),
+          });
         }
       }
     } catch (error) {
@@ -281,10 +300,20 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
           status = "no_data";
           badge = "Not started";
         } else {
-          status = branch === "am" ? "overdue" : "attention";
+          // Overdue once a site's due time has passed; until then it is still to do.
+          const dueAt = (site: (typeof allSites)[number]) => (branch === "am" ? site.due.opening : site.due.closing);
+          const overdueCount = missing.filter((site) => isPastDue(localTime, dueAt(site))).length;
+          status = overdueCount > 0 ? "overdue" : "attention";
           badge = `${plural(missingCount, "site")} not submitted`;
           for (const site of missing.slice(0, 10)) {
-            items.push({ label: site.name, detail: `${branch.toUpperCase()} checklist not submitted today`, path: `${path}?siteId=${site.id}` });
+            const due = dueAt(site);
+            items.push({
+              label: site.name,
+              detail: isPastDue(localTime, due)
+                ? `${branch.toUpperCase()} checklist overdue (due by ${due})`
+                : `${branch.toUpperCase()} checklist due by ${due}`,
+              path: `${path}?siteId=${site.id}`,
+            });
           }
         }
       } else {
@@ -1230,13 +1259,16 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         const shedSites = allSites.filter((site) => shedSiteIds.has(site.id));
         const shedDays = await getGreenkeepingShedDay(clientId, today, shedSites.map((site) => site.id));
         const shedItems: TrackItem[] = [];
+        const shedDueLabel = (due: string) => `not done today, ${isPastDue(localTime, due) ? `overdue (due by ${due})` : `due by ${due}`}`;
         for (const site of shedSites) {
           for (const type of GREENKEEPING_CHECKLIST_TYPES) {
             const state = shedDays.get(site.id)?.[type];
             if (state?.submitted && !state.failed) continue;
             shedItems.push({
               label: site.name,
-              detail: state?.submitted ? `${GREENKEEPING_CHECKLIST_NAMES[type]} submitted with a failed item` : `${GREENKEEPING_CHECKLIST_NAMES[type]} not done today`,
+              detail: state?.submitted
+                ? `${GREENKEEPING_CHECKLIST_NAMES[type]} submitted with a failed item`
+                : `${GREENKEEPING_CHECKLIST_NAMES[type]} ${shedDueLabel(site.due[type === "greenkeeping_opening" ? "opening" : "closing"])}`,
               path: greenDailyChecksPath(site.id),
             });
           }

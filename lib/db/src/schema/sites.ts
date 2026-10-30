@@ -25,6 +25,11 @@ export const sitesTable = pgTable("sites", {
   // When the night porter answer last became yes: walks before it are never
   // counted as missed.
   nightPorterSince: timestamp("night_porter_since"),
+  // When the site's opening and closing checks are due ("HH:MM" on the
+  // business's clock); null means 06:00 and 18:00. Owners and Managers set
+  // them (api-server lib/checklistDueTimes.ts).
+  openingChecksDue: text("opening_checks_due"),
+  closingChecksDue: text("closing_checks_due"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [

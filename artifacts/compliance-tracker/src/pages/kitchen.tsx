@@ -50,6 +50,7 @@ import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useChecklistSite } from "@/hooks/use-checklist-site";
 import { useWorkingSite } from "@/hooks/use-working-site";
 import { ChecklistSiteSelect } from "@/components/checklist-site-select";
+import { ChecklistDueTime } from "@/components/checklist-due-time";
 import { carryAnswers, createChecklistDraftStore, hasAnswers, type ChecklistDraftSlot } from "@/lib/checklist-carry";
 import WeeklyReviewTab from "./kitchen-weekly";
 import ProbeCheckTab from "./kitchen-probe";
@@ -2353,6 +2354,10 @@ function DailyChecksTab() {
         <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ChecklistDueTime site={sites.find(s => s.id === selectedSiteId)} period="opening" date={date}
+            done={Boolean(getAm("kitchen_opening")?.submittedAt)} />
+          <ChecklistDueTime site={sites.find(s => s.id === selectedSiteId)} period="closing" date={date}
+            done={Boolean(getPm("kitchen_closing")?.submittedAt)} />
           <KitchenChecklistCard type="kitchen_opening" siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getAm("kitchen_opening")} onSaved={load} canAdmin={canAdmin} draft={drafts.slot("kitchen_opening")} />
           <KitchenChecklistCard type="kitchen_closing" siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getPm("kitchen_closing")} onSaved={load} canAdmin={canAdmin} draft={drafts.slot("kitchen_closing")} />
         </div>

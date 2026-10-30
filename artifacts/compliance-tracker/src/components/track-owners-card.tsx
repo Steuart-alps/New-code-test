@@ -118,8 +118,9 @@ export function TrackOwnersCard() {
         </div>
         <CardDescription>
           The owner of a track gets its reminders in the app (a pop-up under the bell, and a phone notification in the
-          mobile app) — never by email. Reminders cover the AM checklist (11:00), the PM checklist and kitchen diary
-          (21:00), and overdue checks and actions (09:00), on your account's timezone. Without an owner, reminders go
+          mobile app) — never by email. Reminders cover the AM and PM checklists once each site's due time has passed
+          (06:00 and 18:00 unless changed on the AM or PM page), the kitchen diary (21:00), and overdue checks and
+          actions (09:00), on your account's timezone. Without an owner, reminders go
           to {defaultNames}. A site can have its own owner.
         </CardDescription>
       </CardHeader>
