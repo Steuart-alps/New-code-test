@@ -8958,6 +8958,155 @@ export const useImportFireCallPoints = <TError = ErrorType<void | FireCallPointI
       return useMutation(getImportFireCallPointsMutationOptions(options));
     }
 
+export const getGetLegionellaOutletImportTemplateUrl = () => {
+
+
+
+
+  return `/api/imports/legionella-outlets/template`
+}
+
+/**
+ * @summary Download the CSV template for uploading LegionellaTrack outlets, tanks and calorifiers (managers)
+ */
+export const getLegionellaOutletImportTemplate = async ( options?: RequestInit): Promise<string> => {
+
+  return customFetch<string>(getGetLegionellaOutletImportTemplateUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetLegionellaOutletImportTemplateQueryKey = () => {
+    return [
+    `/api/imports/legionella-outlets/template`
+    ] as const;
+    }
+
+
+export const getGetLegionellaOutletImportTemplateQueryOptions = <TData = Awaited<ReturnType<typeof getLegionellaOutletImportTemplate>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLegionellaOutletImportTemplate>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetLegionellaOutletImportTemplateQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getLegionellaOutletImportTemplate>>> = ({ signal }) => getLegionellaOutletImportTemplate({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getLegionellaOutletImportTemplate>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetLegionellaOutletImportTemplateQueryResult = NonNullable<Awaited<ReturnType<typeof getLegionellaOutletImportTemplate>>>
+export type GetLegionellaOutletImportTemplateQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Download the CSV template for uploading LegionellaTrack outlets, tanks and calorifiers (managers)
+ */
+
+export function useGetLegionellaOutletImportTemplate<TData = Awaited<ReturnType<typeof getLegionellaOutletImportTemplate>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLegionellaOutletImportTemplate>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetLegionellaOutletImportTemplateQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getImportLegionellaOutletsUrl = () => {
+
+
+
+
+  return `/api/imports/legionella-outlets`
+}
+
+/**
+ * The browser sends the spreadsheet's header row and cell text: Name, Type (Hot, Cold, TMV, Little used, Cold water tank or Calorifier), Location and Site. Outlets join the site's outlet list; cold water tanks and calorifiers join the equipment list, where tank checks name them. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error.
+ * @summary Preview or import a spreadsheet of LegionellaTrack outlets, tanks and calorifiers (managers)
+ */
+export const importLegionellaOutlets = async (fireCallPointImportRequest: FireCallPointImportRequest, options?: RequestInit): Promise<FireCallPointImportResult> => {
+
+  return customFetch<FireCallPointImportResult>(getImportLegionellaOutletsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(fireCallPointImportRequest)
+  }
+);}
+
+
+
+
+
+export const getImportLegionellaOutletsMutationOptions = <TError = ErrorType<void | FireCallPointImportResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importLegionellaOutlets>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof importLegionellaOutlets>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext> => {
+
+const mutationKey = ['importLegionellaOutlets'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importLegionellaOutlets>>, {data: BodyType<FireCallPointImportRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  importLegionellaOutlets(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportLegionellaOutletsMutationResult = NonNullable<Awaited<ReturnType<typeof importLegionellaOutlets>>>
+    export type ImportLegionellaOutletsMutationBody = BodyType<FireCallPointImportRequest>
+    export type ImportLegionellaOutletsMutationError = ErrorType<void | FireCallPointImportResult>
+
+    /**
+ * @summary Preview or import a spreadsheet of LegionellaTrack outlets, tanks and calorifiers (managers)
+ */
+export const useImportLegionellaOutlets = <TError = ErrorType<void | FireCallPointImportResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importLegionellaOutlets>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof importLegionellaOutlets>>,
+        TError,
+        {data: BodyType<FireCallPointImportRequest>},
+        TContext
+      > => {
+      return useMutation(getImportLegionellaOutletsMutationOptions(options));
+    }
+
 export const getGetAllergenIngredientImportTemplateUrl = () => {
 
 
@@ -9405,7 +9554,7 @@ export const useReadPatRegisterList = <TError = ErrorType<void>,
       return useMutation(getReadPatRegisterListMutationOptions(options));
     }
 
-export const getGetImportListReadingUrl = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients',) => {
+export const getGetImportListReadingUrl = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets',) => {
 
 
 
@@ -9416,7 +9565,7 @@ export const getGetImportListReadingUrl = (kind: 'room-track-rooms' | 'contracto
 /**
  * @summary Whether ComplyTrack can read a photo or document list for an import, and this month's use
  */
-export const getImportListReading = async (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients', options?: RequestInit): Promise<PatRegisterReadingStatus> => {
+export const getImportListReading = async (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets', options?: RequestInit): Promise<PatRegisterReadingStatus> => {
 
   return customFetch<PatRegisterReadingStatus>(getGetImportListReadingUrl(kind),
   {
@@ -9431,14 +9580,14 @@ export const getImportListReading = async (kind: 'room-track-rooms' | 'contracto
 
 
 
-export const getGetImportListReadingQueryKey = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients',) => {
+export const getGetImportListReadingQueryKey = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets',) => {
     return [
     `/api/imports/list-reading/${kind}`
     ] as const;
     }
 
 
-export const getGetImportListReadingQueryOptions = <TData = Awaited<ReturnType<typeof getImportListReading>>, TError = ErrorType<void>>(kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetImportListReadingQueryOptions = <TData = Awaited<ReturnType<typeof getImportListReading>>, TError = ErrorType<void>>(kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -9465,7 +9614,7 @@ export type GetImportListReadingQueryError = ErrorType<void>
  */
 
 export function useGetImportListReading<TData = Awaited<ReturnType<typeof getImportListReading>>, TError = ErrorType<void>>(
- kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
@@ -9482,7 +9631,7 @@ export function useGetImportListReading<TData = Awaited<ReturnType<typeof getImp
 
 
 
-export const getReadImportListUrl = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients',) => {
+export const getReadImportListUrl = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets',) => {
 
 
 
@@ -9494,7 +9643,7 @@ export const getReadImportListUrl = (kind: 'room-track-rooms' | 'contractors' | 
  * Claude reads the file and returns rows in the import's own columns (RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment, the staff roster or KitchenTrack suppliers' allergen information). Nothing is saved: the browser sends the rows through the import's usual preview. The file is not stored. Off until the server has an Anthropic API key; readings share the business's monthly number with the PAT register reading.
  * @summary Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
  */
-export const readImportList = async (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients',
+export const readImportList = async (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets',
     patRegisterReadRequest: PatRegisterReadRequest, options?: RequestInit): Promise<ImportListReadResult> => {
 
   return customFetch<ImportListReadResult>(getReadImportListUrl(kind),
@@ -9511,8 +9660,8 @@ export const readImportList = async (kind: 'room-track-rooms' | 'contractors' | 
 
 
 export const getReadImportListMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients';data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients';data: BodyType<PatRegisterReadRequest>}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets';data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets';data: BodyType<PatRegisterReadRequest>}, TContext> => {
 
 const mutationKey = ['readImportList'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -9524,7 +9673,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof readImportList>>, {kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients';data: BodyType<PatRegisterReadRequest>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof readImportList>>, {kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets';data: BodyType<PatRegisterReadRequest>}> = (props) => {
           const {kind,data} = props ?? {};
 
           return  readImportList(kind,data,requestOptions)
@@ -9545,11 +9694,11 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  * @summary Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
  */
 export const useReadImportList = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients';data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets';data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof readImportList>>,
         TError,
-        {kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients';data: BodyType<PatRegisterReadRequest>},
+        {kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets';data: BodyType<PatRegisterReadRequest>},
         TContext
       > => {
       return useMutation(getReadImportListMutationOptions(options));

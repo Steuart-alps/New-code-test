@@ -5791,6 +5791,9 @@ async function migrateLegionellaOutlets() {
     ADD COLUMN IF NOT EXISTS outlet_id integer
     REFERENCES legionella_sentinel_outlets(id) ON DELETE SET NULL
   `);
+  // Condition answers (sediment, biofilm, lid, screens) for inspections,
+  // cleans and flushes; null for temperature checks and older records.
+  await db.execute(sql`ALTER TABLE legionella_checks ADD COLUMN IF NOT EXISTS findings jsonb`);
   // A database built by drizzle-kit push already has the plain column, so the
   // ADD COLUMN above is skipped there; add the foreign key on its own.
   await db.execute(sql`

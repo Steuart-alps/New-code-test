@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, date, numeric, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, date, numeric, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
@@ -17,6 +17,9 @@ export const legionellaChecksTable = pgTable("legionella_checks", {
   temperature: numeric("temperature", { precision: 5, scale: 2 }),
   location: text("location"),
   notes: text("notes"),
+  // Condition answers (sediment, biofilm, lid, screens) for inspections,
+  // cleans and flushes, keyed by question (api-zod legionella-condition.ts).
+  findings: jsonb("findings").$type<Record<string, string>>(),
   performedBy: text("performed_by"),
   staffRosterId: integer("staff_roster_id").references(() => staffMembersTable.id, { onDelete: "set null" }),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),

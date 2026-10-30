@@ -20,6 +20,8 @@ import {
   CSV_IMPORT_MAX_COLUMNS,
   CSV_IMPORT_MAX_ROWS,
   importTemplateCsv,
+  legionellaListType,
+  LEGIONELLA_LIST_TYPE_WORDS,
   mapImportRows,
   normaliseHeader,
   normaliseKey,
@@ -58,6 +60,12 @@ const importBody = z.object({
 const requirePatImporter: RequestHandler = (req, res, next) => {
   const user = req.currentUser;
   if (user && (user.role === "client_admin" || user.role === "consultant" || isDepartmentLead(user))) return next();
+  res.status(403).json({ error: "Manager access required" });
+};
+
+const requireLegionellaImporter: RequestHandler = (req, res, next) => {
+  const role = req.currentUser?.role;
+  if (role === "client_admin" || role === "consultant" || role === "client_manager") return next();
   res.status(403).json({ error: "Manager access required" });
 };
 
@@ -291,23 +299,26 @@ async function planContractors(tx: Tx, clientId: number, rows: MappedRow[]): Pro
   });
 }
 
+/** A blank Site cell means the site chosen on the page, or the only site. */
+async function blankSiteFor(
+  tx: Tx, clientId: number, departmentId: number | null, defaultSiteId: number | null | undefined,
+): Promise<{ siteId: number | null; error?: string }> {
+  const siteRows = rowsOf(await tx.execute(sql`SELECT id FROM sites WHERE client_id = ${clientId}`));
+  const siteAllowed = await departmentSiteCheck(tx, clientId, departmentId);
+  if (defaultSiteId != null) {
+    return siteRows.some((row) => Number(row.id) === defaultSiteId) && siteAllowed(defaultSiteId)
+      ? { siteId: defaultSiteId } : { siteId: null, error: "The chosen site is not one of this business's sites" };
+  }
+  if (siteRows.length > 1) return { siteId: null, error: "Site is required: this business has more than one site" };
+  const onlySite = siteRows.length ? Number(siteRows[0].id) : null;
+  return siteAllowed(onlySite) ? { siteId: onlySite } : { siteId: null, error: "The site is outside your department" };
+}
+
 async function planFireCallPoints(
   tx: Tx, clientId: number, departmentId: number | null, userId: number, defaultSiteId: number | null | undefined, rows: MappedRow[],
 ): Promise<PlannedRow[]> {
   const resolveSite = await siteResolver(tx, clientId, departmentId);
-  const siteRows = rowsOf(await tx.execute(sql`SELECT id FROM sites WHERE client_id = ${clientId}`));
-  const siteAllowed = await departmentSiteCheck(tx, clientId, departmentId);
-  // A blank Site cell means the site chosen on the page, or the only site.
-  let blankSite: { siteId: number | null; error?: string };
-  if (defaultSiteId != null) {
-    blankSite = siteRows.some((row) => Number(row.id) === defaultSiteId) && siteAllowed(defaultSiteId)
-      ? { siteId: defaultSiteId } : { siteId: null, error: "The chosen site is not one of this business's sites" };
-  } else if (siteRows.length > 1) {
-    blankSite = { siteId: null, error: "Site is required: this business has more than one site" };
-  } else {
-    const onlySite = siteRows.length ? Number(siteRows[0].id) : null;
-    blankSite = siteAllowed(onlySite) ? { siteId: onlySite } : { siteId: null, error: "The site is outside your department" };
-  }
+  const blankSite = await blankSiteFor(tx, clientId, departmentId, defaultSiteId);
   const existing = rowsOf(await tx.execute(sql`
     SELECT id, site_id, name, location, archived_at IS NOT NULL AS archived
     FROM fire_call_points WHERE client_id = ${clientId} ORDER BY id FOR UPDATE
@@ -346,6 +357,86 @@ async function planFireCallPoints(
       row: input.row, action: "update", label, reasons: [`Updates ${changes.join(", ")}`],
       write: async (t) => { await t.execute(sql`
         UPDATE fire_call_points SET location = ${v.location ?? match.location}, updated_at = now()
+        WHERE id = ${match.id} AND client_id = ${clientId}
+      `); },
+    };
+  });
+}
+
+const LEGIONELLA_TYPE_LABELS: Record<string, string> = {
+  hot: "Hot outlet", cold: "Cold outlet", tmv: "TMV outlet", little_used: "Little-used outlet", calorifier: "Calorifier",
+  cold_water_tank: "Cold water tank",
+};
+
+/**
+ * LegionellaTrack outlets, tanks and calorifiers, named by the business.
+ * Outlets match the site's outlet list by name and type (a basin's hot and
+ * cold taps share a name); tanks and calorifiers match the site's equipment
+ * list by name and kind. Matches only update the location.
+ */
+async function planLegionellaOutlets(
+  tx: Tx, clientId: number, departmentId: number | null, userId: number, defaultSiteId: number | null | undefined, rows: MappedRow[],
+): Promise<PlannedRow[]> {
+  const resolveSite = await siteResolver(tx, clientId, departmentId);
+  const blankSite = await blankSiteFor(tx, clientId, departmentId, defaultSiteId);
+  const outlets = rowsOf(await tx.execute(sql`
+    SELECT id, site_id, name, type, location, active FROM legionella_sentinel_outlets WHERE client_id = ${clientId} ORDER BY id FOR UPDATE
+  `));
+  const units = rowsOf(await tx.execute(sql`
+    SELECT id, site_id, name, type, location, active FROM equipment_items
+    WHERE client_id = ${clientId} AND type IN ('cold_water_tank', 'calorifier') ORDER BY id FOR UPDATE
+  `));
+  const duplicate = duplicateGuard();
+  return rows.map((input): PlannedRow => {
+    const v = input.values;
+    const type = legionellaListType(v.type);
+    const label = [v.name, type ? LEGIONELLA_TYPE_LABELS[type] : v.type, v.location].filter(Boolean).join(" · ") || `Row ${input.row}`;
+    const errors = [...input.errors];
+    if (v.type && !type) errors.push(`Type "${v.type}" is not one of ${LEGIONELLA_LIST_TYPE_WORDS}`);
+    const site = v.site ? resolveSite(v.site) : blankSite;
+    if (site.error) errors.push(site.error);
+    if (errors.length || !type) return { row: input.row, action: "error", label, reasons: errors };
+
+    const isUnit = type === "cold_water_tank" || type === "calorifier";
+    const repeated = duplicate(`${site.siteId ?? ""}|${type}|${normaliseKey(v.name)}`, input.row);
+    if (repeated) return { row: input.row, action: "error", label, reasons: [repeated] };
+    const pool = (isUnit ? units : outlets).filter((item) => item.type === type);
+    const matches = pool.filter((item) => Number(item.site_id ?? 0) === Number(site.siteId ?? 0)
+      && normaliseKey(item.name) === normaliseKey(v.name));
+    const match = matches.find((item) => item.active);
+    if (!match) {
+      if (matches.length) {
+        return { row: input.row, action: "skip", label, reasons: [isUnit
+          ? "Matches an archived item; restore it under Equipment & QR labels instead"
+          : "Matches a removed outlet; add it back on LegionellaTrack instead"] };
+      }
+      return {
+        row: input.row, action: "create", label, reasons: [],
+        write: async (t) => {
+          if (isUnit) {
+            await t.execute(sql`
+              INSERT INTO equipment_items (client_id, site_id, name, type, location, created_by)
+              VALUES (${clientId}, ${site.siteId}, ${v.name}, ${type}, ${v.location}, ${userId})
+            `);
+            return;
+          }
+          // New outlets join the end of their site's list, in file order.
+          await t.execute(sql`
+            INSERT INTO legionella_sentinel_outlets (client_id, site_id, name, type, location, sort_order)
+            VALUES (${clientId}, ${site.siteId}, ${v.name}, ${type}, ${v.location},
+              (SELECT coalesce(max(sort_order), 0) + 1 FROM legionella_sentinel_outlets
+               WHERE client_id = ${clientId} AND site_id IS NOT DISTINCT FROM ${site.siteId}::integer))
+          `);
+        },
+      };
+    }
+    const changes = changedFields([["location", match.location, v.location ?? undefined]]);
+    if (!changes.length) return { row: input.row, action: "skip", label, reasons: ["Already listed with the same details"] };
+    const table = isUnit ? sql`equipment_items` : sql`legionella_sentinel_outlets`;
+    return {
+      row: input.row, action: "update", label, reasons: [`Updates ${changes.join(", ")}`],
+      write: async (t) => { await t.execute(sql`
+        UPDATE ${table} SET location = ${v.location ?? match.location}, updated_at = now()
         WHERE id = ${match.id} AND client_id = ${clientId}
       `); },
     };
@@ -472,6 +563,8 @@ function handleImport(type: CsvImportType): RequestHandler {
           ? await planRooms(tx, clientId, departmentId, req.currentUser!.id, mapped.rows)
           : type === "fire-call-points"
             ? await planFireCallPoints(tx, clientId, departmentId, req.currentUser!.id, parsed.data.siteId, mapped.rows)
+            : type === "legionella-outlets"
+              ? await planLegionellaOutlets(tx, clientId, departmentId, req.currentUser!.id, parsed.data.siteId, mapped.rows)
             : type === "allergen-ingredients"
               ? await planAllergenIngredients(tx, clientId, departmentId,
                 { id: req.currentUser!.id, name: req.currentUser!.name ?? null }, await getAccountToday(clientId), mapped.rows)
@@ -631,6 +724,7 @@ const LIST_READING_ACCESS: Record<ListReadingKind, RequestHandler[]> = {
   // Managers too: they upload their site's roster for the monthly roster check.
   "staff-roster": [requireUserManager],
   "allergen-ingredients": [requirePatImporter, requireService("kitchentrack")],
+  "legionella-outlets": [requireLegionellaImporter, requireService("legionellatrack")],
 };
 
 /** Runs the access rule for the :kind in the path; unknown kinds are 404. */
@@ -759,5 +853,9 @@ router.get("/imports/fire-call-points/template", requireAuth, requireClientAdmin
 router.get("/imports/allergen-ingredients/template", requireAuth, requirePatImporter, requireService("kitchentrack"), sendTemplate("allergen-ingredients", "kitchentrack-supplier-allergens-template.csv"));
 router.post("/imports/allergen-ingredients", requireAuth, denyViewers, requirePatImporter, requireService("kitchentrack"), handleImport("allergen-ingredients"));
 router.post("/imports/fire-call-points", requireAuth, denyViewers, requireClientAdmin, requireService("firetrack"), handleImport("fire-call-points"));
+// LegionellaTrack outlets, tanks and calorifiers: Managers too, as they can
+// add each one by hand (outlets on LegionellaTrack, tanks on the equipment list).
+router.get("/imports/legionella-outlets/template", requireAuth, requireLegionellaImporter, requireService("legionellatrack"), sendTemplate("legionella-outlets", "legionellatrack-outlets-and-tanks-template.csv"));
+router.post("/imports/legionella-outlets", requireAuth, denyViewers, requireLegionellaImporter, requireService("legionellatrack"), handleImport("legionella-outlets"));
 
 export default router;

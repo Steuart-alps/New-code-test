@@ -4727,6 +4727,11 @@ export const LegionellaCheckResult = {
   action_required: 'action_required',
 } as const;
 
+/**
+ * Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
+ */
+export type LegionellaCheckFindings = {[key: string]: string} | null;
+
 export interface LegionellaCheck {
   id: number;
   clientId: number;
@@ -4739,6 +4744,10 @@ export interface LegionellaCheck {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** The named cold water tank or calorifier (equipment list item) the check was made on. */
+  equipmentId?: number | null;
+  /** Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail. */
+  findings?: LegionellaCheckFindings;
   createdAt: string;
   updatedAt: string;
 }
@@ -4750,6 +4759,11 @@ export const CreateLegionellaCheckRequestResult = {
   pass: 'pass',
   fail: 'fail',
 } as const;
+
+/**
+ * Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
+ */
+export type CreateLegionellaCheckRequestFindings = {[key: string]: string} | null;
 
 /**
  * temperature is required for calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, and cold_nonsent_temp checks.
@@ -4765,6 +4779,8 @@ export type CreateLegionellaCheckRequest = unknown & ({
   performedBy?: string | null;
   /** A cold water tank or calorifier on the equipment list (its site must match siteId). */
   equipmentId?: number | null;
+  /** Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail. */
+  findings?: CreateLegionellaCheckRequestFindings;
 });
 
 export type UpdateLegionellaCheckRequestResult = typeof UpdateLegionellaCheckRequestResult[keyof typeof UpdateLegionellaCheckRequestResult];
@@ -4774,6 +4790,11 @@ export const UpdateLegionellaCheckRequestResult = {
   pass: 'pass',
   fail: 'fail',
 } as const;
+
+/**
+ * Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
+ */
+export type UpdateLegionellaCheckRequestFindings = {[key: string]: string} | null;
 
 /**
  * For an existing temperature check, temperature is required. New results use pass or fail.
@@ -4786,6 +4807,10 @@ export interface UpdateLegionellaCheckRequest {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Move the check to another named tank or calorifier at the same site. */
+  equipmentId?: number | null;
+  /** Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail. */
+  findings?: UpdateLegionellaCheckRequestFindings;
 }
 
 export type LegionellaStatusLastResult = typeof LegionellaStatusLastResult[keyof typeof LegionellaStatusLastResult] | null;
