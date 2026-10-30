@@ -13,6 +13,7 @@ import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { Users, Plus, Pencil, Trash2, Loader2, Search, UserCheck, UserX, Upload, Printer } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RosterImportDialog } from "@/components/roster-import-dialog";
+import { DepartmentNameSelect } from "@/components/department-name-select";
 import { printHtmlDocument } from "@/lib/download";
 
 interface StaffMember {
@@ -36,10 +37,12 @@ interface Site { id: number; name: string; }
 const EMPTY_FORM = { name: "", externalPayrollId: "", jobTitle: "", department: "", email: "", siteId: "none", active: true };
 
 function StaffDialog({
-  open, onClose, onSaved, sites, editing,
+  open, onClose, onSaved, sites, editing, usedDepartments,
 }: {
   open: boolean; onClose: () => void; onSaved: () => void;
   sites: Site[]; editing: StaffMember | null;
+  /** Departments already on the roster, offered alongside the ones set up. */
+  usedDepartments: (string | null)[];
 }) {
   const { toast } = useToast();
   const [form, setForm] = useState(EMPTY_FORM);
@@ -106,15 +109,9 @@ function StaffDialog({
             <Label>Payroll / workforce identifier <span className="text-muted-foreground text-xs">(recommended)</span></Label>
             <Input value={form.externalPayrollId} onChange={e => setForm(f => ({ ...f, externalPayrollId: e.target.value }))} placeholder="e.g. EMP-1042" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Job Title</Label>
-              <Input value={form.jobTitle} onChange={e => setForm(f => ({ ...f, jobTitle: e.target.value }))} placeholder="e.g. Chef" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Department</Label>
-              <Input value={form.department} onChange={e => setForm(f => ({ ...f, department: e.target.value }))} placeholder="e.g. Kitchen" />
-            </div>
+          <div className="space-y-1.5">
+            <Label>Job Title</Label>
+            <Input value={form.jobTitle} onChange={e => setForm(f => ({ ...f, jobTitle: e.target.value }))} placeholder="e.g. Chef" />
           </div>
           <div className="space-y-1.5">
             <Label>Email <span className="text-muted-foreground text-xs">(optional)</span></Label>
@@ -132,6 +129,17 @@ function StaffDialog({
               </Select>
             </div>
           )}
+          <div className="space-y-1.5">
+            <Label htmlFor="staff-department">Department</Label>
+            <DepartmentNameSelect
+              id="staff-department"
+              value={form.department}
+              onChange={department => setForm(f => ({ ...f, department }))}
+              siteId={form.siteId !== "none" ? Number(form.siteId) : null}
+              usedBefore={usedDepartments}
+              noneLabel="No department"
+            />
+          </div>
           {editing && (
             <div className="flex items-center gap-3">
               <button
@@ -451,7 +459,8 @@ ${rows.map(s => `<tr>
         </div>
       )}
 
-      <StaffDialog open={dialogOpen} onClose={() => { setDialogOpen(false); setEditing(null); }} onSaved={load} sites={sites} editing={editing} />
+      <StaffDialog open={dialogOpen} onClose={() => { setDialogOpen(false); setEditing(null); }} onSaved={load} sites={sites} editing={editing}
+        usedDepartments={staff.map(s => s.department)} />
       <RosterImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onImported={load} sites={sites} />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null); }}>

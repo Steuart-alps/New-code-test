@@ -22,6 +22,7 @@
     "test:sidebar-browser": "node tests/sidebar-browser.test.mjs",
     "test:coshh-register-browser": "node tests/coshh-register-browser.test.mjs",
     "test:compliance-hub-profile-browser": "node tests/compliance-hub-profile-browser.test.mjs",
+    "test:department-dropdowns-browser": "node tests/department-dropdowns-browser.test.mjs",
     "test:client-scope": "node tests/client-scope.test.mjs",
     "test:pat-legacy-register-browser": "node tests/pat-legacy-register-browser.test.mjs",
     "test:focus-new-row-browser": "node tests/focus-new-row-browser.test.mjs",
