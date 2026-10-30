@@ -19,7 +19,7 @@ import { useWorkingSiteId } from "@/hooks/use-working-site";
  * never come here; the browser reads those itself (lib/spreadsheet.ts).
  */
 
-export type ListReadingKind = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "greentrack-equipment" | "staff-roster";
+export type ListReadingKind = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "greentrack-equipment" | "staff-roster" | "allergen-ingredients";
 
 interface ListReadingStatus { available: boolean; monthlyLimit: number; usedThisMonth: number; ai: AiStatus; sites: Array<{ id: number; name: string }> }
 export interface ListReadResult { headers: string[]; rows: string[][]; unclear: number; unclearRows: number[] }

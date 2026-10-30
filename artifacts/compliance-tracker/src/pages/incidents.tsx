@@ -208,7 +208,15 @@ const SEVERITY_LABELS: Record<string, string> = {
   serious:  "Serious",
   fatal:    "Fatal",
 };
-const severityLabel = (v: string) => SEVERITY_LABELS[v] ?? humanize(v);
+/** The first day of this month on this device, as YYYY-MM-DD. */
+function startOfThisMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+/** Severity filter value for the "Serious/Fatal" summary box. */
+const SERIOUS_OR_FATAL = "serious_or_fatal";
+const severityLabel = (v: string) => (v === SERIOUS_OR_FATAL ? "Serious or fatal" : SEVERITY_LABELS[v] ?? humanize(v));
 
 const STATUS_LABELS: Record<Status, string> = {
   open:                "Open",
@@ -523,7 +531,8 @@ export default function IncidentsPage() {
   const filtered = useMemo(() => {
     let rows = incidents;
     if (filterStatus !== "all") rows = rows.filter(r => r.status === filterStatus);
-    if (filterSeverity !== "all") rows = rows.filter(r => r.severity === filterSeverity);
+    if (filterSeverity === SERIOUS_OR_FATAL) rows = rows.filter(r => r.severity === "serious" || r.severity === "fatal");
+    else if (filterSeverity !== "all") rows = rows.filter(r => r.severity === filterSeverity);
     if (filterType !== "all") rows = rows.filter(r => r.incidentType === filterType);
     if (filterSite !== "all") rows = rows.filter(r => String(r.siteId) === filterSite);
     if (filterFrom) rows = rows.filter(r => r.incidentDate.slice(0, 10) >= filterFrom);
@@ -540,6 +549,26 @@ export default function IncidentsPage() {
     }
     return rows;
   }, [incidents, filterStatus, filterSeverity, filterType, filterSite, filterFrom, filterTo, filterRiddor, search]);
+
+  type SummaryFilter = { status?: Status; severity?: string; from?: string; riddor?: boolean };
+  /** Shows the incidents a summary box counts: its filter only, at the chosen site. */
+  function showSummary(show: SummaryFilter) {
+    setFilterStatus(show.status ?? "all");
+    setFilterSeverity(show.severity ?? "all");
+    setFilterType("all");
+    setFilterFrom(show.from ?? "");
+    setFilterTo("");
+    setFilterRiddor(show.riddor ?? false);
+    setSearch("");
+  }
+  function summaryFilterActive(show: SummaryFilter) {
+    const noFilters = filterStatus === "all" && filterSeverity === "all" && filterType === "all"
+      && !filterFrom && !filterTo && !filterRiddor && !search.trim();
+    if (!show.status && !show.severity && !show.from && !show.riddor) return noFilters;
+    return filterStatus === (show.status ?? "all") && filterSeverity === (show.severity ?? "all")
+      && filterType === "all" && filterFrom === (show.from ?? "") && !filterTo
+      && filterRiddor === (show.riddor ?? false) && !search.trim();
+  }
 
   const riddorOutstanding = summary?.riddorOutstanding ?? 0;
   const riddorOverdue = incidents.filter(r => r.riddorDeadline?.state === "overdue").length;
@@ -892,24 +921,36 @@ ${rows.map(r => `<tr>
       {/* Summary stats */}
       {summary && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          {[
-            { label: "Total",         value: summary.total,              icon: Activity,     color: "text-slate-600" },
-            { label: "Open",          value: summary.openCount,          icon: AlertOctagon, color: "text-rose-600" },
-            { label: "Investigating", value: summary.investigatingCount, icon: Clock,        color: "text-amber-600" },
-            { label: "This Month",    value: summary.thisMonth,          icon: AlertTriangle, color: "text-sky-600" },
-            { label: "RIDDOR",        value: summary.riddorCount,        icon: ShieldAlert,  color: "text-orange-600" },
-            { label: "Serious/Fatal", value: summary.seriousCount,       icon: UserX,        color: "text-rose-700" },
-          ].map(({ label, value, icon: Icon, color }) => (
-            <Card key={label} className="rounded-sm">
-              <CardContent className="p-4">
+          {([
+            { label: "Total",         value: summary.total,              icon: Activity,     color: "text-slate-600", show: {} },
+            { label: "Open",          value: summary.openCount,          icon: AlertOctagon, color: "text-rose-600", show: { status: "open" as const } },
+            { label: "Investigating", value: summary.investigatingCount, icon: Clock,        color: "text-amber-600", show: { status: "under_investigation" as const } },
+            { label: "This Month",    value: summary.thisMonth,          icon: AlertTriangle, color: "text-sky-600", show: { from: startOfThisMonth() } },
+            { label: "RIDDOR",        value: summary.riddorCount,        icon: ShieldAlert,  color: "text-orange-600", show: { riddor: true } },
+            { label: "Serious/Fatal", value: summary.seriousCount,       icon: UserX,        color: "text-rose-700", show: { severity: SERIOUS_OR_FATAL } },
+          ] as { label: string; value: number; icon: typeof Activity; color: string; show: SummaryFilter }[]).map(({ label, value, icon: Icon, color, show }) => {
+            const active = summaryFilterActive(show);
+            return (
+              // Each box lists the incidents it counts (Total clears the filters).
+              <button
+                key={label}
+                type="button"
+                aria-pressed={active}
+                aria-label={`${label}: ${value}. Show ${label === "Total" ? "all incidents" : `${label.toLowerCase()} incidents`}`}
+                onClick={() => showSummary(show)}
+                className={cn(
+                  "rounded-sm border bg-card text-left shadow-sm p-4 transition-colors hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  active && "border-primary ring-1 ring-primary bg-primary/5",
+                )}
+              >
                 <div className={cn("flex items-center gap-1.5 mb-1", color)}>
                   <Icon className="w-3.5 h-3.5" />
                   <span className="text-xs font-medium">{label}</span>
                 </div>
                 <div className="text-2xl font-semibold">{value}</div>
-              </CardContent>
-            </Card>
-          ))}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -943,6 +984,7 @@ ${rows.map(r => `<tr>
           <SelectContent>
             <SelectItem value="all">All severities</SelectItem>
             {severityOptions.map(s => <SelectItem key={s} value={s}>{severityLabel(s)}</SelectItem>)}
+            <SelectItem value={SERIOUS_OR_FATAL}>{severityLabel(SERIOUS_OR_FATAL)}</SelectItem>
           </SelectContent>
         </Select>
         <Select value={filterType} onValueChange={v => setFilterType(v)}>
@@ -1026,7 +1068,15 @@ ${rows.map(r => `<tr>
             </thead>
             <tbody className="divide-y divide-border">
               {filtered.map(r => (
-                <tr key={r.id} className="bg-white hover:bg-muted/20 transition-colors group">
+                <tr
+                  key={r.id}
+                  className="bg-white hover:bg-muted/20 transition-colors group cursor-pointer"
+                  // The whole row opens the incident; its own buttons and photo box keep their clicks.
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest("button, a, input, label, [role='dialog']")) return;
+                    openEdit(r);
+                  }}
+                >
                   <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
                     {fmt(r.incidentDate)}
                     {r.incidentTime && <div className="text-xs text-muted-foreground/60">{r.incidentTime}</div>}
@@ -1083,11 +1133,12 @@ ${rows.map(r => `<tr>
                   </td>
                   <td className="px-4 py-3">
                     <CheckPhotoUploader entityType="incident" entityId={r.id} compact />
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mt-1">
-                      <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm" title="View RIDDOR history" onClick={() => setHistoryIncident(r)}>
+                    {/* Always shown: phones and tablets have no hover to reveal them. */}
+                    <div className="flex items-center gap-1 mt-1">
+                      <Button variant="ghost" size="icon" className="h-8 w-8 rounded-sm" title="View RIDDOR history" aria-label="View RIDDOR history" onClick={() => setHistoryIncident(r)}>
                         <Activity className="w-3.5 h-3.5" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm" onClick={() => openEdit(r)}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 rounded-sm" title="Open incident" aria-label="Open incident" onClick={() => openEdit(r)}>
                         <Pencil className="w-3.5 h-3.5" />
                       </Button>
                     </div>
