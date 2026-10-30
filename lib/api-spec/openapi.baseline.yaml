@@ -7,6 +7,8 @@ servers:
   - url: /api
     description: Base API path
 tags:
+  - name: tree-track
+    description: TreeTrack tree register
   - name: record-signatures
     description: Drawn signatures on recorded checks
   - name: billing
@@ -3435,6 +3437,106 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HotTubCheck"
+
+  /tree-track/trees:
+    get:
+      operationId: listTreeTrackTrees
+      tags: [tree-track]
+      summary: The tree register, each tree with its last inspection and when it is next due
+      parameters:
+        - name: siteId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: includeRemoved
+          in: query
+          required: false
+          description: Include trees marked felled or removed
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Trees
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TreeTrackTreeWithStatus"
+    post:
+      operationId: createTreeTrackTree
+      tags: [tree-track]
+      summary: Add a tree to the register (Owners and consultants)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TreeTrackTreeInput"
+      responses:
+        "201":
+          description: Saved tree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TreeTrackTree"
+        "400":
+          description: Invalid tree, site or what3words address
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /tree-track/trees/{id}:
+    put:
+      operationId: updateTreeTrackTree
+      tags: [tree-track]
+      summary: Change a tree on the register, or mark it felled or removed (Owners and consultants)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TreeTrackTreeUpdate"
+      responses:
+        "200":
+          description: Updated tree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TreeTrackTree"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteTreeTrackTree
+      tags: [tree-track]
+      summary: Delete a tree added by mistake; one with inspections is marked felled instead (Owners and consultants)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "409":
+          description: The tree has inspections
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /bike-track/config:
     get:
@@ -7624,6 +7726,183 @@ components:
           maxItems: 20
           items:
             $ref: "#/components/schemas/GreenTrackApplicationProductInput"
+    TreeTrackTreeInput:
+      type: object
+      required: [ref]
+      properties:
+        ref:
+          type: string
+          description: Tag number, name or group, such as T12
+        species:
+          type: string
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+          description: Where the tree is, in words
+        what3words:
+          type: string
+          nullable: true
+          description: what3words address, stored as word.word.word
+        latitude:
+          type: number
+          nullable: true
+        longitude:
+          type: number
+          nullable: true
+        riskZone:
+          type: string
+          enum: [high, medium, low]
+          description: How busy the area under the tree is
+        inspectionIntervalMonths:
+          type: integer
+          minimum: 1
+          maximum: 60
+        notes:
+          type: string
+          nullable: true
+        removedAt:
+          type: string
+          format: date
+          nullable: true
+          description: Day the tree was felled or removed
+    TreeTrackTreeUpdate:
+      type: object
+      properties:
+        ref:
+          type: string
+          description: Tag number, name or group, such as T12
+        species:
+          type: string
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+          description: Where the tree is, in words
+        what3words:
+          type: string
+          nullable: true
+          description: what3words address, stored as word.word.word
+        latitude:
+          type: number
+          nullable: true
+        longitude:
+          type: number
+          nullable: true
+        riskZone:
+          type: string
+          enum: [high, medium, low]
+          description: How busy the area under the tree is
+        inspectionIntervalMonths:
+          type: integer
+          minimum: 1
+          maximum: 60
+        notes:
+          type: string
+          nullable: true
+        removedAt:
+          type: string
+          format: date
+          nullable: true
+          description: Day the tree was felled or removed
+    TreeTrackTree:
+      type: object
+      required: [id, clientId, ref, riskZone, inspectionIntervalMonths, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        ref:
+          type: string
+          description: Tag number, name or group, such as T12
+        species:
+          type: string
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+          description: Where the tree is, in words
+        what3words:
+          type: string
+          nullable: true
+          description: what3words address, stored as word.word.word
+        latitude:
+          type: number
+          nullable: true
+        longitude:
+          type: number
+          nullable: true
+        riskZone:
+          type: string
+          enum: [high, medium, low]
+          description: How busy the area under the tree is
+        inspectionIntervalMonths:
+          type: integer
+          minimum: 1
+          maximum: 60
+        notes:
+          type: string
+          nullable: true
+        removedAt:
+          type: string
+          format: date
+          nullable: true
+          description: Day the tree was felled or removed
+        createdBy:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    TreeTrackTreeWithStatus:
+      allOf:
+        - $ref: "#/components/schemas/TreeTrackTree"
+        - type: object
+          required: [status]
+          properties:
+            lastInspected:
+              type: string
+              format: date
+              nullable: true
+              description: Last routine inspection (visual, detailed or risk assessment)
+            lastCheckDate:
+              type: string
+              format: date
+              nullable: true
+            lastCheckType:
+              type: string
+              nullable: true
+            openIssue:
+              type: object
+              nullable: true
+              description: The latest inspection found a problem
+              properties:
+                checkDate:
+                  type: string
+                  format: date
+                severity:
+                  type: string
+                  nullable: true
+            nextDue:
+              type: string
+              format: date
+              nullable: true
+            status:
+              type: string
+              enum: [ok, due_soon, overdue, never]
     GreenTrackHourReadingInput:
       type: object
       required: [machineId, readingDate, hours]

@@ -1118,6 +1118,145 @@ export interface GreenTrackApplicationUpdate {
   products?: GreenTrackApplicationProductInput[];
 }
 
+/**
+ * How busy the area under the tree is
+ */
+export type TreeTrackTreeInputRiskZone = typeof TreeTrackTreeInputRiskZone[keyof typeof TreeTrackTreeInputRiskZone];
+
+
+export const TreeTrackTreeInputRiskZone = {
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+} as const;
+
+export interface TreeTrackTreeInput {
+  /** Tag number, name or group, such as T12 */
+  ref: string;
+  species?: string | null;
+  siteId?: number | null;
+  /** Where the tree is, in words */
+  location?: string | null;
+  /** what3words address, stored as word.word.word */
+  what3words?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  /** How busy the area under the tree is */
+  riskZone?: TreeTrackTreeInputRiskZone;
+  /**
+     * @minimum 1
+     * @maximum 60
+     */
+  inspectionIntervalMonths?: number;
+  notes?: string | null;
+  /** Day the tree was felled or removed */
+  removedAt?: string | null;
+}
+
+/**
+ * How busy the area under the tree is
+ */
+export type TreeTrackTreeUpdateRiskZone = typeof TreeTrackTreeUpdateRiskZone[keyof typeof TreeTrackTreeUpdateRiskZone];
+
+
+export const TreeTrackTreeUpdateRiskZone = {
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+} as const;
+
+export interface TreeTrackTreeUpdate {
+  /** Tag number, name or group, such as T12 */
+  ref?: string;
+  species?: string | null;
+  siteId?: number | null;
+  /** Where the tree is, in words */
+  location?: string | null;
+  /** what3words address, stored as word.word.word */
+  what3words?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  /** How busy the area under the tree is */
+  riskZone?: TreeTrackTreeUpdateRiskZone;
+  /**
+     * @minimum 1
+     * @maximum 60
+     */
+  inspectionIntervalMonths?: number;
+  notes?: string | null;
+  /** Day the tree was felled or removed */
+  removedAt?: string | null;
+}
+
+/**
+ * How busy the area under the tree is
+ */
+export type TreeTrackTreeRiskZone = typeof TreeTrackTreeRiskZone[keyof typeof TreeTrackTreeRiskZone];
+
+
+export const TreeTrackTreeRiskZone = {
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+} as const;
+
+export interface TreeTrackTree {
+  id: number;
+  clientId: number;
+  /** Tag number, name or group, such as T12 */
+  ref: string;
+  species?: string | null;
+  siteId?: number | null;
+  /** Where the tree is, in words */
+  location?: string | null;
+  /** what3words address, stored as word.word.word */
+  what3words?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  /** How busy the area under the tree is */
+  riskZone: TreeTrackTreeRiskZone;
+  /**
+     * @minimum 1
+     * @maximum 60
+     */
+  inspectionIntervalMonths: number;
+  notes?: string | null;
+  /** Day the tree was felled or removed */
+  removedAt?: string | null;
+  createdBy?: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * The latest inspection found a problem
+ */
+export type TreeTrackTreeWithStatusOpenIssue = {
+  checkDate?: string;
+  severity?: string | null;
+} | null;
+
+export type TreeTrackTreeWithStatusStatus = typeof TreeTrackTreeWithStatusStatus[keyof typeof TreeTrackTreeWithStatusStatus];
+
+
+export const TreeTrackTreeWithStatusStatus = {
+  ok: 'ok',
+  due_soon: 'due_soon',
+  overdue: 'overdue',
+  never: 'never',
+} as const;
+
+export type TreeTrackTreeWithStatus = TreeTrackTree & ({
+  /** Last routine inspection (visual, detailed or risk assessment) */
+  lastInspected?: string | null;
+  lastCheckDate?: string | null;
+  lastCheckType?: string | null;
+  /** The latest inspection found a problem */
+  openIssue?: TreeTrackTreeWithStatusOpenIssue;
+  nextDue?: string | null;
+  status: TreeTrackTreeWithStatusStatus;
+});
+
 export interface GreenTrackHourReadingInput {
   machineId: number;
   readingDate: string;
@@ -5617,6 +5756,14 @@ export type UpdateHotTubConfigParams = {
  * Save the site-specific HotTubTrack control profile.
  */
 siteId: number;
+};
+
+export type ListTreeTrackTreesParams = {
+siteId?: number;
+/**
+ * Include trees marked felled or removed
+ */
+includeRemoved?: boolean;
 };
 
 export type ListGreenTrackHourReadingsParams = {

@@ -5119,6 +5119,153 @@ export const UpdateHotTubCheckResponse = zod.object({
 
 
 /**
+ * @summary The tree register, each tree with its last inspection and when it is next due
+ */
+export const ListTreeTrackTreesQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional(),
+  "includeRemoved": zod.coerce.boolean().optional().describe('Include trees marked felled or removed')
+})
+
+export const listTreeTrackTreesResponseOneInspectionIntervalMonthsMax = 60;
+
+
+
+export const ListTreeTrackTreesResponseItem = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "ref": zod.string().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(listTreeTrackTreesResponseOneInspectionIntervalMonthsMax),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed'),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+}).and(zod.object({
+  "lastInspected": zod.date().nullish().describe('Last routine inspection (visual, detailed or risk assessment)'),
+  "lastCheckDate": zod.date().nullish(),
+  "lastCheckType": zod.string().nullish(),
+  "openIssue": zod.object({
+  "checkDate": zod.date().optional(),
+  "severity": zod.string().nullish()
+}).nullish().describe('The latest inspection found a problem'),
+  "nextDue": zod.date().nullish(),
+  "status": zod.enum(['ok', 'due_soon', 'overdue', 'never'])
+}))
+export const ListTreeTrackTreesResponse = zod.array(ListTreeTrackTreesResponseItem)
+
+
+/**
+ * @summary Add a tree to the register (Owners and consultants)
+ */
+export const createTreeTrackTreeBodyInspectionIntervalMonthsMax = 60;
+
+
+
+export const CreateTreeTrackTreeBody = zod.object({
+  "ref": zod.string().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).optional().describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(createTreeTrackTreeBodyInspectionIntervalMonthsMax).optional(),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed')
+})
+
+export const createTreeTrackTreeResponseInspectionIntervalMonthsMax = 60;
+
+
+
+export const CreateTreeTrackTreeResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "ref": zod.string().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(createTreeTrackTreeResponseInspectionIntervalMonthsMax),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed'),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Change a tree on the register, or mark it felled or removed (Owners and consultants)
+ */
+export const UpdateTreeTrackTreeParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const updateTreeTrackTreeBodyInspectionIntervalMonthsMax = 60;
+
+
+
+export const UpdateTreeTrackTreeBody = zod.object({
+  "ref": zod.string().optional().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).optional().describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(updateTreeTrackTreeBodyInspectionIntervalMonthsMax).optional(),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed')
+})
+
+export const updateTreeTrackTreeResponseInspectionIntervalMonthsMax = 60;
+
+
+
+export const UpdateTreeTrackTreeResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "ref": zod.string().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(updateTreeTrackTreeResponseInspectionIntervalMonthsMax),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed'),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Delete a tree added by mistake; one with inspections is marked felled instead (Owners and consultants)
+ */
+export const DeleteTreeTrackTreeParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteTreeTrackTreeResponse = zod.void()
+
+
+/**
  * @summary Get Bike hire configuration
  */
 export const GetBikeTrackConfigResponse = zod.object({
