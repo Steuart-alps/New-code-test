@@ -169,7 +169,7 @@ try {
   // A new department can still be typed.
   await dropdown("Department").click();
   await pick("Other (type a new department)");
-  await page.keyboard.type("Spa");
+  await dialog.getByRole("textbox", { name: "Department name", exact: true }).fill("Spa");
   await dialog.getByTestId("upload-signers").filter({ hasText: "No active staff" }).waitFor();
   await dropdown("Department").click();
   await pick("All departments");
