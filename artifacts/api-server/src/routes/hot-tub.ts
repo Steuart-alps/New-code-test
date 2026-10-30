@@ -227,6 +227,22 @@ function hotTubBreach(data: { phValue?: number | null; sanitiserLevel?: number |
   if (data.temperature != null && data.temperature > r.temperature.max) breached.temperature = { observed: data.temperature, range: r.temperature };
   return Object.keys(breached).length ? breached : null;
 }
+/**
+ * The ranges a new check would breach, so a fail the server finds is asked
+ * about before saving (lib/correctiveActions.ts).
+ */
+export async function hotTubBreachForNewCheck(clientId: number, body: unknown) {
+  const parsed = postSchema.safeParse(body);
+  if (!parsed.success) return null;
+  const data = parsed.data;
+  let siteId = data.siteId ?? null;
+  if (data.hotTubId) {
+    const tub = ((await db.execute(sql`SELECT site_id FROM hot_tubs WHERE id = ${data.hotTubId} AND client_id = ${clientId} LIMIT 1`)).rows ?? [])[0] as { site_id: number | null } | undefined;
+    if (tub && siteId == null && tub.site_id != null) siteId = Number(tub.site_id);
+  }
+  const profile = siteId == null ? null : await getHotTubProfile(clientId, siteId);
+  return hotTubBreach(data, data.checkType, profile) as Record<string, { observed: number; range: { min?: number; max?: number } }> | null;
+}
 async function ensureHotTubAction(tx: any, clientId: number, checkId: number, breach: unknown, userId: number | null, ownerName: string | null) {
   await tx.execute(sql`INSERT INTO compliance_actions
     (client_id, source_track, source_record_id, title, severity, owner_name, corrective_action, evidence_reference, created_by, updated_by, auto_generated)
