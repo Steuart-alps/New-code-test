@@ -88,6 +88,7 @@ const runnerLocked = new Set([
   "test:safe-track-ack-refresh", "test:sign-off-access",
   "test:photo-storage-roundtrip", "test:photo-storage-roundtrip:fake", // runner sources the lock after its config gate
   "test:fixtrack-video-roundtrip", "test:fixtrack-video-roundtrip:fake", // same runner as the photo round trip
+  "test:track-action-media-roundtrip", "test:track-action-media-roundtrip:fake", // same runner as the photo round trip
   "test:isolation:ci", "test:modules:ci", "test:dept-isolation:ci",
   "test:dailytrack-locks:ci", "test:config:ci", "test:doc-track-status",
   "test:discounts:ci", "test:compliance-hub:ci", "test:track-actions-trigger",
@@ -113,7 +114,7 @@ const runnerLocked = new Set([
   "test:csrf-enforced:ci",
 ]);
 const freshSchema = new Set([
-  "test:schema:fresh", "test:schema:pushed", "test:schema:upgrade", "test:departments-under-sites", "test:dashboard-accuracy:pushed", "test:kitchen-mobile-replay", "test:mobile-check-replay",
+  "test:schema:fresh", "test:schema:pushed", "test:schema:upgrade", "test:departments-under-sites", "test:fix-track-assign-contractor", "test:contractor-sign-in", "test:doc-sign-offs", "test:green-daily-checks", "test:billing-alerts", "test:delete-test-business", "test:personal-reminders", "test:voice-log", "test:certificate-inbox", "test:fire-retired-checks", "test:auth-me-active-client", "test:ai-addon", "test:inspection-reports", "test:night-fire-walks", "test:fire-drill-records", "test:roster-check", "test:kitchen-month-summary", "test:dashboard-accuracy:pushed", "test:kitchen-mobile-replay", "test:mobile-check-replay",
   "test:kitchen-temperature-actions", "test:kitchen-hold-controls",
   "test:kitchen-inspection-export", "test:kitchen-status-site-scope", "test:dashboard-accuracy", "test:cleaning-schedule-export",
   "test:inspection-pack-calendar", "test:certificate-outcomes", "test:checklist-results-fixtrack",
@@ -142,12 +143,22 @@ const freshSchema = new Set([
   "test:track-notifications", "test:track-notifications:pushed", // in-process app + reminder job (injected clock) on the private cluster
   "test:track-summary-job:pushed", // real daily job scoped to its own fixtures on the private cluster
   "test:track-summary-recipients", "test:track-summary-recipients:pushed", // in-process app + daily summary job (capturing sender) on the private cluster
-  "test:fire-call-points", "test:fire-discharge-task-link", "test:track-task-links", "test:track-due-dates", "test:contractor-visits", "test:certificate-follow-up",
+  "test:fire-call-points", "test:track-task-links", "test:track-due-dates", "test:contractor-visits", "test:certificate-follow-up",
   "test:hot-tub-registry:pushed", "test:kitchen-cleaning-legacy", "test:contractor-portal:pushed",
   "test:public-link-access", "test:public-link-rate-limit", // two API instances on the private cluster
   "test:safe-track-ack-reminders:fresh", "test:storage-price-audit",
 ]);
 const pure = new Set([
+  "test:doc-track-scope", // bundles lib/docTrackScope into a mkdtemp dir; no database or API
+  "test:email-layout", // renders emails in memory; DATABASE_URL only satisfies an import, nothing connects
+  "test:storage-limit-routes", // static source check of src/routes
+  "test:alps-discount-coupon", // bundles the coupon helpers into a mkdtemp dir; no database or API
+  "test:ai-credit", // bundled TypeScript unit test (run-bundled-unit.sh)
+  "test:form-option-defaults", // bundled TypeScript unit test (run-bundled-unit.sh)
+  "test:ai-pricing", // bundled TypeScript unit test (run-bundled-unit.sh)
+  "test:certificate-reading", // bundled TypeScript unit test (run-bundled-unit.sh)
+  "test:register-reading", // bundled TypeScript unit test (run-bundled-unit.sh)
+  "test:report-reading", // bundled TypeScript unit test (run-bundled-unit.sh)
   "test:stripe-tax-check", // bundles the Stripe Tax check into a mkdtemp dir; never contacts Stripe
   "test:upload-size-limit", // ObjectStorageService against an in-memory bucket
   "test:api-runner-lock", // validates this lock without application resources
@@ -235,10 +246,13 @@ for (const [name, command] of scripts) {
     mjsRefs(read(runner)).forEach((entry) => lockedEntrypoints.add(entry));
     mjsRefs(match[2]).forEach((entry) => lockedEntrypoints.add(entry));
   } else if (freshSchema.has(name)) {
-    // FRESH_SCHEMA_BASE=push only changes how the private cluster's base schema is built.
-    const direct = command.match(/^(?:FRESH_SCHEMA_BASE=push )?bash tests\/run-fresh-schema\.sh((?: tests\/[A-Za-z0-9._-]+\.mjs)*)$/);
-    if (direct) {
-      mjsRefs(direct[1]).forEach((entry) => lockedEntrypoints.add(entry));
+    // FRESH_SCHEMA_* settings (e.g. FRESH_SCHEMA_BASE=push, FRESH_SCHEMA_UPGRADE_FIXTURE)
+    // only change how the private cluster is built or which fixture runs on it.
+    // Several such runs may be chained with &&.
+    const runs = command.split(" && ").map((part) => part.match(
+      /^(?:FRESH_SCHEMA_[A-Z_]+=[A-Za-z0-9-]+ )*bash tests\/run-fresh-schema\.sh((?: (?:\.\.\/compliance-tracker\/)?tests\/[A-Za-z0-9._-]+\.mjs)*)$/));
+    if (runs.every(Boolean)) {
+      runs.forEach((direct) => mjsRefs(direct[1]).forEach((entry) => lockedEntrypoints.add(entry)));
       continue;
     }
     // A wrapper may only hand suites to run-fresh-schema.sh; it must not start
@@ -274,6 +288,8 @@ for (const [name, command] of scripts) {
 // Standalone pure entrypoints use isolated fixtures with no shared database,
 // build output or live storage. Helper modules are only imported by suites.
 const pureEntrypoints = new Set([
+  "stripe-tax-check.mjs",
+  "alps-discount-coupon.mjs", "doc-track-scope.mjs", "email-layout.mjs", "storage-limit-route-inventory.mjs",
   "billing-addon-activation.mjs", "billing-addon-catalog.mjs", "biketrack-billing.mjs", "login-rate-limit.mjs",
   "pesttrack-billing.mjs", "service-price-preflight.mjs", "stripe-backfill-scope.mjs", "track-summary-routing.mjs",
   "private-file-acl.mjs", "staged-photo-creation.mjs", "pattrack-billing.mjs",
@@ -283,6 +299,7 @@ const pureEntrypoints = new Set([
   "trial-lock-allowlist.mjs", "storage-price-check.mjs", "openapi-route-inventory.mjs", "site-move-route-inventory.mjs", "upload-size-limit.mjs",
 ]);
 const helperModules = new Set([
+  "consultant-account.mjs",
   "pdf-text.mjs",
   "approval-workflow-fixtures.mjs", "doc-train-flows.mjs",
   "private-file-acl-fixture.mjs", "storage-test-availability.mjs",
