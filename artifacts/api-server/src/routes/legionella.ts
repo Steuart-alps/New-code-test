@@ -826,6 +826,19 @@ function legionellaLimits(profile: unknown, checkType: string, opts: LimitOption
 
 type LimitOptions = { healthcare: boolean; location?: string | null; tmvOutlet?: boolean };
 
+/**
+ * The temperature breach a new check would be stored with, so a fail the
+ * server finds is asked about before saving (lib/correctiveActions.ts).
+ */
+export async function legionellaBreachForNewCheck(clientId: number, body: unknown) {
+  const parsed = postSchema.safeParse(body);
+  if (!parsed.success) return null;
+  const data = parsed.data;
+  const profile = data.siteId == null ? null : await getLegionellaProfile(clientId, data.siteId);
+  return legionellaBreach(data.checkType, data.temperature, profile,
+    { healthcare: await isHealthcareClient(clientId), location: data.location, tmvOutlet: await isTmvOutlet(clientId, data.outletId) });
+}
+
 function legionellaBreach(checkType: string, temperature: number | null | undefined, profile: unknown, opts: LimitOptions) {
   if (temperature == null || !Number.isFinite(temperature)) return null;
   const limits = legionellaLimits(profile, checkType, opts);

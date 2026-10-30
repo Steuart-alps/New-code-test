@@ -188,6 +188,21 @@ try {
   assert.equal(requests.length, listBefore, "a spreadsheet is never sent to be read");
   console.log("ok - staff, call point and room lists are read the same way, and unreadable files are not sent");
 
+  // ── Suppliers' allergen information is read on the PAT register's model ──
+  reply = { stopReason: "end_turn", text: JSON.stringify({ rows: [
+    { name: "Pesto", supplier: "Brakes", productCode: "P2", contains: "Milk; Tree nuts", mayContain: "Peanuts", site: null, notes: null, unclear: false },
+    { name: "Mystery sauce", supplier: null, productCode: null, contains: null, mayContain: null, site: null, notes: null, unclear: true },
+  ] }) };
+  const allergens = await readList({ ...listInput, kind: "allergen-ingredients", siteId: null });
+  const allergenRequest = requests.at(-1)!.body;
+  assert.equal(allergenRequest.model, "claude-sonnet-5-5", "allergens are read on Claude Sonnet, not Haiku");
+  assert.match(allergenRequest.system, /Never work out allergens from the product's name/);
+  assert.deepEqual(allergens.headers, ["Ingredient", "Supplier", "Product code", "Contains", "May contain", "Site", "Notes"]);
+  assert.deepEqual(allergens.rows[0], ["Pesto", "Brakes", "P2", "Milk; Tree nuts", "Peanuts", "", ""]);
+  assert.equal(allergens.rows[1][3], "", "allergens the file doesn't give are left blank for the import to flag");
+  assert.deepEqual(allergens.unclearRows, [3]);
+  console.log("ok - suppliers' allergen information is read on Sonnet, and nothing is filled in that the file doesn't say");
+
   // ── A list Claude Haiku declines is tried once more on Claude Sonnet ────
   const staffRow = { payrollId: null, name: "Jane Smith", jobTitle: "Chef", department: "Kitchen", email: null, unclear: false };
   queued = [{ stopReason: "refusal", text: "" }, { stopReason: "end_turn", text: JSON.stringify({ rows: [staffRow] }) }];

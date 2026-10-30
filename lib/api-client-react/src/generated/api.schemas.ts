@@ -4509,6 +4509,45 @@ export interface KitchenClosedDaysCreated {
   created: string[];
 }
 
+export interface KitchenMonthSummarySite {
+  siteId: number | null;
+  siteName: string | null;
+  /** The site's first diary record; days before it are not counted. */
+  startedOn: string | null;
+  daysCounted: number;
+  recordedDays: number;
+  draftDays: number;
+  closedDays: number;
+  missedDays: number;
+  missedDates: string[];
+  failedReadings: number;
+  actionsRaised: number;
+  actionsOpen: number;
+}
+
+export type KitchenMonthSummaryTotals = {
+  daysCounted: number;
+  recordedDays: number;
+  draftDays: number;
+  closedDays: number;
+  missedDays: number;
+  failedReadings: number;
+  actionsRaised: number;
+  actionsResolved: number;
+  actionsOpen: number;
+  actionsOverdue: number;
+};
+
+export interface KitchenMonthSummary {
+  month: string;
+  from: string;
+  /** The last day counted (yesterday, or the month's last day). Null when no day has finished yet. */
+  through: string | null;
+  today: string;
+  sites: KitchenMonthSummarySite[];
+  totals: KitchenMonthSummaryTotals;
+}
+
 export interface FoodSafetyMonthlySummary {
   year: number;
   month: number;
@@ -5692,6 +5731,14 @@ month: number;
  * Scope to a site's diary. Omit for the whole-organisation diary.
  */
 siteId?: number;
+};
+
+export type GetFoodSafetyMonthSummaryParams = {
+/**
+ * The month as YYYY-MM. Defaults to the business's current month.
+ * @pattern ^[0-9]{4}-[0-9]{2}$
+ */
+month?: string;
 };
 
 export type GetFoodSafetyMissingDatesParams = {

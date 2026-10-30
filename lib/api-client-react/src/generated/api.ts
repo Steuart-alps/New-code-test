@@ -133,6 +133,7 @@ import type {
   GetFireSafetyStatusParams,
   GetFoodSafetyConfigParams,
   GetFoodSafetyMissingDatesParams,
+  GetFoodSafetyMonthSummaryParams,
   GetFoodSafetyRecordByDateParams,
   GetFoodSafetySummaryParams,
   GetGreenTrackPreStartDayParams,
@@ -191,6 +192,7 @@ import type {
   KitchenClosedDaysCreated,
   KitchenClosedDaysInput,
   KitchenClosedDaysList,
+  KitchenMonthSummary,
   LegionellaCheck,
   LegionellaConfig,
   LegionellaStatus,
@@ -8956,6 +8958,155 @@ export const useImportFireCallPoints = <TError = ErrorType<void | FireCallPointI
       return useMutation(getImportFireCallPointsMutationOptions(options));
     }
 
+export const getGetAllergenIngredientImportTemplateUrl = () => {
+
+
+
+
+  return `/api/imports/allergen-ingredients/template`
+}
+
+/**
+ * @summary Download the CSV template for importing suppliers' allergen information (managers)
+ */
+export const getAllergenIngredientImportTemplate = async ( options?: RequestInit): Promise<string> => {
+
+  return customFetch<string>(getGetAllergenIngredientImportTemplateUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAllergenIngredientImportTemplateQueryKey = () => {
+    return [
+    `/api/imports/allergen-ingredients/template`
+    ] as const;
+    }
+
+
+export const getGetAllergenIngredientImportTemplateQueryOptions = <TData = Awaited<ReturnType<typeof getAllergenIngredientImportTemplate>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAllergenIngredientImportTemplate>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAllergenIngredientImportTemplateQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAllergenIngredientImportTemplate>>> = ({ signal }) => getAllergenIngredientImportTemplate({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAllergenIngredientImportTemplate>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAllergenIngredientImportTemplateQueryResult = NonNullable<Awaited<ReturnType<typeof getAllergenIngredientImportTemplate>>>
+export type GetAllergenIngredientImportTemplateQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Download the CSV template for importing suppliers' allergen information (managers)
+ */
+
+export function useGetAllergenIngredientImportTemplate<TData = Awaited<ReturnType<typeof getAllergenIngredientImportTemplate>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAllergenIngredientImportTemplate>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAllergenIngredientImportTemplateQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getImportAllergenIngredientsUrl = () => {
+
+
+
+
+  return `/api/imports/allergen-ingredients`
+}
+
+/**
+ * The browser sends the spreadsheet's header row and cell text: a column per allergen (Y, N or May) or Contains and May contain lists. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error. Rows match existing ingredients by site and name; changed allergens update every dish using the ingredient, each with a change log entry.
+ * @summary Preview or import suppliers' allergen information as KitchenTrack ingredients (managers)
+ */
+export const importAllergenIngredients = async (fireCallPointImportRequest: FireCallPointImportRequest, options?: RequestInit): Promise<FireCallPointImportResult> => {
+
+  return customFetch<FireCallPointImportResult>(getImportAllergenIngredientsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(fireCallPointImportRequest)
+  }
+);}
+
+
+
+
+
+export const getImportAllergenIngredientsMutationOptions = <TError = ErrorType<void | FireCallPointImportResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importAllergenIngredients>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof importAllergenIngredients>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext> => {
+
+const mutationKey = ['importAllergenIngredients'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importAllergenIngredients>>, {data: BodyType<FireCallPointImportRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  importAllergenIngredients(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportAllergenIngredientsMutationResult = NonNullable<Awaited<ReturnType<typeof importAllergenIngredients>>>
+    export type ImportAllergenIngredientsMutationBody = BodyType<FireCallPointImportRequest>
+    export type ImportAllergenIngredientsMutationError = ErrorType<void | FireCallPointImportResult>
+
+    /**
+ * @summary Preview or import suppliers' allergen information as KitchenTrack ingredients (managers)
+ */
+export const useImportAllergenIngredients = <TError = ErrorType<void | FireCallPointImportResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importAllergenIngredients>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof importAllergenIngredients>>,
+        TError,
+        {data: BodyType<FireCallPointImportRequest>},
+        TContext
+      > => {
+      return useMutation(getImportAllergenIngredientsMutationOptions(options));
+    }
+
 export const getGetAiAddonUrl = () => {
 
 
@@ -9254,7 +9405,7 @@ export const useReadPatRegisterList = <TError = ErrorType<void>,
       return useMutation(getReadPatRegisterListMutationOptions(options));
     }
 
-export const getGetImportListReadingUrl = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster',) => {
+export const getGetImportListReadingUrl = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients',) => {
 
 
 
@@ -9265,7 +9416,7 @@ export const getGetImportListReadingUrl = (kind: 'room-track-rooms' | 'contracto
 /**
  * @summary Whether ComplyTrack can read a photo or document list for an import, and this month's use
  */
-export const getImportListReading = async (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster', options?: RequestInit): Promise<PatRegisterReadingStatus> => {
+export const getImportListReading = async (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients', options?: RequestInit): Promise<PatRegisterReadingStatus> => {
 
   return customFetch<PatRegisterReadingStatus>(getGetImportListReadingUrl(kind),
   {
@@ -9280,14 +9431,14 @@ export const getImportListReading = async (kind: 'room-track-rooms' | 'contracto
 
 
 
-export const getGetImportListReadingQueryKey = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster',) => {
+export const getGetImportListReadingQueryKey = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients',) => {
     return [
     `/api/imports/list-reading/${kind}`
     ] as const;
     }
 
 
-export const getGetImportListReadingQueryOptions = <TData = Awaited<ReturnType<typeof getImportListReading>>, TError = ErrorType<void>>(kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetImportListReadingQueryOptions = <TData = Awaited<ReturnType<typeof getImportListReading>>, TError = ErrorType<void>>(kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -9314,7 +9465,7 @@ export type GetImportListReadingQueryError = ErrorType<void>
  */
 
 export function useGetImportListReading<TData = Awaited<ReturnType<typeof getImportListReading>>, TError = ErrorType<void>>(
- kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
@@ -9331,7 +9482,7 @@ export function useGetImportListReading<TData = Awaited<ReturnType<typeof getImp
 
 
 
-export const getReadImportListUrl = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster',) => {
+export const getReadImportListUrl = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients',) => {
 
 
 
@@ -9340,10 +9491,10 @@ export const getReadImportListUrl = (kind: 'room-track-rooms' | 'contractors' | 
 }
 
 /**
- * Claude reads the file and returns rows in the import's own columns (RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment or the staff roster). Nothing is saved: the browser sends the rows through the import's usual preview. The file is not stored. Off until the server has an Anthropic API key; readings share the business's monthly number with the PAT register reading.
+ * Claude reads the file and returns rows in the import's own columns (RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment, the staff roster or KitchenTrack suppliers' allergen information). Nothing is saved: the browser sends the rows through the import's usual preview. The file is not stored. Off until the server has an Anthropic API key; readings share the business's monthly number with the PAT register reading.
  * @summary Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
  */
-export const readImportList = async (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster',
+export const readImportList = async (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients',
     patRegisterReadRequest: PatRegisterReadRequest, options?: RequestInit): Promise<ImportListReadResult> => {
 
   return customFetch<ImportListReadResult>(getReadImportListUrl(kind),
@@ -9360,8 +9511,8 @@ export const readImportList = async (kind: 'room-track-rooms' | 'contractors' | 
 
 
 export const getReadImportListMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients';data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients';data: BodyType<PatRegisterReadRequest>}, TContext> => {
 
 const mutationKey = ['readImportList'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -9373,7 +9524,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof readImportList>>, {kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof readImportList>>, {kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients';data: BodyType<PatRegisterReadRequest>}> = (props) => {
           const {kind,data} = props ?? {};
 
           return  readImportList(kind,data,requestOptions)
@@ -9394,11 +9545,11 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  * @summary Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
  */
 export const useReadImportList = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients';data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof readImportList>>,
         TError,
-        {kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>},
+        {kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients';data: BodyType<PatRegisterReadRequest>},
         TContext
       > => {
       return useMutation(getReadImportListMutationOptions(options));
@@ -15314,6 +15465,91 @@ export function useGetFoodSafetySummary<TData = Awaited<ReturnType<typeof getFoo
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetFoodSafetySummaryQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFoodSafetyMonthSummaryUrl = (params?: GetFoodSafetyMonthSummaryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/food-safety/month-summary?${stringifiedParams}` : `/api/food-safety/month-summary`
+}
+
+/**
+ * For every site the user can see: diary days recorded, in draft, closed and missed (counted up to yesterday, from the site's first diary record), and the KitchenTrack actions raised in the month and still open.
+ * @summary KitchenTrack month summary for Owners and Managers
+ */
+export const getFoodSafetyMonthSummary = async (params?: GetFoodSafetyMonthSummaryParams, options?: RequestInit): Promise<KitchenMonthSummary> => {
+
+  return customFetch<KitchenMonthSummary>(getGetFoodSafetyMonthSummaryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFoodSafetyMonthSummaryQueryKey = (params?: GetFoodSafetyMonthSummaryParams,) => {
+    return [
+    `/api/food-safety/month-summary`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetFoodSafetyMonthSummaryQueryOptions = <TData = Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>, TError = ErrorType<ErrorResponse>>(params?: GetFoodSafetyMonthSummaryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFoodSafetyMonthSummaryQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>> = ({ signal }) => getFoodSafetyMonthSummary(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFoodSafetyMonthSummaryQueryResult = NonNullable<Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>>
+export type GetFoodSafetyMonthSummaryQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary KitchenTrack month summary for Owners and Managers
+ */
+
+export function useGetFoodSafetyMonthSummary<TData = Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetFoodSafetyMonthSummaryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFoodSafetyMonthSummaryQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
