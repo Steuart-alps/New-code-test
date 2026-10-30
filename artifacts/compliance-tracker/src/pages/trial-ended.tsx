@@ -8,6 +8,7 @@ import { forgetPendingCheckout, pendingCheckoutKey, trackCompletedCheckout } fro
 import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, KeyRound } from "lucide-react";
 import alpsLogo from "@/assets/alps-logo.png";
 import { CHECKOUT_ADDONS, SELECTED_MODULE_CARD, SELECTED_MODULE_CHECKBOX, checkoutPerSiteTotal } from "@/lib/addon-catalog";
+import { SetupServiceCheckoutOption, offerSetupService, type SetupServiceBilling } from "@/components/setup-service-checkout";
 
 const ADDONS = CHECKOUT_ADDONS;
 
@@ -20,6 +21,8 @@ export default function TrialEndedPage() {
   const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
   const [bundle, setBundle] = useState(false);
   const [discountCode, setDiscountCode] = useState("");
+  const [setupService, setSetupService] = useState<SetupServiceBilling>(null);
+  const [addSetupService, setAddSetupService] = useState(false);
   const checkoutAnalyticsKey = activeClientId === null ? null : pendingCheckoutKey(activeClientId);
 
   const canPay = user?.role === "consultant" || user?.role === "client_admin";
@@ -67,6 +70,19 @@ export default function TrialEndedPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // "Would you like ALPS to set you up?": ticked already when they asked on the setup page.
+  useEffect(() => {
+    if (!canPay) return;
+    apiFetch("/billing/config")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        const offer = (data?.setupService ?? null) as SetupServiceBilling;
+        setSetupService(offer);
+        setAddSetupService(offerSetupService(offer) && !!offer?.requestedAt);
+      })
+      .catch(() => setSetupService(null));
+  }, [activeClientId, canPay]);
+
   // Pre-tick the modules the account picked on the pricing page at signup.
   useEffect(() => {
     const picked = (client as any)?.selectedServices as string[] | null | undefined;
@@ -102,6 +118,7 @@ export default function TrialEndedPage() {
           bundle,
           services: services.length > 0 ? services : undefined,
           ...(discountCode.trim() ? { discountCode: discountCode.trim() } : {}),
+          ...(addSetupService && offerSetupService(setupService) ? { setupService: true } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -254,6 +271,10 @@ export default function TrialEndedPage() {
                 <span className="text-xs text-white/50">+ VAT</span>
               </div>
             </div>
+
+            {offerSetupService(setupService) && (
+              <SetupServiceCheckoutOption fee={setupService!.fee} checked={addSetupService} onChange={setAddSetupService} />
+            )}
 
             <div className="border border-border bg-white px-4 py-3">
               <label htmlFor="alps-discount-code" className="block text-sm font-medium text-[#162D42]">

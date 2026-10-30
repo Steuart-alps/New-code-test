@@ -249,6 +249,56 @@ async function setupWizard(a, b, viewer) {
         .map((line) => JSON.parse(line)).filter((m) => m.subject?.startsWith("Setup service request"));
       check("setup service: one email to ALPS with the notes, escaped", sent.length === 1 && sent[0].to === process.env.ADMIN_EMAIL
         && sent[0].text.includes("01563 000000") && sent[0].html.includes("&lt;b&gt;and&lt;/b&gt;"), JSON.stringify(sent.map((m) => m.subject)));
+      check("setup service: email says the fee joins their first payment", sent[0]?.text.includes("Payment: It will be added to their first payment"),
+        sent[0]?.text);
+    }
+    const billing = await a("GET", "/billing/config");
+    check("setup service: checkout offers it ticked, not yet paid", billing.status === 200
+      && billing.data?.setupService?.fee === "£500 + VAT" && billing.data.setupService.requestedAt === asked.data?.requestedAt
+      && billing.data.setupService.paidAt === null, JSON.stringify(billing.data?.setupService));
+    check("setup service isolation: other business not asked at checkout",
+      (await b("GET", "/billing/config")).data?.setupService?.requestedAt === null);
+
+    // The Stripe webhook for a paid checkout that carried the fee: bundled
+    // straight from src (no Stripe in tests), against the same database.
+    if (process.env.DATABASE_URL) {
+      const { build } = await import("esbuild");
+      const { mkdtemp } = await import("node:fs/promises");
+      const path = await import("node:path");
+      // Inside the package, next to its dependencies.
+      const cache = new URL("../node_modules/.cache/", import.meta.url).pathname;
+      await (await import("node:fs/promises")).mkdir(cache, { recursive: true });
+      const outfile = path.join(await mkdtemp(path.join(cache, "setup-service-")), "setup-service.cjs");
+      await build({
+        entryPoints: [new URL("../src/lib/setupService.ts", import.meta.url).pathname],
+        bundle: true, platform: "node", format: "cjs", outfile, logLevel: "silent", external: ["*.node", "pg-native"],
+        // pino's worker-thread transport can't run from a one-file bundle.
+        plugins: [{ name: "quiet-logger", setup(b) {
+          b.onResolve({ filter: /^\.\/logger$/ }, () => ({ path: "logger", namespace: "quiet-logger" }));
+          b.onLoad({ filter: /.*/, namespace: "quiet-logger" }, () => ({ contents: "const noop = () => {}; module.exports.logger = { info: noop, warn: noop, error: noop, debug: noop, child() { return this; } };", loader: "js" }));
+        } }],
+      });
+      // Emails from this process are captured like the server's, never sent.
+      process.env.NODE_ENV = "test";
+      const { recordSetupServiceCheckoutEvent } = await import(outfile);
+      const paidEvent = (clientId, extra = {}) => ({
+        type: "checkout.session.completed",
+        data: { object: { id: `cs_test_${clientId}`, payment_status: "paid", metadata: { clientId: String(clientId), setupService: "1" }, ...extra } },
+      });
+      await recordSetupServiceCheckoutEvent(paidEvent(b.clientId, { payment_status: "unpaid" }));
+      await recordSetupServiceCheckoutEvent({ type: "checkout.session.completed", data: { object: { payment_status: "paid", metadata: { clientId: String(b.clientId) } } } });
+      check("setup service: unpaid or fee-less checkouts don't mark it paid", (await b("GET", "/billing/config")).data?.setupService?.paidAt === null);
+      await recordSetupServiceCheckoutEvent(paidEvent(a.clientId));
+      await recordSetupServiceCheckoutEvent(paidEvent(a.clientId)); // Stripe redelivers
+      const paid = (await a("GET", "/billing/config")).data?.setupService;
+      check("setup service: paid checkout recorded, so it is never charged again", !!paid?.paidAt && paid.requestedAt === asked.data?.requestedAt, JSON.stringify(paid));
+      check("setup service isolation: other business still unpaid", (await b("GET", "/billing/config")).data?.setupService?.paidAt === null);
+      if (process.env.TEST_EMAIL_CAPTURE_PATH) {
+        const { readFile } = await import("node:fs/promises");
+        const paidMails = (await readFile(process.env.TEST_EMAIL_CAPTURE_PATH, "utf8").catch(() => "")).split("\n").filter(Boolean)
+          .map((line) => JSON.parse(line)).filter((m) => m.subject?.startsWith("Setup service paid"));
+        check("setup service: ALPS told once that it's paid", paidMails.length === 1 && paidMails[0].to === process.env.ADMIN_EMAIL, String(paidMails.length));
+      }
     }
   } else {
     check("setup service: refused without ALPS's email address", asked.status === 503 && asked.data?.code === "SETUP_SERVICE_UNAVAILABLE", JSON.stringify(asked));

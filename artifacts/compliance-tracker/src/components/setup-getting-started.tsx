@@ -11,8 +11,12 @@ import { INFO_SHEETS, SETUP_SERVICE_FEE, downloadInfoSheet, type InfoSheet, type
 export type SetupAi = { configured: boolean; active: boolean };
 export type SetupAssistRequest = { requestedAt: string; requestedBy: string };
 
-/** Shown on the setup service offer. ALPS invoices it; nothing is charged in the app. */
-export const SETUP_SERVICE_PRICE_NOTE = `A one-off fee of ${SETUP_SERVICE_FEE}, invoiced separately from your subscription.`;
+/**
+ * Shown on the setup service offer. The fee joins the first payment: the
+ * checkout's "Would you like ALPS to set you up?" box is ticked for a business
+ * that asks here (api lib/setupService.ts). ALPS invoices one that already pays.
+ */
+export const SETUP_SERVICE_PRICE_NOTE = `A one-off fee of ${SETUP_SERVICE_FEE}, added to your first payment. If you already pay monthly, ALPS invoices it instead.`;
 
 /** What the setup service covers, as the offer lists it. */
 const SETUP_SERVICE_INCLUDES = [
@@ -137,7 +141,7 @@ function AiNote({ ai }: { ai?: SetupAi }) {
   );
 }
 
-function SetupServiceOffer({ request, onRequest }: {
+export function SetupServiceOffer({ request, onRequest }: {
   request: SetupAssistRequest | null;
   onRequest: (details: { phone: string; notes: string }) => Promise<void>;
 }) {

@@ -39,6 +39,7 @@ import {
   verifyClientDiscountCode,
 } from "../lib/alpsDiscount";
 import { logger } from "../lib/logger";
+import { SETUP_SERVICE_METADATA_KEY, getSetupServiceState, setupServiceLineItem } from "../lib/setupService";
 import {
   checkStorageAddonPrice,
   isWholeStoragePacks,
@@ -239,6 +240,10 @@ router.get("/config", requireAuth, async (req, res) => {
         }
       : null;
 
+    // "Would you like ALPS to set you up?" at checkout: ticked already when
+    // the business asked from the setup page, hidden once paid.
+    const setupService = clientId ? await getSetupServiceState(clientId).catch(() => null) : null;
+
     res.json({
       publishableKey,
       subscription,
@@ -257,6 +262,7 @@ router.get("/config", requireAuth, async (req, res) => {
       // and still covers costs; the price and step are shown before buying.
       storageAddonAvailable: storageAddon !== null,
       storageAddon,
+      setupService,
       services: {
         entitled,
         addons: activeAddons,
@@ -336,11 +342,13 @@ router.get("/plans", async (_req, res) => {
 // Consultants AND client admins may pay: when a trial expires the client's
 // own admin must be able to set up billing, not just the consultant.
 router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
-  const { clientId: bodyClientId, services: requestedServices, bundle, discountCode: rawDiscountCode } = req.body as {
+  const { clientId: bodyClientId, services: requestedServices, bundle, discountCode: rawDiscountCode, setupService } = req.body as {
     clientId?: number;
     services?: string[];
     bundle?: boolean;
     discountCode?: unknown;
+    /** "Would you like ALPS to set you up?" ticked: the one-off fee joins this first payment. */
+    setupService?: unknown;
   };
   const clientId = getClientId(req);
   if (!clientId) { res.status(400).json({ error: "clientId required" }); return; }
@@ -423,6 +431,10 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
       }
     }
 
+    // The setup service is charged once: a business that has paid it never
+    // sees it on a later checkout (after cancelling and coming back).
+    const addSetupService = setupService === true && !(await getSetupServiceState(clientId)).paidAt;
+
     const billingEmail = req.currentUser?.email ?? undefined;
     let customerId = client.stripeCustomerId ?? undefined;
     if (!customerId) {
@@ -475,7 +487,8 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ["card"],
-      line_items: lineItems,
+      // A one-time line in a subscription checkout is on the first invoice only.
+      line_items: addSetupService ? [...lineItems, setupServiceLineItem()] : lineItems,
       mode: "subscription",
       // Back to the dashboard of the business being paid for: "/" sends
       // consultants to their portfolio, which read as a new account.
@@ -483,6 +496,7 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
       cancel_url: `${baseUrl}/dashboard?billing=cancel&clientId=${clientId}`,
       metadata: {
         clientId: String(clientId),
+        ...(addSetupService ? { [SETUP_SERVICE_METADATA_KEY]: "1" } : {}),
         ...(discountReservation
           ? {
               discountCode: discountReservation.code,
@@ -516,7 +530,7 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
       }
     }
 
-    res.json({ url: session.url, discountApplied: Boolean(discountReservation) });
+    res.json({ url: session.url, discountApplied: Boolean(discountReservation), setupServiceAdded: addSetupService });
   } catch (err: any) {
     if (discountReservation && !checkoutSessionCreated) {
       try {

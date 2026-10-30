@@ -19,6 +19,7 @@ import {
 } from "./lib/certificateInbox";
 import { Sentry, isErrorReportingEnabled } from "./lib/sentry";
 import { recordAlpsDiscountCheckoutEvent } from "./lib/alpsDiscount";
+import { recordSetupServiceCheckoutEvent } from "./lib/setupService";
 import { csrfProtection } from "./middleware/csrf";
 import { computeReadiness, getBillingReadiness } from "./lib/stripeStartup";
 import { withReadinessDetails } from "./lib/readinessDetails";
@@ -217,6 +218,7 @@ app.post(
         data?: { object?: Record<string, any> };
       };
       await recordAlpsDiscountCheckoutEvent(event);
+      await recordSetupServiceCheckoutEvent(event);
       res.status(200).json({ received: true });
     } catch (err: any) {
       logger.error({ err }, "Stripe webhook error");
