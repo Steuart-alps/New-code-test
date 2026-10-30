@@ -42,6 +42,9 @@ Wednesday 28 October.
 | 23 | Contractor sign-in on site and logging their own test results | After launch (you chose this on 28 October) | None | Your "go" in its own thread |
 | 24 | Let Owners choose how often urgent alerts are sent | After launch | None | Nothing; urgent alerts stay same-day for now |
 | 25 | Link TrainTrack to outside training providers | After launch | None for hosting; some providers may charge for a link | Which providers your clients use |
+| 26 | Combine SafeTrack into DocTrack | After launch | None; affects pricing | Your call on pricing |
+| 27 | One Owner login for several separate businesses | After launch | None | Your go-ahead |
+| 28 | Finish or hide the staff roster "Open kiosk" | After launch | None | Your choice: finish or hide |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -927,6 +930,59 @@ That decides which direct links are worth building first.
 
 ---
 
+## 26. Combine SafeTrack into DocTrack
+
+**When:** after launch. From your 30 October list ("Safe track leads to
+doctrack, combine?").
+
+On the website, SafeTrack already opens the DocTrack pages: documents, who
+must read them and who has signed. Combining them properly would mean one
+module name, one menu item and one price, so customers aren't confused about
+what they are buying.
+
+**Your call:** SafeTrack and DocTrack may be sold separately today, so
+combining them changes what customers pay for. Options are to fold SafeTrack
+into DocTrack at no extra charge, or keep two names on one shared page.
+
+**Cost:** none for hosting.
+
+---
+
+## 27. One Owner login for several separate businesses
+
+**When:** after launch. From your 30 October list ("Owner can be designated
+owner of multiple sites using same email login").
+
+Today one email address belongs to one business. An Owner who runs two or
+more separate businesses (not just several sites of one business) would sign
+in once and switch between them, the way a consultant can. Each business keeps
+its own billing, records and staff, and nothing is shared between them.
+
+Several sites of one business already work under one login; this is only for
+separate businesses with separate bills.
+
+**Cost:** none. No extra hosting.
+
+---
+
+## 28. Staff roster "Open kiosk"
+
+**When:** after launch. From your 30 October list ("What is 'open kiosk' on
+staff roster?").
+
+The staff roster has an "Open kiosk" button that lets staff record the start
+of their shift on a shared screen, but nothing in the app shows those
+records yet, so it looks unfinished. Two choices:
+
+1. **Finish it** as a tablet sign-in sheet: staff tap their name to sign in
+   and out, managers see who is on site, and it feeds the fire roll call
+   (alongside contractor sign-in, item 23).
+2. **Hide it** until there is time to finish it.
+
+**Cost:** none. No extra hosting.
+
+---
+
 ## Future apps (separate from ComplyTrack)
 
 Ideas for separate apps, outside ComplyTrack itself. Logged only; nothing
@@ -979,6 +1035,9 @@ work:
 | Site safety information to contractors | None |
 | Contractor sign-in and test logging | None |
 | Choose how often urgent alerts are sent | None |
+| Combine SafeTrack into DocTrack | None for hosting; changes pricing |
+| One Owner login for several businesses | None |
+| Staff roster kiosk | None |
 | TrainTrack links to training providers | None for hosting; pennies per certificate read; some providers may charge |
 | Choose AI model and effort | Depends on choices; stronger settings cost more per use, capped by spending limits |
 | White-labelling for resellers | Little or none for hosting; possibly a small cost per partner web address and email address |
