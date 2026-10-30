@@ -44,6 +44,15 @@ const TYPE_LABELS: Record<string, string> = {
   signage:      "Signage",
 };
 
+// Examples that fit each inspection type; retired or custom types use the routine ones.
+const TYPE_PLACEHOLDERS: Record<string, { area: string; findings: string; hazard: string; action: string }> = {
+  routine:      { area: "e.g. Reception, stairwell, car park", findings: "e.g. Floors, lighting, handrails and exits all checked, all fine apart from one loose stair nosing", hazard: "Describe any hazard identified (slip, trip, fall, obstruction, etc.)", action: "e.g. Refix stair nosing on the main stairs" },
+  hazard:       { area: "e.g. Kitchen back door, main stairs", findings: "e.g. Water pooling by the back door after rain", hazard: "e.g. Wet floor, slip risk to staff carrying trays", action: "e.g. Fit a drip tray and anti-slip mat; coned off meanwhile" },
+  fault:        { area: "e.g. Plant room, first floor corridor", findings: "e.g. Corridor light fitting not working", hazard: "e.g. Poor lighting on the route to the fire exit", action: "e.g. Electrician to replace the fitting" },
+  housekeeping: { area: "e.g. Cellar, linen store, back yard", findings: "e.g. Empty boxes stacked in the corridor to the cellar", hazard: "e.g. Obstructed walkway and extra fire load", action: "e.g. Clear boxes to the recycling store and remind staff" },
+  signage:      { area: "e.g. Fire exits, cellar steps, car park", findings: "e.g. Fire exit sign above the bar door is faded", hazard: "e.g. Fire exit hard to see in an emergency", action: "e.g. Order and fit a new fire exit sign" },
+};
+
 const STATUSES = ["open", "actioned", "closed"] as const;
 const STATUS_LABELS: Record<string, string> = {
   open: "Open", actioned: "Actioned", closed: "Closed",
@@ -216,6 +225,8 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites, spoken }:
     } finally { setSaving(false); }
   };
 
+  const examples = TYPE_PLACEHOLDERS[form.inspectionType] ?? TYPE_PLACEHOLDERS.routine;
+
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving && !v) onClose(); }}>
       <DialogContent className="max-w-2xl rounded-sm max-h-[90vh] overflow-y-auto">
@@ -245,7 +256,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites, spoken }:
           </div>
           <div className="space-y-1.5">
             <Label>Area / location</Label>
-            <Input value={form.area} onChange={set("area")} placeholder="e.g. Reception, stairwell, car park" className="rounded-sm" />
+            <Input value={form.area} onChange={set("area")} placeholder={examples.area} className="rounded-sm" />
           </div>
           <div className="space-y-1.5">
             <StaffPerformerSelect label="Inspected by" value={form.inspectedBy} onChange={(value) => setForm((current) => ({ ...current, inspectedBy: value }))} onRosterIdChange={(value) => setForm((current) => ({ ...current, staffRosterId: value }))} />
@@ -272,16 +283,16 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites, spoken }:
             </Select>
           </div>
           <div className="col-span-full space-y-1.5">
-            <Label>Findings</Label>
-            <Textarea rows={2} value={form.findings} onChange={set("findings")} placeholder="What was observed during the inspection" className="rounded-sm" />
+            <Label htmlFor="premises-findings">Findings</Label>
+            <Textarea id="premises-findings" rows={2} value={form.findings} onChange={set("findings")} placeholder={examples.findings} className="rounded-sm" />
           </div>
           <div className="col-span-full space-y-1.5">
             <Label>Hazard details</Label>
-            <Textarea rows={2} value={form.hazardDetails} onChange={set("hazardDetails")} placeholder="Describe any hazard identified (slip, trip, fall, obstruction, etc.)" className="rounded-sm" />
+            <Textarea rows={2} value={form.hazardDetails} onChange={set("hazardDetails")} placeholder={examples.hazard} className="rounded-sm" />
           </div>
           <div className="col-span-full space-y-1.5">
             <Label>Action required</Label>
-            <Textarea rows={2} value={form.actionRequired} onChange={set("actionRequired")} placeholder="Remedial action needed" className="rounded-sm" />
+            <Textarea rows={2} value={form.actionRequired} onChange={set("actionRequired")} placeholder={examples.action} className="rounded-sm" />
           </div>
           <div className="col-span-full space-y-1.5">
             <Label>Action taken</Label>
