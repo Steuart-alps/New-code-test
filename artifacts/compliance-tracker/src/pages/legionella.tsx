@@ -52,6 +52,9 @@ import {
   LegionellaConditionQuestions, LegionellaFindingsSummary, legionellaFindingsComplete, legionellaFindingsPayload,
 } from "@/components/legionella-condition-questions";
 import type { LegionellaFindings } from "@workspace/api-zod/legionella-condition";
+import {
+  LegionellaUnitPicker, legionellaUnitLabel, legionellaUnitType, siteUnitsFor, useLegionellaUnits, type LegionellaUnit,
+} from "@/components/legionella-unit-picker";
 
 // HSG274 Part 2 Table 2.1
 const CHECK_TYPE_LABELS: Record<LegionellaCheckType, string> = {
@@ -973,6 +976,20 @@ function RecordCheckDialog({
   const createCheck = useCreateLegionellaCheck();
   const { data: sites } = useListSites();
   const { data: config } = useGetLegionellaConfig();
+  const { data: allUnits } = useLegionellaUnits();
+  const siteUnits = siteUnitsFor(allUnits, checkType, selectedSite);
+  const siteUnitIds = siteUnits.map(u => u.id).join(",");
+  const pickUnit = (unit: LegionellaUnit | null) => {
+    setEquipment(unit ? { id: unit.id, name: unit.name } : null);
+    if (unit) setLocation(unit.location ?? unit.name);
+  };
+  // A tank from another site or of the wrong kind is dropped; a site with
+  // only one tank (or calorifier) has it chosen already.
+  useEffect(() => {
+    if (!open || !allUnits) return;
+    if (equipment && !siteUnits.some(u => u.id === equipment.id)) pickUnit(null);
+    else if (!equipment && !preset && siteUnits.length === 1) pickUnit(siteUnits[0]);
+  }, [open, allUnits, siteUnitIds, equipment?.id]);
 
   // Pre-fill from template
   useEffect(() => {
@@ -995,6 +1012,10 @@ function RecordCheckDialog({
     }
     if (!legionellaFindingsComplete(checkType, findings)) {
       toast({ title: "Answer every \"What did you find?\" question", variant: "destructive" });
+      return;
+    }
+    if (siteUnits.length > 1 && !equipment) {
+      toast({ title: legionellaUnitType(checkType) === "calorifier" ? "Choose which calorifier" : "Choose which tank", variant: "destructive" });
       return;
     }
     const data: CreateLegionellaCheckRequest & { staffRosterId?: number | null } = {
@@ -1046,12 +1067,6 @@ function RecordCheckDialog({
         <DialogHeader>
           <DialogTitle className="font-display font-bold">Record Legionella Check</DialogTitle>
         </DialogHeader>
-        {equipment && (
-          <div className="flex items-center justify-between gap-2 rounded-sm border bg-muted/40 px-3 py-2 text-sm">
-            <span>Recording for <span className="font-medium">{equipment.name}</span></span>
-            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setEquipment(null)}>Not this item</Button>
-          </div>
-        )}
         <div className="space-y-4 py-4">
           <div className="space-y-1.5">
             <Label>Check Type</Label>
@@ -1132,6 +1147,8 @@ function RecordCheckDialog({
             </div>
           )}
 
+          <LegionellaUnitPicker checkType={checkType} siteId={selectedSite} units={siteUnits} value={equipment?.id ?? null} onChange={pickUnit} />
+
           <div className="space-y-1.5">
             <Label>Location / Outlet</Label>
             <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Ground floor male toilets, tap 3" />
@@ -1170,6 +1187,9 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
   const [findings, setFindings] = useState<LegionellaFindings>(check.findings ?? {});
   const [findingsChanged, setFindingsChanged] = useState(false);
   const [selectedSite, setSelectedSite] = useState<number | undefined>(check.siteId || undefined);
+  const [equipmentId, setEquipmentId] = useState<number | null>(check.equipmentId ?? null);
+  const { data: allUnits } = useLegionellaUnits();
+  const siteUnits = siteUnitsFor(allUnits, check.checkType, selectedSite);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -1184,6 +1204,9 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
       toast({ title: "Answer every \"What did you find?\" question", variant: "destructive" });
       return;
     }
+    // A tank from the old site cannot follow the check to a new one.
+    const unit = allUnits?.find(u => u.id === equipmentId);
+    const nextEquipmentId = unit && (unit.siteId ?? undefined) !== selectedSite ? null : equipmentId;
     updateCheck.mutate(
       {
         id: check.id,
@@ -1197,6 +1220,7 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
           performedBy: performedBy || null, staffRosterId: staffRosterId,
           notes: notes || null,
           ...(findingsChanged ? { findings: legionellaFindingsPayload(check.checkType, findings) } : {}),
+          ...(nextEquipmentId !== (check.equipmentId ?? null) ? { equipmentId: nextEquipmentId } : {}),
         } as any,
       },
       {
@@ -1283,6 +1307,14 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
             </div>
           )}
 
+          <LegionellaUnitPicker
+            checkType={check.checkType}
+            siteId={selectedSite}
+            units={siteUnits}
+            value={equipmentId}
+            onChange={unit => { setEquipmentId(unit?.id ?? null); if (unit) setLocation(unit.location ?? unit.name); }}
+          />
+
           <div className="space-y-1.5">
             <Label>Location / Outlet</Label>
             <Input value={location} onChange={(e) => setLocation(e.target.value)} />
@@ -1351,6 +1383,8 @@ export default function LegionellaPage() {
   );
   const serverLocked = (statusError as any)?.status === 403;
 
+  const { data: legionellaUnits } = useLegionellaUnits();
+  const unitById = new Map((legionellaUnits ?? []).map(unit => [unit.id, unit]));
   const { data: checks, isLoading: checksLoading } = useListLegionellaChecks(
     { checkType: filterType || undefined, siteId: filterSite },
     { query: { enabled: hasLegionellatrack, queryKey: getListLegionellaChecksQueryKey({ checkType: filterType || undefined, siteId: filterSite }) } }
@@ -1617,6 +1651,7 @@ export default function LegionellaPage() {
               <div className="divide-y divide-border">
                 {checks.map((check) => {
                   const site = sites?.find((s) => s.id === check.siteId);
+                  const unit = check.equipmentId != null ? unitById.get(check.equipmentId) : undefined;
                   return (
                     <div key={check.id} className="p-4 hover:bg-muted/20 transition-colors">
                       <div className="flex items-start justify-between gap-4">
@@ -1632,6 +1667,9 @@ export default function LegionellaPage() {
                             )}
                             {site && (
                               <Badge variant="outline" className="text-xs">{site.name}</Badge>
+                            )}
+                            {unit && (
+                              <Badge variant="outline" className="text-xs bg-slate-50" data-testid="legionella-check-unit">{unit.name}</Badge>
                             )}
                           </div>
                           <div className="text-xs text-muted-foreground space-y-0.5">

@@ -21,6 +21,8 @@ export interface LegionellaCheck {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** The named cold water tank or calorifier (equipment list item) the check was made on. */
+  equipmentId?: number | null;
   /** Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail. */
   findings?: LegionellaCheckFindings;
   createdAt: Date;

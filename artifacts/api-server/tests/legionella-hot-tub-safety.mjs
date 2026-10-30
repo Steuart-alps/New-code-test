@@ -103,6 +103,25 @@ const run = async () => {
   const noAnswers = await tankCheck(undefined);
   check("older apps can still save an inspection without answers", noAnswers.status === 201 && noAnswers.data?.result === "pass"
     && noAnswers.data?.findings == null, JSON.stringify(noAnswers.data));
+  // Named tanks: with two at a site, a tank check must say which one. They
+  // go on a second site so the checks below keep a site without tanks.
+  const tankSite = await request("POST", "/sites", { name: `Two tanks ${Date.now()}`, seedStarterChecks: false });
+  const tankCheckAt = (findings, extra = {}) => tankCheck(findings, { siteId: tankSite.data?.id, ...extra });
+  const tankA = await request("POST", "/equipment", { name: "Tank 1", type: "cold_water_tank", siteId: tankSite.data?.id, location: "Roof void" });
+  check("a tank can be named on the equipment list", tankA.status === 201 && tankA.data?.name === "Tank 1", JSON.stringify(tankA.data));
+  const oneTank = await tankCheckAt(cleanTank);
+  check("with one named tank, naming it is optional", oneTank.status === 201, oneTank.status);
+  const tankB = await request("POST", "/equipment", { name: "Kitchen header tank", type: "cold_water_tank", siteId: tankSite.data?.id });
+  const unnamed = await tankCheckAt(cleanTank);
+  check("with two named tanks, an inspection must say which", unnamed.status === 400 && /which tank/i.test(unnamed.data?.error ?? ""), JSON.stringify(unnamed.data));
+  const unnamedTemp = await request("POST", "/legionella", { checkType: "cold_tank_temp", checkDate: day, result: "pass", temperature: 14, siteId: tankSite.data?.id });
+  check("with two named tanks, a tank temperature must say which", unnamedTemp.status === 400, unnamedTemp.status);
+  const named = await tankCheckAt(cleanTank, { equipmentId: tankB.data?.id });
+  check("an inspection of the second tank is saved against it", named.status === 201 && named.data?.equipmentId === tankB.data?.id, JSON.stringify(named.data));
+  const calorifier = await request("POST", "/legionella", { checkType: "calorifier_temp", checkDate: day, result: "pass", temperature: 62, siteId: tankSite.data?.id });
+  check("calorifier checks are not held up by the tanks", calorifier.status === 201, calorifier.status);
+  const moved = await request("PUT", `/legionella/${named.data?.id}`, { equipmentId: tankA.data?.id });
+  check("a check can be moved to the other tank", moved.status === 200 && moved.data?.equipmentId === tankA.data?.id, JSON.stringify(moved.data));
   const actions = await request("GET", "/compliance-hub/actions");
   const rows = actions.data ?? [];
   const tankAction = rows.find(a => a.sourceTrack === "LegionellaTrack" && a.sourceRecordId === String(dirtyTank.data?.id));

@@ -349,7 +349,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
 
   const outletError = await outletLinkError(clientId, data.outletId, data.checkType, data.siteId);
   if (outletError) return res.status(400).json({ error: outletError });
-  const equipmentError = await equipmentLinkError(clientId, data.equipmentId, data.checkType, data.siteId);
+  const equipmentError = await equipmentLinkError(clientId, data.equipmentId, data.checkType, data.siteId)
+    ?? (data.equipmentId == null ? await unnamedUnitError(clientId, data.checkType, data.siteId) : null);
   if (equipmentError) return res.status(400).json({ error: equipmentError });
 
   const userId = req.currentUser!.id;
@@ -450,6 +451,23 @@ const EQUIPMENT_CHECK_TYPES: Record<string, readonly string[]> = {
  * item must be this business's, at the check's own site, and of a type that
  * takes this check. As with outlets, an existing link survives archiving.
  */
+/**
+ * A site with more than one named cold water tank (or calorifier) must say
+ * which one a tank check was made on, so each tank's record can be told apart.
+ */
+async function unnamedUnitError(clientId: number, checkType: string, siteId: number | null | undefined): Promise<string | null> {
+  if (siteId == null) return null;
+  const unitType = Object.keys(EQUIPMENT_CHECK_TYPES).find(type => EQUIPMENT_CHECK_TYPES[type].includes(checkType));
+  if (!unitType) return null;
+  const result = await db.execute(sql`
+    SELECT count(*)::int AS units FROM equipment_items
+    WHERE client_id = ${clientId} AND site_id = ${siteId} AND type = ${unitType} AND active = true
+  `);
+  const units = Number((result.rows[0] as { units: number } | undefined)?.units ?? 0);
+  if (units < 2) return null;
+  return unitType === "calorifier" ? "Choose which calorifier this check was made on" : "Choose which tank this check was made on";
+}
+
 async function equipmentLinkError(
   clientId: number,
   equipmentId: number | null | undefined,

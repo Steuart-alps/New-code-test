@@ -12396,6 +12396,10 @@ components:
         performedBy:
           type: string
           nullable: true
+        equipmentId:
+          type: integer
+          nullable: true
+          description: The named cold water tank or calorifier (equipment list item) the check was made on.
         findings:
           type: object
           nullable: true
@@ -12489,6 +12493,10 @@ components:
         performedBy:
           type: string
           nullable: true
+        equipmentId:
+          type: integer
+          nullable: true
+          description: Move the check to another named tank or calorifier at the same site.
         findings:
           type: object
           nullable: true

@@ -6900,6 +6900,7 @@ export const ListLegionellaChecksResponseItem = zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('The named cold water tank or calorifier (equipment list item) the check was made on.'),
   "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
@@ -6934,6 +6935,7 @@ export const CreateLegionellaCheckResponse = zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('The named cold water tank or calorifier (equipment list item) the check was made on.'),
   "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
@@ -7078,6 +7080,7 @@ export const UpdateLegionellaCheckBody = zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('Move the check to another named tank or calorifier at the same site.'),
   "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.')
 }).describe('For an existing temperature check, temperature is required. New results use pass or fail.')
 
@@ -7092,6 +7095,7 @@ export const UpdateLegionellaCheckResponse = zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('The named cold water tank or calorifier (equipment list item) the check was made on.'),
   "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
