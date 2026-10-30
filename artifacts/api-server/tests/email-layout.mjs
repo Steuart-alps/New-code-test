@@ -2,7 +2,7 @@
 // message in a white card, and a footer with the ALPS logo and legal name.
 // sendEmail and sendSystemEmail apply it; bodies already built with the
 // layout are left alone, so nothing is wrapped twice.
-// Usage: node tests/email-layout.mjs (DATABASE_URL must be set; nothing connects)
+// Usage: node tests/email-layout.mjs (the database address variable must be set for the imports; nothing connects)
 import assert from "node:assert/strict";
 import path from "node:path";
 import { build } from "esbuild";
