@@ -84,6 +84,8 @@ async function open(aiActive) {
       return json(route, { preview: body.preview, committed: !body.preview, summary: { total: rows.length, create: rows.length, update: 0, skip: 0, error: 0 }, rows, ignoredHeaders: [] });
     }
     if (url.pathname === "/api/green-track/machines/import") return json(route, { imported: body.rows.length, skipped: [] });
+    if (url.pathname === "/api/setup/state") return json(route, { assistRequest: null });
+    if (url.pathname === "/api/setup/assist-request") return json(route, { requestedAt: "2026-10-30T09:00:00.000Z", requestedBy: "Owner", emailed: true });
     return json(route, {});
   });
   await page.goto(`${baseUrl}/tests/upload-lists-harness.html`, { waitUntil: "domcontentloaded" });
@@ -121,7 +123,16 @@ try {
   browser = await chromium.launch({ headless: true, args: ["--no-sandbox"], executablePath: chromiumPath() });
 
   {
+    // "Upload your lists" leads with the ALPS setup service (the upsell).
     const { page, requests, pageErrors } = await open(true);
+    const offer = page.getByTestId("setup-service-offer");
+    await offer.waitFor();
+    assert.match(await offer.innerText(), /Let ALPS set it all up for you[\s\S]*£500 \+ VAT, added to your first payment/);
+    await offer.getByRole("button", { name: "Ask ALPS to set it up for you" }).click();
+    await page.getByLabel("Best phone number (optional)").fill("01563 000000");
+    await offer.getByRole("button", { name: "Send request to ALPS" }).click();
+    await offer.getByText(/Request sent on/).waitFor();
+    assert.deepEqual(posts(requests, "/api/setup/assist-request").map(r => r.body), [{ phone: "01563 000000" }]);
     const accept = await page.getByTestId("input-upload-lists").getAttribute("accept");
     assert.ok(accept.includes("image/*") && accept.includes(".pdf") && accept.includes(".xlsx"));
     assert.equal(await page.getByTestId("input-upload-lists").getAttribute("multiple"), "");

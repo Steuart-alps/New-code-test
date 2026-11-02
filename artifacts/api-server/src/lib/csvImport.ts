@@ -67,7 +67,7 @@ export const CSV_IMPORT_COLUMNS: Record<CsvImportType, CsvImportColumn[]> = {
     { key: "trades", label: "Trades", aliases: ["trades", "trade", "services"], max: 1000, kind: "list", example: "Electrical" },
     { key: "gasSafeNumber", label: "Gas Safe number", aliases: ["gassafenumber", "gassafe", "gassafeno", "gassaferegistration"], max: 30, example: "" },
     { key: "publicLiabilityExpiry", label: "Public liability expiry", aliases: ["publicliabilityexpiry", "plexpiry", "publicliability", "insuranceexpiry"], max: 20, kind: "date", example: "31/03/2027" },
-    { key: "notes", label: "Notes", aliases: ["notes", "note", "comments"], max: 2000, example: "" },
+    { key: "notes", label: "Notes", aliases: ["notes", "note", "comments", "whattheydo", "whatdotheydo", "work"], max: 2000, example: "" },
   ],
   // Rows are listed in rotation order: new call points join the end of their
   // site's rotation in the order the file gives them.

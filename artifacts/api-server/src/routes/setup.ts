@@ -10,6 +10,8 @@ import { addMonthsToDay, isCalendarDay } from "../lib/taskSchedule";
 import { getAiStatus } from "../lib/aiAllowance";
 import { escapeHtml, getPublicAppUrl, sendSystemEmail } from "../lib/email";
 import { BUSINESS_TYPES } from "./auth";
+import { findLiveSubscription } from "../lib/billing";
+import { SETUP_ASSIST_SETTING, SETUP_SERVICE_FEE, SETUP_SERVICE_PAID_SETTING } from "../lib/setupService";
 
 // First-run setup wizard (web /setup): business type and nation, first site
 // (created through POST /sites), the team (people added through POST /users),
@@ -24,9 +26,7 @@ const NATIONS = ["england", "wales", "scotland", "northern_ireland", "multi_nati
 const PICKED_MODULES_SETTING = "setup_modules";
 const DEFERRED_SETTING = "setup_deferred_at";
 const TEAM_ALONE_SETTING = "setup_team_alone_at";
-const ASSIST_SETTING = "setup_assist_requested";
-/** The setup service's one-off fee, as the getting-started page shows it. ALPS invoices it. */
-const SETUP_SERVICE_FEE = "£500 + VAT";
+const ASSIST_SETTING = SETUP_ASSIST_SETTING;
 // Superseded service keys are not offered as starting modules.
 const LEGACY_MODULES = new Set(["pooltrack", "swimtrack", "safetrack"]);
 
@@ -364,8 +364,10 @@ router.post("/setup/team-alone", requireAuth, requireClientAdmin, async (req, re
 });
 
 // "Ask ALPS to set it up for you": the getting-started page's offer of a
-// paid setup service (a one-off SETUP_SERVICE_FEE). It only emails ALPS
-// (ADMIN_EMAIL), who invoice it themselves; nothing is charged here. One request per
+// paid setup service (a one-off SETUP_SERVICE_FEE). It emails ALPS
+// (ADMIN_EMAIL); nothing is charged here. The fee joins the business's first
+// payment (the checkout box is ticked for them, lib/setupService.ts); a
+// business that already pays monthly is invoiced by ALPS. One request per
 // business: asking again returns the first request without a second email.
 router.post("/setup/assist-request", requireAuth, requireClientAdmin, async (req, res) => {
   const clientId = getClientId(req);
@@ -387,12 +389,24 @@ router.post("/setup/assist-request", requireAuth, requireClientAdmin, async (req
   }
 
   const user = req.currentUser!;
-  const [client] = await db.select({ name: clientsTable.name, businessType: clientsTable.businessType })
-    .from(clientsTable).where(eq(clientsTable.id, clientId));
+  const [client] = await db.select({
+    name: clientsTable.name, businessType: clientsTable.businessType,
+    stripeCustomerId: clientsTable.stripeCustomerId, trialEndsAt: clientsTable.trialEndsAt,
+  }).from(clientsTable).where(eq(clientsTable.id, clientId));
   const [siteCount] = await db.select({ count: sql<number>`count(*)::int` }).from(sitesTable).where(eq(sitesTable.clientId, clientId));
   const ai = await getAiStatus(clientId).catch(() => null);
   const { phone, notes } = parsed.data;
   const businessName = client?.name ?? `Business ${clientId}`;
+  const paying = client?.stripeCustomerId
+    ? await findLiveSubscription(client.stripeCustomerId).then(Boolean).catch(() => false)
+    : false;
+  const payment = await setting(clientId, SETUP_SERVICE_PAID_SETTING)
+    ? "Already paid with their first payment."
+    : paying
+      ? "They already pay monthly, so it can't join a first payment: please invoice it separately."
+      : client && client.trialEndsAt === null
+        ? "This business has no checkout (free account): agree the fee with them."
+        : "It will be added to their first payment (the box is ticked for them at checkout). You'll get a \"Setup service paid\" email when it's paid.";
   const rows: Array<[string, string]> = [
     ["Business", businessName],
     ["Business type", client?.businessType ?? "Not given yet"],
@@ -400,6 +414,7 @@ router.post("/setup/assist-request", requireAuth, requireClientAdmin, async (req
     ["Phone", phone || "Not given"],
     ["Sites added so far", String(siteCount?.count ?? 0)],
     ["AI features", ai?.active ? "On" : "Off"],
+    ["Payment", payment],
   ];
   const appUrl = getPublicAppUrl().replace(/\/+$/, "");
   try {
@@ -408,14 +423,14 @@ router.post("/setup/assist-request", requireAuth, requireClientAdmin, async (req
       subject: `Setup service request: ${businessName}`,
       html: `
         <h2>Setup service request</h2>
-        <p>This business would like ALPS to enter its initial data for it, for the one-off ${SETUP_SERVICE_FEE} shown in the app. Nothing has been charged in ComplyTrack.</p>
+        <p>This business would like ALPS to enter its initial data for it, for the one-off ${SETUP_SERVICE_FEE} shown in the app.</p>
         <table style="border-collapse: collapse; margin: 16px 0;">
           ${rows.map(([label, value]) => `<tr><td style="padding: 4px 16px 4px 0; color: #64748b;">${label}</td><td style="padding: 4px 0;"><strong>${escapeHtml(value)}</strong></td></tr>`).join("")}
         </table>
         ${notes ? `<h3>Their notes</h3><p style="white-space:pre-wrap">${escapeHtml(notes)}</p>` : ""}
         <p>The business is listed under Clients in <a href="${escapeHtml(appUrl)}">ComplyTrack</a>.</p>
       `,
-      text: `Setup service request\n\nThis business would like ALPS to enter its initial data for it, for the one-off ${SETUP_SERVICE_FEE} shown in the app. Nothing has been charged in ComplyTrack.\n\n${rows.map(([label, value]) => `${label}: ${value}`).join("\n")}${notes ? `\n\nTheir notes:\n${notes}` : ""}\n\nThe business is listed under Clients in ComplyTrack: ${appUrl}`,
+      text: `Setup service request\n\nThis business would like ALPS to enter its initial data for it, for the one-off ${SETUP_SERVICE_FEE} shown in the app.\n\n${rows.map(([label, value]) => `${label}: ${value}`).join("\n")}${notes ? `\n\nTheir notes:\n${notes}` : ""}\n\nThe business is listed under Clients in ComplyTrack: ${appUrl}`,
       idempotencyKey: `setup-assist-${clientId}`,
     });
   } catch (err) {
