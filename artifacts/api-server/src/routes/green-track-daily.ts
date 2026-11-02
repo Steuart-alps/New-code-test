@@ -9,6 +9,7 @@
  * can see. Machines follow GreenTrack's own (tenant-only) scope.
  */
 import { Router, type Request } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { dailyChecklistsTable, sitesTable } from "@workspace/db/schema";
@@ -41,7 +42,7 @@ const createSchema = z.object({
 });
 
 // A checklist keeps its site and day.
-const updateSchema = createSchema.partial().omit({ checklistType: true, checkDate: true, siteId: true });
+const updateSchema = partialUpdate(createSchema).omit({ checklistType: true, checkDate: true, siteId: true });
 
 function visibleSiteIds(clientId: number, departmentId: number) {
   return db.select({ id: sitesTable.id }).from(sitesTable)

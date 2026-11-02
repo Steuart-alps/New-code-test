@@ -7,6 +7,8 @@ servers:
   - url: /api
     description: Base API path
 tags:
+  - name: tree-track
+    description: TreeTrack tree register
   - name: record-signatures
     description: Drawn signatures on recorded checks
   - name: billing
@@ -2816,6 +2818,100 @@ paths:
               schema:
                 $ref: "#/components/schemas/FireCallPointImportResult"
 
+  /imports/legionella-outlets/template:
+    get:
+      operationId: getLegionellaOutletImportTemplate
+      tags: [legionella]
+      summary: Download the CSV template for uploading LegionellaTrack outlets, tanks and calorifiers (managers)
+      responses:
+        "200":
+          description: CSV template
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /imports/legionella-outlets:
+    post:
+      operationId: importLegionellaOutlets
+      tags: [legionella]
+      summary: Preview or import a spreadsheet of LegionellaTrack outlets, tanks and calorifiers (managers)
+      description: >-
+        The browser sends the spreadsheet's header row and cell text: Name,
+        Type (Hot, Cold, TMV, Little used, Cold water tank or Calorifier),
+        Location and Site. Outlets join the site's outlet list; cold water
+        tanks and calorifiers join the equipment list, where tank checks name
+        them. With preview true (the default) nothing is written; otherwise
+        every row is written in one go, only when no row has an error.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FireCallPointImportRequest"
+      responses:
+        "200":
+          description: What each row did, or would do
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+        "400":
+          description: The file is missing a required column or has no rows
+        "409":
+          description: Nothing was imported because some rows have errors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+
+  /imports/allergen-ingredients/template:
+    get:
+      operationId: getAllergenIngredientImportTemplate
+      tags: [kitchen-allergens]
+      summary: Download the CSV template for importing suppliers' allergen information (managers)
+      responses:
+        "200":
+          description: CSV template
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /imports/allergen-ingredients:
+    post:
+      operationId: importAllergenIngredients
+      tags: [kitchen-allergens]
+      summary: Preview or import suppliers' allergen information as KitchenTrack ingredients (managers)
+      description: >-
+        The browser sends the spreadsheet's header row and cell text: a column
+        per allergen (Y, N or May) or Contains and May contain lists. With
+        preview true (the default) nothing is written; otherwise every row is
+        written in one go, only when no row has an error. Rows match existing
+        ingredients by site and name; changed allergens update every dish
+        using the ingredient, each with a change log entry.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FireCallPointImportRequest"
+      responses:
+        "200":
+          description: What each row did, or would do
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+        "400":
+          description: The file has no allergen columns, no Ingredient column, or no rows
+        "409":
+          description: Nothing was imported because some rows have errors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+
   /billing/ai:
     get:
       operationId: getAiAddon
@@ -2919,7 +3015,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster]
+            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster, allergen-ingredients, legionella-outlets]
       responses:
         "200":
           description: Reading status and the sites the caller can import into
@@ -2938,7 +3034,8 @@ paths:
       description: >-
         Claude reads the file and returns rows in the import's own columns
         (RoomTrack rooms, contractors, FireTrack call points, GreenTrack
-        equipment or the staff roster). Nothing is saved: the browser sends
+        equipment, the staff roster or KitchenTrack suppliers' allergen
+        information). Nothing is saved: the browser sends
         the rows through the import's usual preview. The file is not stored.
         Off until the server has an Anthropic API key; readings share the
         business's monthly number with the PAT register reading.
@@ -2948,7 +3045,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster]
+            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster, allergen-ingredients, legionella-outlets]
       requestBody:
         required: true
         content:
@@ -3340,6 +3437,106 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HotTubCheck"
+
+  /tree-track/trees:
+    get:
+      operationId: listTreeTrackTrees
+      tags: [tree-track]
+      summary: The tree register, each tree with its last inspection and when it is next due
+      parameters:
+        - name: siteId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: includeRemoved
+          in: query
+          required: false
+          description: Include trees marked felled or removed
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Trees
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TreeTrackTreeWithStatus"
+    post:
+      operationId: createTreeTrackTree
+      tags: [tree-track]
+      summary: Add a tree to the register (Owners and consultants)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TreeTrackTreeInput"
+      responses:
+        "201":
+          description: Saved tree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TreeTrackTree"
+        "400":
+          description: Invalid tree, site or what3words address
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /tree-track/trees/{id}:
+    put:
+      operationId: updateTreeTrackTree
+      tags: [tree-track]
+      summary: Change a tree on the register, or mark it felled or removed (Owners and consultants)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TreeTrackTreeUpdate"
+      responses:
+        "200":
+          description: Updated tree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TreeTrackTree"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteTreeTrackTree
+      tags: [tree-track]
+      summary: Delete a tree added by mistake; one with inspections is marked felled instead (Owners and consultants)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "409":
+          description: The tree has inspections
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /bike-track/config:
     get:
@@ -4777,6 +4974,42 @@ paths:
                 $ref: "#/components/schemas/FoodSafetyMonthlySummary"
         "400":
           description: Invalid year, month, or site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /food-safety/month-summary:
+    get:
+      operationId: getFoodSafetyMonthSummary
+      tags: [food-safety]
+      summary: KitchenTrack month summary for Owners and Managers
+      description: >-
+        For every site the user can see: diary days recorded, in draft, closed and missed
+        (counted up to yesterday, from the site's first diary record), and the KitchenTrack
+        actions raised in the month and still open.
+      parameters:
+        - in: query
+          name: month
+          description: The month as YYYY-MM. Defaults to the business's current month.
+          schema:
+            type: string
+            pattern: "^[0-9]{4}-[0-9]{2}$"
+      responses:
+        "200":
+          description: The month's summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KitchenMonthSummary"
+        "400":
+          description: Invalid month
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Only Owners and Managers see the summary
           content:
             application/json:
               schema:
@@ -7493,6 +7726,183 @@ components:
           maxItems: 20
           items:
             $ref: "#/components/schemas/GreenTrackApplicationProductInput"
+    TreeTrackTreeInput:
+      type: object
+      required: [ref]
+      properties:
+        ref:
+          type: string
+          description: Tag number, name or group, such as T12
+        species:
+          type: string
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+          description: Where the tree is, in words
+        what3words:
+          type: string
+          nullable: true
+          description: what3words address, stored as word.word.word
+        latitude:
+          type: number
+          nullable: true
+        longitude:
+          type: number
+          nullable: true
+        riskZone:
+          type: string
+          enum: [high, medium, low]
+          description: How busy the area under the tree is
+        inspectionIntervalMonths:
+          type: integer
+          minimum: 1
+          maximum: 60
+        notes:
+          type: string
+          nullable: true
+        removedAt:
+          type: string
+          format: date
+          nullable: true
+          description: Day the tree was felled or removed
+    TreeTrackTreeUpdate:
+      type: object
+      properties:
+        ref:
+          type: string
+          description: Tag number, name or group, such as T12
+        species:
+          type: string
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+          description: Where the tree is, in words
+        what3words:
+          type: string
+          nullable: true
+          description: what3words address, stored as word.word.word
+        latitude:
+          type: number
+          nullable: true
+        longitude:
+          type: number
+          nullable: true
+        riskZone:
+          type: string
+          enum: [high, medium, low]
+          description: How busy the area under the tree is
+        inspectionIntervalMonths:
+          type: integer
+          minimum: 1
+          maximum: 60
+        notes:
+          type: string
+          nullable: true
+        removedAt:
+          type: string
+          format: date
+          nullable: true
+          description: Day the tree was felled or removed
+    TreeTrackTree:
+      type: object
+      required: [id, clientId, ref, riskZone, inspectionIntervalMonths, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        ref:
+          type: string
+          description: Tag number, name or group, such as T12
+        species:
+          type: string
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+          description: Where the tree is, in words
+        what3words:
+          type: string
+          nullable: true
+          description: what3words address, stored as word.word.word
+        latitude:
+          type: number
+          nullable: true
+        longitude:
+          type: number
+          nullable: true
+        riskZone:
+          type: string
+          enum: [high, medium, low]
+          description: How busy the area under the tree is
+        inspectionIntervalMonths:
+          type: integer
+          minimum: 1
+          maximum: 60
+        notes:
+          type: string
+          nullable: true
+        removedAt:
+          type: string
+          format: date
+          nullable: true
+          description: Day the tree was felled or removed
+        createdBy:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    TreeTrackTreeWithStatus:
+      allOf:
+        - $ref: "#/components/schemas/TreeTrackTree"
+        - type: object
+          required: [status]
+          properties:
+            lastInspected:
+              type: string
+              format: date
+              nullable: true
+              description: Last routine inspection (visual, detailed or risk assessment)
+            lastCheckDate:
+              type: string
+              format: date
+              nullable: true
+            lastCheckType:
+              type: string
+              nullable: true
+            openIssue:
+              type: object
+              nullable: true
+              description: The latest inspection found a problem
+              properties:
+                checkDate:
+                  type: string
+                  format: date
+                severity:
+                  type: string
+                  nullable: true
+            nextDue:
+              type: string
+              format: date
+              nullable: true
+            status:
+              type: string
+              enum: [ok, due_soon, overdue, never]
     GreenTrackHourReadingInput:
       type: object
       required: [machineId, readingDate, hours]
@@ -11918,6 +12328,89 @@ components:
             type: string
             format: date
 
+    KitchenMonthSummarySite:
+      type: object
+      required: [siteId, siteName, startedOn, daysCounted, recordedDays, draftDays, closedDays, missedDays, missedDates, failedReadings, actionsRaised, actionsOpen]
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
+        startedOn:
+          type: string
+          format: date
+          nullable: true
+          description: The site's first diary record; days before it are not counted.
+        daysCounted:
+          type: integer
+        recordedDays:
+          type: integer
+        draftDays:
+          type: integer
+        closedDays:
+          type: integer
+        missedDays:
+          type: integer
+        missedDates:
+          type: array
+          items:
+            type: string
+            format: date
+        failedReadings:
+          type: integer
+        actionsRaised:
+          type: integer
+        actionsOpen:
+          type: integer
+
+    KitchenMonthSummary:
+      type: object
+      required: [month, from, through, today, sites, totals]
+      properties:
+        month:
+          type: string
+        from:
+          type: string
+          format: date
+        through:
+          type: string
+          format: date
+          nullable: true
+          description: The last day counted (yesterday, or the month's last day). Null when no day has finished yet.
+        today:
+          type: string
+          format: date
+        sites:
+          type: array
+          items:
+            $ref: "#/components/schemas/KitchenMonthSummarySite"
+        totals:
+          type: object
+          required: [daysCounted, recordedDays, draftDays, closedDays, missedDays, failedReadings, actionsRaised, actionsResolved, actionsOpen, actionsOverdue]
+          properties:
+            daysCounted:
+              type: integer
+            recordedDays:
+              type: integer
+            draftDays:
+              type: integer
+            closedDays:
+              type: integer
+            missedDays:
+              type: integer
+            failedReadings:
+              type: integer
+            actionsRaised:
+              type: integer
+            actionsResolved:
+              type: integer
+            actionsOpen:
+              type: integer
+            actionsOverdue:
+              type: integer
+
     FoodSafetyMonthlySummary:
       type: object
       required:
@@ -12229,6 +12722,16 @@ components:
         performedBy:
           type: string
           nullable: true
+        equipmentId:
+          type: integer
+          nullable: true
+          description: The named cold water tank or calorifier (equipment list item) the check was made on.
+        findings:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+          description: Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
         createdAt:
           type: string
           format: date-time
@@ -12281,6 +12784,12 @@ components:
           type: integer
           nullable: true
           description: A cold water tank or calorifier on the equipment list (its site must match siteId).
+        findings:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+          description: Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
       required:
         - checkType
         - checkDate
@@ -12310,6 +12819,16 @@ components:
         performedBy:
           type: string
           nullable: true
+        equipmentId:
+          type: integer
+          nullable: true
+          description: Move the check to another named tank or calorifier at the same site.
+        findings:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+          description: Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
 
     LegionellaStatus:
       type: object

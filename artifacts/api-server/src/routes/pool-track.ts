@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql, eq, and } from "drizzle-orm";
@@ -48,7 +49,7 @@ const createSchema = z.object({
   notes: z.string().max(2000).optional().nullable(),
 });
 
-const updateSchema = createSchema.partial().omit({ checkType: true });
+const updateSchema = partialUpdate(createSchema).omit({ checkType: true });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

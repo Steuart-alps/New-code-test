@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { hotTubChecksTable, sitesTable, HOT_TUB_CHECK_TYPES, trackControlProfilesTable, auditEventsTable } from "@workspace/db/schema";
@@ -123,7 +124,7 @@ router.put("/tubs/:id", requireAuth, denyViewers, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-  const parsed = tubSchema.partial().safeParse(req.body);
+  const parsed = partialUpdate(tubSchema).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const d = parsed.data;
   const existingResult = await db.execute(sql`
@@ -173,7 +174,7 @@ router.delete("/tubs/:id", requireAuth, denyViewers, async (req, res) => {
   res.status(204).end();
 });
 
-const updateSchema = createSchema.partial().omit({ checkType: true });
+const updateSchema = partialUpdate(createSchema).omit({ checkType: true });
 // Creation only: the mobile outbox's device entry ID (see clientEntryReplay).
 const postSchema = createSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
@@ -226,6 +227,22 @@ function hotTubBreach(data: { phValue?: number | null; sanitiserLevel?: number |
   }
   if (data.temperature != null && data.temperature > r.temperature.max) breached.temperature = { observed: data.temperature, range: r.temperature };
   return Object.keys(breached).length ? breached : null;
+}
+/**
+ * The ranges a new check would breach, so a fail the server finds is asked
+ * about before saving (lib/correctiveActions.ts).
+ */
+export async function hotTubBreachForNewCheck(clientId: number, body: unknown) {
+  const parsed = postSchema.safeParse(body);
+  if (!parsed.success) return null;
+  const data = parsed.data;
+  let siteId = data.siteId ?? null;
+  if (data.hotTubId) {
+    const tub = ((await db.execute(sql`SELECT site_id FROM hot_tubs WHERE id = ${data.hotTubId} AND client_id = ${clientId} LIMIT 1`)).rows ?? [])[0] as { site_id: number | null } | undefined;
+    if (tub && siteId == null && tub.site_id != null) siteId = Number(tub.site_id);
+  }
+  const profile = siteId == null ? null : await getHotTubProfile(clientId, siteId);
+  return hotTubBreach(data, data.checkType, profile) as Record<string, { observed: number; range: { min?: number; max?: number } }> | null;
 }
 async function ensureHotTubAction(tx: any, clientId: number, checkId: number, breach: unknown, userId: number | null, ownerName: string | null) {
   await tx.execute(sql`INSERT INTO compliance_actions

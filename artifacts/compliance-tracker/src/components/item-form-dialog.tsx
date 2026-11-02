@@ -42,7 +42,8 @@ const formSchema = z.object({
   notes: z.string().optional(),
 });
 
-type FormValues = z.infer<typeof formSchema>;
+type FormValues = z.output<typeof formSchema>;
+type FormInput = z.input<typeof formSchema>;
 
 export function ItemFormDialog({
   isOpen,
@@ -69,7 +70,7 @@ export function ItemFormDialog({
   // like the "Mark done" dialog; the next due date is counted from it.
   const [completedDay, setCompletedDay] = useState(localToday());
   const [assignee, setAssignee] = useState<AssigneeValue>(emptyAssignee);
-  const form = useForm<FormValues>({
+  const form = useForm<FormInput, unknown, FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       title: "", description: "", status: "pending", priority: "medium",

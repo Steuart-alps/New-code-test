@@ -162,7 +162,7 @@ router.patch("/feedback/:id", requireAuth, denyViewers, requireClientAdmin, asyn
   const clientId = getClientId(req);
   const id = reportIdParam.safeParse(req.params.id);
   const parsed = UpdateFeedbackReportBody.strict()
-    .refine(body => Number.isInteger(body.expectedRevision) && body.expectedRevision <= 2147483647)
+    .refine((body: { expectedRevision: number }) => Number.isInteger(body.expectedRevision) && body.expectedRevision <= 2147483647)
     .safeParse(req.body);
   if (!clientId) {
     res.status(400).json({ error: "Select a client to review feedback." });

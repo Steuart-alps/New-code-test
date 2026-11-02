@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sitesTable } from "@workspace/db/schema";
@@ -186,7 +187,7 @@ router.put("/weekly/:id", requireAuth, denyViewers, async (req, res) => {
   const existing = await fetchWeeklyById(id, clientId);
   if (!existing) return res.status(404).json({ error: "Not found" });
 
-  const parsed = weeklyBody.partial().safeParse(req.body);
+  const parsed = partialUpdate(weeklyBody).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
   const { checks, deviations, additional, managerSignature, submittedAt, siteId } = parsed.data;
@@ -328,7 +329,7 @@ router.put("/probe/:id", requireAuth, denyViewers, async (req, res) => {
   const existing = await fetchProbeById(id, clientId);
   if (!existing) return res.status(404).json({ error: "Not found" });
 
-  const parsed = probeBody.partial().safeParse(req.body);
+  const parsed = partialUpdate(probeBody).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
   const { probes, overallResult, checkedBy, checkedByRosterId, signature, notes, submittedAt, siteId } = parsed.data;

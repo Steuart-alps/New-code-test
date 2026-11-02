@@ -74,7 +74,10 @@ export default function AllergensPage() {
   const { toast } = useToast();
   const { siteName } = useRegisterSites();
 
-  const [tab, setTab] = useState("dishes");
+  const [tab, setTab] = useState(() => {
+    const asked = new URLSearchParams(window.location.search).get("tab");
+    return asked === "ingredients" || asked === "charts" ? asked : "dishes";
+  });
   const [siteFilter, setSiteFilter] = useSiteFilter("all");
   const workingSiteId = useWorkingSiteId();
   const [q, setQ] = useState("");
