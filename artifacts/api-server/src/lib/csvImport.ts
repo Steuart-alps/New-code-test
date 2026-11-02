@@ -1,7 +1,7 @@
 /**
  * Register CSV imports (PATTrack appliances, RoomTrack rooms, contractors,
  * FireTrack call points, KitchenTrack ingredients from suppliers' allergen
- * information, LegionellaTrack outlets and tanks).
+ * information, LegionellaTrack outlets and tanks, compliance checks).
  *
  * Mirrors the staff-roster reconciliation: the browser reads the spreadsheet
  * (Excel or CSV) and sends its header row and cell text; the API maps the
@@ -14,7 +14,7 @@ import { PAT_APPLIANCE_TYPES } from "@workspace/db/schema";
 import { ALLERGEN_KEYS } from "./allergenRecipes";
 import { ALLERGEN_COLUMN_LABELS, ALLERGEN_COLUMN_PREFIXES, allergensInText, parseAllergenCell } from "./allergenImport";
 
-export const CSV_IMPORT_TYPES = ["pat-appliances", "room-track-rooms", "contractors", "fire-call-points", "allergen-ingredients", "legionella-outlets"] as const;
+export const CSV_IMPORT_TYPES = ["pat-appliances", "room-track-rooms", "contractors", "fire-call-points", "allergen-ingredients", "legionella-outlets", "compliance-checks"] as const;
 export type CsvImportType = (typeof CSV_IMPORT_TYPES)[number];
 
 export function isCsvImportType(value: unknown): value is CsvImportType {
@@ -100,6 +100,22 @@ export const CSV_IMPORT_COLUMNS: Record<CsvImportType, CsvImportColumn[]> = {
     { key: "location", label: "Location", aliases: ["location", "where", "area", "room", "position", "description"], max: 200, example: "Clubhouse ground floor" },
     { key: "site", label: "Site", aliases: ["site", "sitename"], max: 200, example: "" },
   ],
+  // A business's own compliance checklist, as most keep it: one line per
+  // contractor service (lib/complianceCheckImport.ts). "Last done" is read
+  // leniently: text that is not a date ("5 minute function test") is kept as
+  // a note. A "Status" or days-left column is not needed and is left out.
+  "compliance-checks": [
+    { key: "title", label: "Check", aliases: ["check", "checkname", "compliancecheck", "item", "itemname", "title", "task", "inspection", "service", "name"], required: true, max: 300, example: "Fire Alarm Maintenance" },
+    { key: "repeat", label: "Repeat", aliases: ["repeat", "repeatevery", "timeperiod", "frequency", "interval", "period", "howoften", "every", "repeatmonths", "frequencymonths"], max: 100, example: "6 monthly" },
+    { key: "lastDone", label: "Last done", aliases: ["lastdone", "lastcompleted", "completed", "datecompleted", "datelastcompleted", "lastservice", "lastservicedate", "lastinspection", "lastinspected", "lastchecked", "lastvisit", "lastdate", "done"], max: 200, example: "28/09/2026" },
+    { key: "dueDate", label: "Next due", aliases: ["nextdue", "nextduedate", "duedate", "due", "nextdate", "renewaldate", "expirydate", "expiry"], max: 20, kind: "date", example: "28/03/2027" },
+    { key: "contractor", label: "Contractor", aliases: ["contractor", "contractorname", "contractorcompany", "company", "supplier", "provider", "carriedoutby", "engineer"], max: 200, example: "Acme Fire" },
+    { key: "phone", label: "Contractor phone", aliases: ["contractorphone", "telephonenumber", "telephone", "phone", "phonenumber", "tel", "contactnumber", "mobile"], max: 50, example: "" },
+    { key: "email", label: "Contractor email", aliases: ["contractoremail", "emailaddress", "email", "mail"], max: 254, kind: "email", example: "" },
+    { key: "site", label: "Site", aliases: ["site", "sitename"], max: 200, example: "" },
+    { key: "category", label: "Category", aliases: ["category", "section", "area"], max: 100, example: "" },
+    { key: "notes", label: "Notes", aliases: ["notes", "note", "comments", "comment"], max: 2000, example: "" },
+  ],
 };
 
 export type LegionellaListType = "hot" | "cold" | "tmv" | "little_used" | "cold_water_tank" | "calorifier";
@@ -129,6 +145,7 @@ export const CSV_IMPORT_KEYS: Record<CsvImportType, string> = {
   "fire-call-points": "Site + call point",
   "allergen-ingredients": "Site + ingredient name",
   "legionella-outlets": "Site + name (outlets), or site + name + type (tanks and calorifiers)",
+  "compliance-checks": "Check name (matched to ComplyTrack's own check where there is one) + site",
 };
 
 export const normaliseHeader = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -158,6 +175,18 @@ export interface MappedImport {
 /** Map spreadsheet headers to columns and validate each cell's shape. */
 export function mapImportRows(type: CsvImportType, input: CsvImportInput): MappedImport {
   const columns = CSV_IMPORT_COLUMNS[type];
+  // A title above the headings ("Compliance Checklist", then the headings on
+  // row 3): use the first of the top rows that has every required heading.
+  const required = columns.filter((column) => column.required);
+  const hasRequired = (headers: string[]) => required.every((column) => headers.some((header) => column.aliases.includes(normaliseHeader(String(header ?? "")))));
+  let skipped = 0;
+  if (!hasRequired(input.headers)) {
+    const found = input.rows.slice(0, 10).findIndex((row) => hasRequired(row));
+    if (found >= 0) {
+      skipped = found + 1;
+      input = { headers: input.rows[found].map((header) => String(header ?? "")), rows: input.rows.slice(found + 1) };
+    }
+  }
   const fileErrors: string[] = [];
   const headerIndex = new Map<string, number>();
   const ignoredHeaders: string[] = [];
@@ -184,7 +213,9 @@ export function mapImportRows(type: CsvImportType, input: CsvImportInput): Mappe
 
   const rows: MappedRow[] = [];
   input.rows.forEach((cells, index) => {
-    if (cells.every((cell) => !String(cell ?? "").trim())) return; // blank spreadsheet line
+    // A blank spreadsheet line, or one with text only in columns not imported
+    // (a "Status" formula column carried down past the last check).
+    if ([...headerIndex.values()].every((position) => !String(cells[position] ?? "").trim())) return;
     const values: Record<string, string | null> = {};
     const errors: string[] = [];
     for (const column of columns) {
@@ -229,7 +260,7 @@ export function mapImportRows(type: CsvImportType, input: CsvImportInput): Mappe
       if (match) values.applianceType = match;
       else errors.push(`Appliance type "${values.applianceType}" is not recognised (use one of: ${PAT_APPLIANCE_TYPES.join(", ")})`);
     }
-    if (type === "contractors" && values.email) values.email = values.email.toLowerCase();
+    if ((type === "contractors" || type === "compliance-checks") && values.email) values.email = values.email.toLowerCase();
     if (type === "allergen-ingredients") {
       // One "contains" and one "may contain" list from the matrix and the
       // list columns together, in the regulated order.
@@ -251,7 +282,7 @@ export function mapImportRows(type: CsvImportType, input: CsvImportInput): Mappe
       values.contains = ALLERGEN_KEYS.filter((key) => contains.has(key)).join(";");
       values.mayContain = ALLERGEN_KEYS.filter((key) => mayContain.has(key) && !contains.has(key)).join(";");
     }
-    rows.push({ row: index + 2, values, errors });
+    rows.push({ row: index + skipped + 2, values, errors });
   });
   return { rows, fileErrors, ignoredHeaders };
 }

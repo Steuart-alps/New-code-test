@@ -5,7 +5,7 @@
  * sorted by AI instead (POST /imports/sort-list).
  */
 
-export type ListKind = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "greentrack-equipment" | "staff-roster" | "legionella-outlets";
+export type ListKind = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "greentrack-equipment" | "staff-roster" | "legionella-outlets" | "compliance-checks";
 
 /**
  * The tab each list has in the setup wizard's "What we need from you"
@@ -72,6 +72,14 @@ export const LIST_KINDS: Record<ListKind, { label: string; noun: string; service
     headings: ["outletortank", "outlet", "outletname", "outlettype", "sentinel", "sentineloutlet", "outletref", "tank", "tankname", "hotorcold", "hotcold"],
     fileName: /outlets?|sentinel|legionella|water|tanks?/i,
   },
+  // A business's own compliance checklist (spreadsheets only: no AI reading).
+  "compliance-checks": {
+    label: "Compliance checks",
+    noun: "compliance checks",
+    service: null,
+    headings: ["item", "check", "checkname", "compliancecheck", "timeperiod", "frequency", "repeat", "repeatevery", "lastcompleted", "lastdone", "lastservice", "duedate", "nextdue", "nextduedate"],
+    fileName: /compliance|checklist|checks/i,
+  },
 };
 
 const normalise = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -99,9 +107,25 @@ export function guessListKind(headers: string[], fileName: string, kinds: ListKi
   return best && best.score >= 2 && best.score > (next?.score ?? 0) ? best.kind : null;
 }
 
+/** Kinds that read photos and PDFs (with AI); compliance checks come from spreadsheets only. */
+export const photoListKinds = (kinds: ListKind[]) => kinds.filter(kind => kind !== "compliance-checks");
+
+/**
+ * guessListKind for a sheet whose headings may sit below a title ("Compliance
+ * Checklist" on row 1, headings on row 3): the first of the top rows that
+ * decides it.
+ */
+export function guessListKindFromSheet(sheet: { headers: string[]; rows: string[][] }, fileName: string, kinds: ListKind[]): ListKind | null {
+  for (const headers of [sheet.headers, ...sheet.rows.slice(0, 10)]) {
+    const kind = guessListKind(headers.map(header => String(header ?? "")), fileName, kinds);
+    if (kind) return kind;
+  }
+  return null;
+}
+
 /** The list a photo or PDF most likely is from its file name alone, when only one kind matches. */
 export function guessListKindFromName(fileName: string, kinds: ListKind[]): ListKind | null {
   const name = fileName.replace(/[_.-]+/g, " ");
-  const matches = kinds.filter(kind => LIST_KINDS[kind].fileName.test(name));
+  const matches = photoListKinds(kinds).filter(kind => LIST_KINDS[kind].fileName.test(name));
   return matches.length === 1 ? matches[0] : null;
 }

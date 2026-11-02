@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { getApiErrorMessage } from "@/lib/api";
-import { LIST_KINDS, WORKBOOK_TABS, availableListKinds, guessListKind, guessListKindFromName, type ListKind } from "@/lib/list-kinds";
+import { LIST_KINDS, WORKBOOK_TABS, availableListKinds, guessListKindFromName, guessListKindFromSheet, type ListKind } from "@/lib/list-kinds";
 import { readSpreadsheet, spreadsheetTabNames } from "@/lib/spreadsheet";
 import { cn } from "@/lib/utils";
 
@@ -40,6 +40,7 @@ const CSV_IMPORTS: Partial<Record<ListKind, ImportCsvType>> = {
   contractors: "contractors",
   "fire-call-points": "fire-call-points",
   "legionella-outlets": "legionella-outlets",
+  "compliance-checks": "compliance-checks",
 };
 
 /** The page body, without the app frame (also used by its browser test). */
@@ -74,7 +75,7 @@ export function UploadLists() {
         const tabs = await spreadsheetTabNames(file);
         const workbookKind = kinds.find(candidate => tabs.some(tab => tab.trim().toLowerCase() === WORKBOOK_TABS[candidate]?.toLowerCase()));
         const sheet = await readSpreadsheet(file, workbookKind ? { sheet: WORKBOOK_TABS[workbookKind] } : {});
-        const kind = workbookKind ?? guessListKind(sheet.headers, file.name, kinds);
+        const kind = workbookKind ?? guessListKindFromSheet(sheet, file.name, kinds);
         update(item.id, kind
           ? { kind, state: "ready", note: `${sheet.rows.length} row${sheet.rows.length === 1 ? "" : "s"}, sorted by its column headings` }
           : { state: "choose", note: "Its column headings don't say which list it is. Choose one." });
