@@ -6552,6 +6552,14 @@ async function migrateCertificateInbox() {
   `);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_certificate_upload_links_token" ON "certificate_upload_links" ("token_hash")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_certificate_upload_links_item" ON "certificate_upload_links" ("client_id", "item_id")`);
+  // Replies to contractor emails: the link's code tags the Reply-To, and a
+  // received reply records which link (and so which check) it answers.
+  await db.execute(sql`ALTER TABLE "certificate_upload_links" ADD COLUMN IF NOT EXISTS "reply_ref" text`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_certificate_upload_links_reply_ref" ON "certificate_upload_links" ("reply_ref")`);
+  await db.execute(sql`
+    ALTER TABLE "certificate_inbox_emails" ADD COLUMN IF NOT EXISTS "upload_link_id" integer
+      REFERENCES "certificate_upload_links"("id") ON DELETE SET NULL
+  `);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "certificate_inbox_items" (
       "id" serial PRIMARY KEY,
