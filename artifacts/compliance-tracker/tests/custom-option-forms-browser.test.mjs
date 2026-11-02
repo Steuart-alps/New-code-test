@@ -241,6 +241,8 @@ async function routeApi(route) {
     return write(200, { ok: true });
   }
   if (method === "POST" && path === "/api/analytics/events") return route.fulfill({ status: 204 });
+  // Each inspection row and the edit dialog show the record's photos and videos.
+  if (method === "GET" && path === "/api/photos") return json(route, []);
   // The Contractors page's "Contractor visits" card (#155).
   if (method === "GET" && path === "/api/contractor-visits") return json(route, { types: [], visits: [] });
   // The Contractors page's "Certificates outstanding" card and the red check badge.

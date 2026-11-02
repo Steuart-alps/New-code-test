@@ -329,6 +329,7 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
               <Button variant="outline" size="sm" onClick={() => save(false)} disabled={saving} className="flex-1">{saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save draft"}</Button>
               <Button size="sm" onClick={() => save(true)} disabled={saving || !progress.ready} className="flex-1">Submit checklist</Button>
             </div>
+            {!existing?.id && <p className="text-xs text-muted-foreground">Save a draft to add photos or videos.</p>}
           </div>
         )}
         {submitted && draft?.get() && hasAnswers(draft.get()!.items) && (

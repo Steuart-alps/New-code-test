@@ -76,5 +76,9 @@ export async function signUpTenant(context, { appUrl, label, email, password, na
   const me = await signIn(page, label, email, password);
   const clientId = me?.user?.clientId;
   assert.ok(Number.isInteger(clientId), `${label} needs its own client`);
+  // "Only Owners record for now", so the setup step's "Add your team first"
+  // gate doesn't stand in front of the track pages.
+  const alone = await api(page, "POST", "/setup/team-alone");
+  assert.equal(alone.status, 200, `${label} owners-only recording: ${alone.text}`);
   return { page, clientId };
 }
