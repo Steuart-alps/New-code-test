@@ -14,7 +14,11 @@ import { chromium } from "@playwright/test";
 //     against the version the edits were made on;
 //   - a clean form shows the newer version, and a saved form is clean again;
 //   - the completeness calendar shows an organisation closure as closed, not
-//     missing, and the site scope does not inherit it.
+//     missing, and the site scope does not inherit it;
+//   - cooking opens with three lines ready, empty lines are not saved, there
+//     is no whole-day corrective actions box, and a failed line's own
+//     corrective action is marked as needed.
+// The edits use the first cooking line's corrective action ("the note").
 // The /api/food-safety fixture is stateful and mirrors
 // artifacts/api-server/src/routes/food-safety.ts.
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
@@ -187,25 +191,28 @@ function captureToasts() {
 
 // ─── Page helpers ────────────────────────────────────────────────────────────
 
-const correctivesBox = page => page.getByPlaceholder(/Fridge 2 running warm/);
+const NOTE_LABEL = "Cooking line 1 corrective action";
+const correctivesBox = page => page.getByLabel(NOTE_LABEL, { exact: true });
+/** Another device's entry: one cooking line holding only the note. */
+const cookingNote = text => ({ hotTemperature: [{ item: "", timeStart: "", timeFinish: "", coreTemp: "", correctiveAction: text }] });
 const dateInput = page => page.locator("input[type='date']");
 const siteSelect = page => page.locator("select").filter({ has: page.locator("option", { hasText: "Organisation diary" }) });
 const discardDialog = page => page.getByRole("alertdialog", { name: "Discard unsaved changes?" });
 
 async function waitForDiary(page, { date, unit, correctives }) {
-  await page.waitForFunction(({ date, unit, correctives }) => {
+  await page.waitForFunction(({ date, unit, correctives, label }) => {
     const input = document.querySelector("input[type='date']");
-    const box = [...document.querySelectorAll("textarea")].find(t => /Fridge 2 running warm/.test(t.placeholder));
+    const box = document.querySelector(`input[aria-label="${label}"]`);
     const units = [...document.querySelectorAll("input")].map(i => i.value);
     return input?.value === date && box && box.value === correctives && (!unit || units.includes(unit));
-  }, { date, unit, correctives });
+  }, { date, unit, correctives, label: NOTE_LABEL });
 }
-const diaryState = page => page.evaluate(() => ({
+const diaryState = page => page.evaluate(label => ({
   date: document.querySelector("input[type='date']")?.value,
   site: [...document.querySelectorAll("select")].find(s => [...s.options].some(o => o.text === "Organisation diary"))?.value,
-  correctives: [...document.querySelectorAll("textarea")].find(t => /Fridge 2 running warm/.test(t.placeholder))?.value,
+  correctives: document.querySelector(`input[aria-label="${label}"]`)?.value,
   units: [...document.querySelectorAll("input")].map(i => i.value),
-}));
+}), NOTE_LABEL);
 async function refetchDiary(page) {
   await page.evaluate(() => window.__queryClient.invalidateQueries());
   // Let the refetch land and any hydration effect run.
@@ -231,6 +238,12 @@ try {
   await page.route("**/api/**", routeApi);
 
   await page.goto(`${baseUrl}/tests/kitchen-diary-harness.html`, { waitUntil: "domcontentloaded" });
+  // The business has one site, so the diary opens on it (the user's working
+  // site); the organisation diary is still a pick away.
+  await waitForDiary(page, { date: TODAY, unit: "Site Fridge", correctives: "" });
+  assert.equal((await diaryState(page)).site, String(SITE.id), "the diary opens on the working site");
+  checks.push("site: the diary opens on the user's working site");
+  await siteSelect(page).selectOption("");
   await waitForDiary(page, { date: TODAY, unit: "Org Fridge", correctives: "" });
 
   // ── A closed day is labelled closed, never missing ──
@@ -297,7 +310,7 @@ try {
 
   // ── A late response (another device creates the day) keeps unsaved edits ──
   await correctivesBox(page).fill("Site walk-in fan cleaned");
-  serverWrite(SITE.id, TODAY, { correctives: "Entered on the phone" });
+  serverWrite(SITE.id, TODAY, cookingNote("Entered on the phone"));
   await refetchDiary(page);
   state = await diaryState(page);
   assert.equal(state.correctives, "Site walk-in fan cleaned", "a refetched record does not overwrite unsaved edits");
@@ -313,14 +326,14 @@ try {
   checks.push("late record: unsaved edits stay; the save is refused, not applied over the other entry");
 
   // ── A clean form shows newer server data; a dirty one keeps its edits ──
-  serverWrite(SITE.id, TODAY, { correctives: "Updated on the phone" });
+  serverWrite(SITE.id, TODAY, cookingNote("Updated on the phone"));
   await refetchDiary(page);
   await waitForDiary(page, { date: TODAY, unit: null, correctives: "Updated on the phone" });
   checks.push("refetch: a clean form shows the newer version");
 
   const baseVersion = records.get(scopeKey(SITE.id, TODAY)).updatedAt;
   await correctivesBox(page).fill("Chef's own note");
-  serverWrite(SITE.id, TODAY, { correctives: "Phone again" });
+  serverWrite(SITE.id, TODAY, cookingNote("Phone again"));
   await refetchDiary(page);
   state = await diaryState(page);
   assert.equal(state.correctives, "Chef's own note", "a refetched update does not overwrite unsaved edits");
@@ -337,7 +350,8 @@ try {
   before = await toastCount(page);
   await page.getByRole("button", { name: "Save Draft" }).click();
   await expectToast(page, before, "Draft saved");
-  assert.equal(records.get(scopeKey(SITE.id, TODAY)).correctives, "Saved note");
+  assert.deepEqual(records.get(scopeKey(SITE.id, TODAY)).hotTemperature.map(line => line.correctiveAction), ["Saved note"],
+    "the two empty ready lines are not saved");
   await waitForDiary(page, { date: TODAY, unit: null, correctives: "Saved note" });
   await dateInput(page).fill(TWO_DAYS_AGO);
   await waitForDiary(page, { date: TWO_DAYS_AGO, unit: "Site Fridge", correctives: "" });
@@ -351,6 +365,17 @@ try {
     "site scope ignores the organisation closure",
   );
   checks.push("calendar: the site scope keeps its own closed days");
+
+  // ── Lines ready to fill, and a corrective action under each heading ──
+  assert.equal(await page.getByLabel(/^Cooking line \d corrective action$/).count(), 3, "a new day opens with three cooking lines");
+  assert.equal(await page.getByLabel(/^Cooling line \d corrective action$/).count(), 3, "and three cooling lines");
+  assert.equal(await page.getByPlaceholder(/Fridge 2 running warm/).count(), 0, "no whole-day corrective actions box on a new day");
+  const firstCookingLine = page.locator("tr", { has: correctivesBox(page) });
+  await firstCookingLine.getByPlaceholder("°C").fill("60");
+  await page.waitForFunction(label => document.querySelector(`input[aria-label="${label}"]`)?.getAttribute("aria-invalid") === "true", NOTE_LABEL);
+  await correctivesBox(page).fill("Cooked on until 75°C");
+  await page.waitForFunction(label => !document.querySelector(`input[aria-label="${label}"]`)?.hasAttribute("aria-invalid"), NOTE_LABEL);
+  checks.push("lines: three ready to fill, empty ones not saved, a failed line asks for its own corrective action");
 
   assert.deepEqual(pageErrors, [], "no page errors");
   const unexpected = unexpectedRequests.filter(entry => !entry.startsWith("GET "));

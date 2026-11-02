@@ -5,7 +5,22 @@
  * sorted by AI instead (POST /imports/sort-list).
  */
 
-export type ListKind = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "greentrack-equipment" | "staff-roster" | "compliance-checks";
+export type ListKind = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "greentrack-equipment" | "staff-roster" | "legionella-outlets" | "compliance-checks";
+
+/**
+ * The tab each list has in the setup wizard's "What we need from you"
+ * workbooks (src/lib/setup-info-sheets.ts); its import reads that tab.
+ * LegionellaTrack's workbook counts outlets rather than listing them, so its
+ * outlet and tank list has no tab.
+ */
+export const WORKBOOK_TABS: Partial<Record<ListKind, string>> = {
+  "pat-appliances": "Appliances",
+  "room-track-rooms": "Rooms",
+  contractors: "Contractors",
+  "fire-call-points": "Call points",
+  "greentrack-equipment": "Equipment",
+  "staff-roster": "Staff roster",
+};
 
 export const LIST_KINDS: Record<ListKind, { label: string; noun: string; service: string | null; headings: string[]; fileName: RegExp }> = {
   "pat-appliances": {
@@ -49,6 +64,13 @@ export const LIST_KINDS: Record<ListKind, { label: string; noun: string; service
     service: null,
     headings: ["payrollid", "payrollno", "payrollnumber", "employeeid", "staffid", "workforceid", "employeename", "staffname", "jobtitle", "role", "position", "department", "dept", "team"],
     fileName: /staff|roster|employee|team|people/i,
+  },
+  "legionella-outlets": {
+    label: "LegionellaTrack outlets and tanks",
+    noun: "water outlets and tanks",
+    service: "legionellatrack",
+    headings: ["outletortank", "outlet", "outletname", "outlettype", "sentinel", "sentineloutlet", "outletref", "tank", "tankname", "hotorcold", "hotcold"],
+    fileName: /outlets?|sentinel|legionella|water|tanks?/i,
   },
   // A business's own compliance checklist (spreadsheets only: no AI reading).
   "compliance-checks": {

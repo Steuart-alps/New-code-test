@@ -10,6 +10,7 @@ import { AiAllowanceNote, aiAllowanceState } from "@/components/ai-allowance-not
 import type { AiStatus } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 
 /**
  * "Only have a paper list, photo or PDF?": with the AI features add-on,
@@ -18,7 +19,7 @@ import { Button } from "@/components/ui/button";
  * never come here; the browser reads those itself (lib/spreadsheet.ts).
  */
 
-export type ListReadingKind = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "greentrack-equipment" | "staff-roster";
+export type ListReadingKind = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "greentrack-equipment" | "staff-roster" | "allergen-ingredients" | "legionella-outlets";
 
 interface ListReadingStatus { available: boolean; monthlyLimit: number; usedThisMonth: number; ai: AiStatus; sites: Array<{ id: number; name: string }> }
 export interface ListReadResult { headers: string[]; rows: string[][]; unclear: number; unclearRows: number[] }
@@ -113,7 +114,10 @@ export async function listFileBody(file: File): Promise<{ fileName: string; mime
 export function useListReading(kind: ListReadingKind, enabled: boolean, defaultSiteId?: number | null) {
   const { activeClientId } = useAuth();
   const clientApiFetch = useActiveClientApi();
-  const [siteId, setSiteId] = useState(defaultSiteId ? String(defaultSiteId) : "");
+  // The caller's site, else the user's working site, until one is picked.
+  const workingSiteId = useWorkingSiteId();
+  const [chosenSiteId, setSiteId] = useState<string | null>(null);
+  const siteId = chosenSiteId ?? (defaultSiteId ? String(defaultSiteId) : workingSiteId ? String(workingSiteId) : "");
   const query = useQuery({
     queryKey: ["imports", kind, "reading", activeClientId],
     enabled,

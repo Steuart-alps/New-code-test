@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { AlertTriangle, CheckCircle2, ClipboardCheck, History, Pencil, Plus, Printer, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ClipboardCheck, Eye, History, Pencil, Plus, Printer, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -12,8 +12,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useAuth, useCanEdit } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { printHtmlDocument } from "@/lib/download";
 import { ConfirmDelete, SiteSelect, ensureOk } from "@/components/register-shared";
+import { AllergenMatrix } from "@/components/allergen-parts";
 import {
   CHARTS_PATH, DISHES_PATH, MENUS_PATH, chartTitle, renderChartHtml,
   type AllergenChart, type AllergenItem, type AllergenMenu, type ChartSignoff,
@@ -98,7 +100,10 @@ export function AllergenChartsTab({ charts, menus, dishes, isLoading, error }: {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [historyChart, setHistoryChart] = useState<AllergenChart | null>(null);
+  const [viewing, setViewing] = useState<AllergenChart | null>(null);
   const [menuForm, setMenuForm] = useState<{ id: number | null; siteId: string; name: string } | null>(null);
+  // A new menu starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
   const [deleteMenu, setDeleteMenu] = useState<AllergenMenu | null>(null);
 
   async function refresh() {
@@ -182,7 +187,7 @@ export function AllergenChartsTab({ charts, menus, dishes, isLoading, error }: {
 
       <div className="flex justify-end">
         {canEdit && (
-          <Button size="sm" variant="outline" className="rounded-sm h-8 text-xs gap-1.5" onClick={() => setMenuForm({ id: null, siteId: "", name: "" })}>
+          <Button size="sm" variant="outline" className="rounded-sm h-8 text-xs gap-1.5" onClick={() => setMenuForm({ id: null, siteId: workingSiteId ? String(workingSiteId) : "", name: "" })}>
             <Plus className="w-3.5 h-3.5" /> Add menu
           </Button>
         )}
@@ -209,6 +214,9 @@ export function AllergenChartsTab({ charts, menus, dishes, isLoading, error }: {
                     <p className="text-xs text-muted-foreground">{chart.dishCount} dish{chart.dishCount === 1 ? "" : "es"}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-1">
+                    <Button variant="outline" size="sm" className="rounded-sm h-8 text-xs gap-1.5" onClick={() => setViewing(chart)}>
+                      <Eye className="w-3.5 h-3.5" /> View
+                    </Button>
                     <Button variant="outline" size="sm" className="rounded-sm h-8 text-xs gap-1.5" onClick={() => print(chart)}>
                       <Printer className="w-3.5 h-3.5" /> Print
                     </Button>
@@ -240,6 +248,26 @@ export function AllergenChartsTab({ charts, menus, dishes, isLoading, error }: {
           })}
         </section>
       ))}
+
+      <Dialog open={viewing !== null} onOpenChange={(open) => { if (!open) setViewing(null); }}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>{viewing ? chartTitle(viewing) : ""}</DialogTitle>
+            <DialogDescription>
+              Laid out like the Food Standards Agency's allergen chart. ✔ = contains, M = may contain (supplier's warning).
+            </DialogDescription>
+          </DialogHeader>
+          {viewing && <ChartStatus chart={viewing} />}
+          <div className="max-h-[65vh] overflow-y-auto">
+            {viewing && <AllergenMatrix dishes={chartDishes(viewing, dishes)} />}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { if (viewing) print(viewing); }} className="gap-1.5">
+              <Printer className="w-4 h-4" /> Print
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={signing !== null} onOpenChange={(open) => { if (!open) setSigning(null); }}>
         <DialogContent className="max-w-lg">

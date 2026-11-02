@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { Link, useLocation, useSearch } from "wouter";
 import {
   Lock, Plus, Pencil, Trash2, Search, Wrench, AlertTriangle, CheckCircle2,
@@ -637,6 +638,7 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
 
 export default function FixTrackPage() {
   const { hasService, user, activeClientId } = useAuth();
+  const workingSiteId = useWorkingSiteId();
   const clientApiFetch = useActiveClientApi();
   const clientCanAdmin = useCanAdmin();
   const canAdmin = clientCanAdmin || useIsMaintenanceManager();
@@ -739,6 +741,8 @@ export default function FixTrackPage() {
       reportedDate: today,
       reportedBy:   user?.name ?? "",
       mediaUrls:    [],
+      // A new report starts on the user's working site.
+      ...(workingSiteId ? { siteId: workingSiteId } : {}),
       ...prefill,
     });
     setDialogOpen(true);
@@ -836,6 +840,8 @@ export default function FixTrackPage() {
         setForm({ ...created, ...(mediaUrls ? { mediaUrls } : {}) });
         await load();
         setSaving(false);
+        // The box stays open (now as "Edit Issue"), so say the issue is saved.
+        toast({ title: "Issue reported", description: "It's saved. Add photos or videos now, or close this box." });
         return; // keep dialog open so media can be attached
       }
       setDialogOpen(false);
@@ -1028,7 +1034,7 @@ export default function FixTrackPage() {
             </div>
             <p className="text-sm text-muted-foreground">Report and track maintenance issues across your sites</p>
           </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
             {clientCanAdmin && (
               <Button type="button" variant="outline" onClick={openAlertSettings} className="gap-1.5">
                 <Settings2 className="w-4 h-4" /> Alert timing

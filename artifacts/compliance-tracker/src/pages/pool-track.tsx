@@ -31,6 +31,7 @@ import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { useSiteFilterId, useWorkingSiteId } from "@/hooks/use-working-site";
 import { sortedEntries } from "@/lib/sort-options";
 import { RecordSignedBy } from "@/components/record-signature";
 
@@ -348,6 +349,9 @@ function RecordDialog({
   const [checkDate, setCheckDate] = useState(existing?.check_date ?? todayIso());
   const [checkTime, setCheckTime] = useState(existing?.check_time ?? nowTime());
   const [selectedSite, setSelectedSite] = useState<number | undefined>(existing?.site_id ?? siteId);
+  const workingSiteId = useWorkingSiteId();
+  // A new check starts on the page's site, else the user's working site.
+  useEffect(() => { if (open && !isEdit) setSelectedSite(siteId ?? workingSiteId ?? undefined); }, [open]);
   const [ph, setPh] = useState(existing?.ph_level ?? "");
   const [freeChlor, setFreeChlor] = useState(existing?.free_chlorine ?? "");
   const [combChlor, setCombChlor] = useState(existing?.combined_chlorine ?? "");
@@ -587,7 +591,7 @@ export default function PoolTrackPage() {
   const hasPool = hasService("pooltrack");
 
   const [filterType, setFilterType] = useState("");
-  const [filterSite, setFilterSite] = useState<number | undefined>();
+  const [filterSite, setFilterSite] = useSiteFilterId();
   const [recordOpen, setRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<string | undefined>(undefined);
   const [checks, setChecks] = useState<PoolCheck[]>([]);

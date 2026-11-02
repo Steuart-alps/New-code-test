@@ -111,8 +111,20 @@ function readOldWordFile(data: Uint8Array): string[][] {
   return table ?? delimitedRows(lines);
 }
 
-/** Read the first sheet of an Excel or CSV file (or a Word table or text list) as a header row plus cell text. */
-export async function readSpreadsheet(file: File): Promise<{ headers: string[]; rows: string[][] }> {
+/**
+ * An Excel workbook with several tabs (such as the setup wizard's "What we
+ * need from you" workbooks): the tab named `sheet` when there is one, else
+ * the first tab that isn't the "Read me" tab, else the first tab.
+ */
+function pickSheet(names: string[], sheet?: string): string | undefined {
+  const lower = (value: string) => value.trim().toLowerCase();
+  return (sheet ? names.find((name) => lower(name) === lower(sheet)) : undefined)
+    ?? names.find((name) => lower(name) !== "read me")
+    ?? names[0];
+}
+
+/** Read one sheet of an Excel or CSV file (or a Word table or text list) as a header row plus cell text. */
+export async function readSpreadsheet(file: File, options: { sheet?: string } = {}): Promise<{ headers: string[]; rows: string[][] }> {
   const name = file.name.toLowerCase();
   let table: string[][];
   if (/\.doc$/.test(name) || file.type === "application/msword") {
@@ -128,7 +140,8 @@ export async function readSpreadsheet(file: File): Promise<{ headers: string[]; 
     const workbook = isCsv
       ? XLSX.read(await file.text(), { type: "string", raw: true })
       : XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: "array", cellNF: true });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const sheetName = pickSheet(workbook.SheetNames, options.sheet);
+    const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
     if (!sheet) return { headers: [], rows: [] };
     if (!isCsv) isoDateCells(sheet);
     table = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: "", blankrows: false, dateNF: "yyyy-mm-dd" })
@@ -136,6 +149,13 @@ export async function readSpreadsheet(file: File): Promise<{ headers: string[]; 
   }
   const [headers = [], ...rows] = table;
   return { headers, rows };
+}
+
+/** The tab names of an Excel workbook (none for CSV, Word or text files). */
+export async function spreadsheetTabNames(file: File): Promise<string[]> {
+  const name = file.name.toLowerCase();
+  if (!/\.(xlsx|xlsm|xls|ods)$/.test(name)) return [];
+  return XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: "array", bookSheets: true }).SheetNames;
 }
 
 /**
@@ -148,6 +168,28 @@ export function downloadExcel(filename: string, sheetName: string, rows: string[
   sheet["!cols"] = widths.map(wch => ({ wch }));
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, sheet, sheetName.slice(0, 31));
+  XLSX.writeFile(workbook, filename);
+}
+
+/** A workbook cell: text, or a formula Excel works out (shown with `format`). */
+export type WorkbookCell = string | { formula: string; format?: string };
+
+/**
+ * Save several tabs as one .xlsx file. Text cells are stored as text (see
+ * downloadExcel); formula cells are left for Excel to calculate.
+ */
+export function downloadWorkbook(filename: string, sheets: { name: string; rows: WorkbookCell[][] }[]) {
+  const workbook = XLSX.utils.book_new();
+  for (const { name, rows } of sheets) {
+    const sheet = XLSX.utils.aoa_to_sheet(rows.map(row => row.map(value => typeof value === "string"
+      ? { t: "s", v: value }
+      : { t: "n", f: value.formula, ...(value.format ? { z: value.format } : {}) })));
+    const columns = Math.max(0, ...rows.map(row => row.length));
+    // Titles and notes above the headings (a single long cell) don't widen the column.
+    const width = (value: WorkbookCell | undefined, row: WorkbookCell[]) => typeof value === "string" && row.length > 1 ? value.length + 2 : 12;
+    sheet["!cols"] = Array.from({ length: columns }, (_, column) => ({ wch: Math.min(48, Math.max(12, ...rows.map(row => width(row[column], row)))) }));
+    XLSX.utils.book_append_sheet(workbook, sheet, name.slice(0, 31));
+  }
   XLSX.writeFile(workbook, filename);
 }
 

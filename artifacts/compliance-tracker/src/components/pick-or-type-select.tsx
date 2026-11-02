@@ -12,15 +12,17 @@ export interface PickGroup {
 }
 
 const TYPED = "__typed__";
+const NONE = "__none__";
 
 /**
  * A dropdown of the usual answers, with a last "Other" choice that opens a box
  * to type in. The value is plain text, so a value typed before the dropdown
- * existed (or one no longer in the list) still shows, in the box.
+ * existed (or one no longer in the list) still shows, in the box. With
+ * `noneLabel`, a first choice such as "All departments" stands for no value.
  */
 export function PickOrTypeSelect({
   id, value, onChange, groups, placeholder = "Choose…", otherLabel = "Other (type it in)",
-  typedPlaceholder, typedLabel, disabled,
+  typedPlaceholder, typedLabel, disabled, noneLabel,
 }: {
   id?: string;
   value: string;
@@ -32,6 +34,8 @@ export function PickOrTypeSelect({
   /** Accessible name of the box for typing; defaults to the placeholder. */
   typedLabel?: string;
   disabled?: boolean;
+  /** A first choice that clears the value, e.g. "All departments". */
+  noneLabel?: string;
 }) {
   // One option per text, in the first group that lists it.
   const seen = new Set<string>();
@@ -49,13 +53,16 @@ export function PickOrTypeSelect({
   return (
     <div className="space-y-2">
       <Select
-        value={showTyped ? TYPED : listed ? value : ""}
+        value={showTyped ? TYPED : listed ? value : noneLabel ? NONE : ""}
         disabled={disabled}
         onValueChange={(next) => {
           if (next === TYPED) {
             setTyping(true);
             focusBox.current = true;
             if (listed) onChange("");
+          } else if (next === NONE) {
+            setTyping(false);
+            onChange("");
           } else {
             setTyping(false);
             onChange(next);
@@ -71,6 +78,8 @@ export function PickOrTypeSelect({
             box.current?.focus();
           }}
         >
+          {noneLabel && <SelectItem value={NONE}>{noneLabel}</SelectItem>}
+          {noneLabel && shown.length > 0 && <SelectSeparator />}
           {shown.map((group, index) => (
             <SelectGroup key={group.label ?? index}>
               {index > 0 && <SelectSeparator />}

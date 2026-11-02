@@ -1,4 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
@@ -334,7 +335,7 @@ const staffCreate = z.object({
   active: z.boolean().optional(),
 });
 
-const staffUpdate = staffCreate.partial();
+const staffUpdate = partialUpdate(staffCreate);
 // A payroll ID is recommended (it keeps people matched when names change)
 // but rosters from small businesses often have none.
 const rosterRow = staffCreate.extend({

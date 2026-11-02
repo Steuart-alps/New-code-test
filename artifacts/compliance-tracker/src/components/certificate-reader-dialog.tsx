@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useFileDrop } from "@/hooks/use-file-drop";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { useUpload } from "@/hooks/use-upload";
 import { localToday } from "@/lib/onboarding";
 import {
@@ -50,11 +51,12 @@ interface Draft {
   checked: boolean;
 }
 
-function draftFrom(reading: CertificateReading): Draft {
+/** newSiteId: the site a new check starts on (the user's working site), or "" for all sites. */
+function draftFrom(reading: CertificateReading, newSiteId = ""): Draft {
   return {
     check: reading.itemId != null ? String(reading.itemId) : reading.newCheck ? NEW_CHECK : "",
     newTitle: reading.newCheck?.title ?? "",
-    newSiteId: "",
+    newSiteId,
     newFrequency: reading.newCheck?.frequencyMonths ? String(reading.newCheck.frequencyMonths) : "",
     name: reading.name,
     issueDate: reading.issueDate ?? "",
@@ -123,6 +125,8 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null, inb
   const { data: items = [] } = useListComplianceItems({});
   const { data: contractors = [] } = useListContractors();
   const { data: sites = [] } = useListSites();
+  const workingSiteId = useWorkingSiteId();
+  const newSiteId = workingSiteId ? String(workingSiteId) : "";
   const input = useRef<HTMLInputElement>(null);
   // The chosen files, the certificates found in them, and which one is being checked.
   const [files, setFiles] = useState<CertificateFile[]>([]);
@@ -135,7 +139,7 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null, inb
   const stored = useRef(new Map<string, string>());
   const initialReading = inbox ? inbox.reading ?? blankReading(inbox.fileName ?? "", inbox.itemId, inbox.contractorName) : null;
   const [reading, setReading] = useState<CertificateReading | null>(initialReading);
-  const [draft, setDraft] = useState<Draft | null>(initialReading ? draftFrom(initialReading) : null);
+  const [draft, setDraft] = useState<Draft | null>(initialReading ? draftFrom(initialReading, newSiteId) : null);
   const [inboxNote, setInboxNote] = useState<string | null>(inbox?.note ?? null);
   const entry = inbox ? null : batch[position] ?? null;
   const readByAi = inbox ? !!inbox.reading || reading !== initialReading : !!entry?.byAi;
@@ -168,7 +172,7 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null, inb
       const result = await readCertificateInboxItem(inbox.id);
       setInboxNote(result.note);
       if (result.reading) {
-        const next = draftFrom(result.reading);
+        const next = draftFrom(result.reading, newSiteId);
         const item = items.find((i) => String(i.id) === next.check);
         if (item?.contractorId && quotable.some((c) => c.id === item.contractorId)) next.quoteContractorId = String(item.contractorId);
         setReading(result.reading);
@@ -200,7 +204,7 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null, inb
 
   /** A draft for a reading, with the contractor to ask for a quote chosen where it can be. */
   function draftWithContractor(next: CertificateReading): Draft {
-    const result = draftFrom(next);
+    const result = draftFrom(next, newSiteId);
     const item = items.find((i) => String(i.id) === result.check);
     if (item?.contractorId && quotable.some((c) => c.id === item.contractorId)) result.quoteContractorId = String(item.contractorId);
     else if (next.contractorName) {
@@ -217,7 +221,7 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null, inb
     const next = entries[index]!;
     setPosition(index);
     setReading(next.reading);
-    setDraft(next.byAi ? draftWithContractor(next.reading) : draftFrom(next.reading));
+    setDraft(next.byAi ? draftWithContractor(next.reading) : draftFrom(next.reading, newSiteId));
   }
 
   /** Each file becomes a certificate to fill in by hand (or one, for the check the reader was opened from). */

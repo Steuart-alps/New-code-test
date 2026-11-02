@@ -116,7 +116,7 @@ export const LEGIONELLA_CHECK_TYPES = [
   "shower_clean", "tmv_service", "outlet_flush",
 ] as const;
 
-const LEGIONELLA_LABELS: Record<string, string> = {
+export const LEGIONELLA_LABELS: Record<string, string> = {
   calorifier_temp:       "Calorifier temperature",
   hot_sentinel_temp:     "Hot water sentinel outlet temperature",
   hot_nonsent_temp:      "Hot water representative outlet temperature",
@@ -136,7 +136,7 @@ const LEGIONELLA_LABELS: Record<string, string> = {
 
 const POOL_CHECK_TYPES = ["routine", "opening", "closing", "weekly"] as const;
 
-const POOL_LABELS: Record<string, string> = {
+export const POOL_LABELS: Record<string, string> = {
   routine: "Routine pool check",
   opening: "Pool opening check",
   closing: "Pool closing check",
@@ -144,7 +144,7 @@ const POOL_LABELS: Record<string, string> = {
 };
 export const TUB_CHECK_TYPES = ["water_chemistry", "temperature", "filter_clean",
   "cover_inspection", "drain_refill", "microbiological_test", "risk_assessment"] as const;
-const TUB_LABELS: Record<string, string> = {
+export const TUB_LABELS: Record<string, string> = {
   water_chemistry: "Water chemistry check", temperature: "Temperature check",
   filter_clean: "Filter clean", cover_inspection: "Cover inspection",
   drain_refill: "Drain & refill", microbiological_test: "Microbiological test",

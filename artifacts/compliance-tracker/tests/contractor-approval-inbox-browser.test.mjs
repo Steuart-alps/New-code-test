@@ -85,6 +85,16 @@ after(async () => {
 async function browserContext(session) {
   const context = await browser.newContext();
   contexts.push(context);
+  // Every fixture user has already seen the quick tutorial, so it does not
+  // open over the page (src/components/quick-tutorial.tsx).
+  await context.addInitScript(() => {
+    try {
+      const getItem = Storage.prototype.getItem;
+      Storage.prototype.getItem = function (key) {
+        return String(key).startsWith("complytrack:quickTutorialSeen:") ? "true" : getItem.call(this, key);
+      };
+    } catch { /* storage replaced by the test itself */ }
+  });
   await context.route(`${appOrigin}/api/**`, async route => {
     const original = new URL(route.request().url());
     const headers = { ...route.request().headers() };
@@ -1292,13 +1302,27 @@ test("acting on a request another manager already handled says so, refreshes the
   ], "each stale action is tried once and never retried");
 });
 
+/**
+ * Only a consultant (ALPS) adds businesses; sign-up makes an Owner. The
+ * multi-business tests promote the fixture Owner the way
+ * api-server/tests/consultant-account.mjs does.
+ */
+async function promoteOwnerToConsultant(owner) {
+  await db.execute(sql`UPDATE users SET role = 'consultant' WHERE id = ${owner.userId}`);
+  await db.execute(sql`INSERT INTO consultant_clients (user_id, client_id)
+    VALUES (${owner.userId}, ${owner.clientId}) ON CONFLICT DO NOTHING`);
+}
+
 test("two real tabs on one business share new-request acknowledgments; a tab on another business is untouched", async () => {
   const owner = fixtures.owner;
+  await promoteOwnerToConsultant(owner);
   const secondClient = await owner.request("POST", "/clients", {
     name: `Inbox second business ${suffix}`, slug: `inbox-second-${suffix}`,
   });
   assert.equal(secondClient.status, 201, JSON.stringify(secondClient.data));
   const secondClientId = secondClient.data.id;
+  // Pass the "Add your team first" gate on the new business, as its Owner would.
+  assert.equal((await owner.request("POST", `/setup/team-alone?clientId=${secondClientId}`, {})).status, 200);
   const secondSite = await owner.request("POST", `/sites?clientId=${secondClientId}`, {
     name: `Inbox second-business site ${suffix}`, seedStarterChecks: false,
   });
@@ -1389,11 +1413,14 @@ test("two real tabs on one business share new-request acknowledgments; a tab on 
 
 test("with browser storage and tab messaging blocked, each tab still finds new requests on its timed refresh, scoped to its business, and stops when it leaves", async () => {
   const owner = fixtures.owner;
+  await promoteOwnerToConsultant(owner);
   const secondClient = await owner.request("POST", "/clients", {
     name: `Inbox blocked-storage business ${suffix}`, slug: `inbox-blocked-${suffix}`,
   });
   assert.equal(secondClient.status, 201, JSON.stringify(secondClient.data));
   const secondClientId = secondClient.data.id;
+  // Pass the "Add your team first" gate on the new business, as its Owner would.
+  assert.equal((await owner.request("POST", `/setup/team-alone?clientId=${secondClientId}`, {})).status, 200);
   const secondSite = await owner.request("POST", `/sites?clientId=${secondClientId}`, {
     name: `Inbox blocked-storage site ${suffix}`, seedStarterChecks: false,
   });
@@ -1482,11 +1509,14 @@ test("with browser storage and tab messaging blocked, each tab still finds new r
 
 test("a frozen, hidden or back-cached approvals tab catches up on its own business's indicators when it returns", async () => {
   const owner = fixtures.owner;
+  await promoteOwnerToConsultant(owner);
   const secondClient = await owner.request("POST", "/clients", {
     name: `Inbox lifecycle business ${suffix}`, slug: `inbox-lifecycle-${suffix}`,
   });
   assert.equal(secondClient.status, 201, JSON.stringify(secondClient.data));
   const secondClientId = secondClient.data.id;
+  // Pass the "Add your team first" gate on the new business, as its Owner would.
+  assert.equal((await owner.request("POST", `/setup/team-alone?clientId=${secondClientId}`, {})).status, 200);
   const secondSite = await owner.request("POST", `/sites?clientId=${secondClientId}`, {
     name: `Inbox lifecycle site ${suffix}`, seedStarterChecks: false,
   });

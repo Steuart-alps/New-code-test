@@ -46,7 +46,7 @@ interface ParsedStaff {
 
 /** Staff rows from an Excel or CSV file, a Word table or a text list. */
 async function parseExcel(file: File): Promise<ParsedStaff[]> {
-  const { headers, rows } = await readSpreadsheet(file);
+  const { headers, rows } = await readSpreadsheet(file, { sheet: "Staff roster" });
   return parseStaffTable(headers, rows);
 }
 

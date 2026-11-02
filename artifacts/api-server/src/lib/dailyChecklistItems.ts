@@ -49,7 +49,7 @@ const CHECKLIST_NAMES: Record<string, string> = {
   greenkeeping_closing: 'Greenkeeping shed closing checks',
 };
 
-function moduleFor(checklistType: string) {
+export function moduleFor(checklistType: string) {
   if (checklistType.startsWith('kitchen_')) return 'kitchen';
   if (checklistType.startsWith('greenkeeping_')) return 'green';
   return checklistType.endsWith('_opening') ? 'daily_am' : 'daily_pm';

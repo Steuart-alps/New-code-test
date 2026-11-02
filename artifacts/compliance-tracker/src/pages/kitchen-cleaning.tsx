@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import { API_BASE } from "@/lib/api";
 import { downloadFile } from "@/lib/download";
 import { useListSites } from "@workspace/api-client-react";
+import { useWorkingSite } from "@/hooks/use-working-site";
 import { RecordSignedBy } from "@/components/record-signature";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -388,7 +389,12 @@ export default function CleaningScheduleTab() {
   const [view, setView]                 = useState<string | null>(null);
   const [hasAccountLevel, setHasAccountLevel] = useState(false);
   const viewSite = sites.find(site => String(site.id) === view) ?? null;
+  const workingSite = useWorkingSite();
   const loadSeq = useRef(0);
+  // Ticks, names and notes not yet saved, by period and task: kept when the
+  // kitchen is changed so they aren't wiped by the reload; cleared by a save.
+  const unsaved = useRef(new Map<string, CompletionItem>());
+  const unsavedKey = (freq: Frequency, date: string, taskId: number) => `${freq}|${date}|${taskId}`;
   const viewRef = useRef(view);
   viewRef.current = view;
 
@@ -479,11 +485,11 @@ export default function CleaningScheduleTab() {
           notes:  saved?.notes  ?? "",
         };
       });
-      setCompletions(merged);
+      setCompletions(savedLog?.submitted_at ? merged : merged.map(c => (c.taskId != null && unsaved.current.get(unsavedKey(freq, date, c.taskId))) || c));
     } catch {
       if (seq !== loadSeq.current) return;
       setLog(null);
-      setCompletions(tasks.filter(t => t.frequency === freq).map(t => ({
+      setCompletions(tasks.filter(t => t.frequency === freq).map(t => unsaved.current.get(unsavedKey(freq, date, t.id)) ?? ({
         taskId: t.id, taskArea: t.area, taskName: t.task,
         done: false, doneBy: user?.name ?? "", notes: "",
       })));
@@ -513,13 +519,15 @@ export default function CleaningScheduleTab() {
     loadTasks();
   }, []);
 
-  // Open on the first kitchen once kitchens exist; a business without
+  // Open on the user's working site's kitchen (else the first kitchen) once
+  // kitchens exist; a business without
   // kitchens keeps the account-level view it has always had.
   useEffect(() => {
-    if (sitesLoading) return;
+    if (sitesLoading || !workingSite.ready) return;
     if (view !== null && (view === ACCOUNT_LEVEL || viewSite)) return;
-    setView(sites.length > 0 ? String(sites[0].id) : ACCOUNT_LEVEL);
-  }, [sites, sitesLoading, view, viewSite]);
+    const startSite = sites.find(site => site.id === workingSite.siteId) ?? sites[0];
+    setView(startSite ? String(startSite.id) : ACCOUNT_LEVEL);
+  }, [sites, sitesLoading, view, viewSite, workingSite.ready, workingSite.siteId]);
 
   useEffect(() => {
     setHistory([]);
@@ -556,6 +564,7 @@ export default function CleaningScheduleTab() {
         return;
       }
       const saved = await r.json();
+      for (const c of completions) if (c.taskId != null) unsaved.current.delete(unsavedKey(activeFreq, periodDate, c.taskId));
       setLog(saved);
       toast({ title: submit ? "Schedule signed off" : "Draft saved" });
       loadHistory();
@@ -574,16 +583,25 @@ export default function CleaningScheduleTab() {
 
   // ── Completion helpers ───────────────────────────────────────────────────
 
+  function edit(idx: number, change: Partial<CompletionItem>) {
+    setCompletions(prev => prev.map((c, i) => {
+      if (i !== idx) return c;
+      const next = { ...c, ...change };
+      if (next.taskId != null) unsaved.current.set(unsavedKey(activeFreq, periodDate, next.taskId), next);
+      return next;
+    }));
+  }
+
   function toggleDone(idx: number, done: boolean) {
-    setCompletions(prev => prev.map((c, i) => i === idx ? { ...c, done } : c));
+    edit(idx, { done });
   }
 
   function setDoneBy(idx: number, v: string) {
-    setCompletions(prev => prev.map((c, i) => i === idx ? { ...c, doneBy: v } : c));
+    edit(idx, { doneBy: v });
   }
 
   function setNotes(idx: number, v: string) {
-    setCompletions(prev => prev.map((c, i) => i === idx ? { ...c, notes: v } : c));
+    edit(idx, { notes: v });
   }
 
   // ── Group completions by area ────────────────────────────────────────────

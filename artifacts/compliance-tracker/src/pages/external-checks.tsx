@@ -23,6 +23,7 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent
 } from "@/components/ui/dropdown-menu";
 import { Card } from "@/components/ui/card";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 
 type FilterKey =
   | "due-soon"
@@ -55,10 +56,13 @@ export default function ExternalChecksPage() {
     return (v && (v in FILTER_LABELS) ? (v as FilterKey) : null);
   }, [search]);
 
+  // Without ?siteId= the list starts on the user's own site (all sites for
+  // an Owner or Consultant); picking "All sites" then puts siteId=all in the link.
+  const ownSiteId = useWorkingSiteId();
   const siteParam = useMemo(() => {
     const v = new URLSearchParams(search).get("siteId");
-    return v ?? "all";
-  }, [search]);
+    return v ?? (ownSiteId ? String(ownSiteId) : "all");
+  }, [search, ownSiteId]);
 
   const { data: rawItems = [], isLoading } = useListComplianceItems({});
   const { data: sites = [] } = useListSites();
@@ -89,7 +93,7 @@ export default function ExternalChecksPage() {
 
   const setSiteFilter = (value: string) => {
     const params = new URLSearchParams(search);
-    if (value === "all") params.delete("siteId");
+    if (value === "all" && !ownSiteId) params.delete("siteId");
     else params.set("siteId", value);
     const qs = params.toString();
     navigate(`/external-checks${qs ? `?${qs}` : ""}`);

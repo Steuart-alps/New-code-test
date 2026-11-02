@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { CreateLegionellaCheckRequestFindings } from './createLegionellaCheckRequestFindings';
 import type { CreateLegionellaCheckRequestResult } from './createLegionellaCheckRequestResult';
 import type { LegionellaCheckType } from './legionellaCheckType';
 
@@ -22,4 +23,6 @@ export type CreateLegionellaCheckRequest = unknown & ({
   performedBy?: string | null;
   /** A cold water tank or calorifier on the equipment list (its site must match siteId). */
   equipmentId?: number | null;
+  /** Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail. */
+  findings?: CreateLegionellaCheckRequestFindings;
 });

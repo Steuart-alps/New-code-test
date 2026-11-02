@@ -327,6 +327,9 @@ async function routeApi(route, url) {
   // AquaTrack opens on its water-quality tab.
   if (pathname === "/api/pool-track" && method === "GET") return jsonResponse(route, []);
   if (pathname === "/api/pool-track/config" && method === "GET") return jsonResponse(route, {});
+  // The business has one site, so AquaTrack opens on it and loads its status and plan.
+  if (pathname === "/api/pool-track/status" && method === "GET") return jsonResponse(route, []);
+  if (pathname === "/api/pool-track/monitoring-plan" && method === "GET") return jsonResponse(route, { profile: {}, approved: false });
   if (pathname === "/api/photos" && method === "POST") {
     unexpectedApiRequests.push({ method, url: url.toString(), body: request.postData() ?? null });
     return jsonResponse(route, { error: "Staged evidence must only be attached with a record create request" }, 501);

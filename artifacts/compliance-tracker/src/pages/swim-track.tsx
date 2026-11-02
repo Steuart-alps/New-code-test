@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { RequiredRecordPhotoEvidence, useNewRecordPhotoEvidence } from "@/components/required-record-photo-evidence";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
@@ -172,10 +173,11 @@ function SessionDialog({
 }) {
   const { toast } = useToast();
   const apiFetch = useSwimTrackApi();
+  const workingSiteId = useWorkingSiteId();
   const photoEvidence = useNewRecordPhotoEvidence("swim_session", open && !session);
   const today = new Date().toISOString().split("T")[0];
   const blank = {
-     siteId: "", sessionDate: today, sessionType: "public_swim", lifeguardName: "", lifeguardRosterId: null as number | null,
+     siteId: workingSiteId ? String(workingSiteId) : "", sessionDate: today, sessionType: "public_swim", lifeguardName: "", lifeguardRosterId: null as number | null,
     openTime: "", closeTime: "", maxBathers: "", batherCountPeak: "",
     preSessionResult: "pass", preSessionNotes: "", poolClosed: false,
     closureReason: "", notes: "",
@@ -357,11 +359,12 @@ function SurveillanceDialog({
 }) {
   const { toast } = useToast();
   const apiFetch = useSwimTrackApi();
+  const workingSiteId = useWorkingSiteId();
   const photoEvidence = useNewRecordPhotoEvidence("swim_surveillance_check", open && !check);
   const today = new Date().toISOString().split("T")[0];
   const now = new Date().toTimeString().slice(0, 5);
   const blank = {
-    siteId: "", checkDate: today, checkTime: now, batherCount: "",
+    siteId: workingSiteId ? String(workingSiteId) : "", checkDate: today, checkTime: now, batherCount: "",
     scanCompleted: true, observations: "", checkedBy: "", checkedByRosterId: null as number | null, result: "pass",
   };
   const [form, setForm] = useState(blank);
@@ -478,10 +481,11 @@ function FirstAidDialog({
 }) {
   const { toast } = useToast();
   const apiFetch = useSwimTrackApi();
+  const workingSiteId = useWorkingSiteId();
   const photoEvidence = useNewRecordPhotoEvidence("swim_first_aid_check", open && !check);
   const today = new Date().toISOString().split("T")[0];
   const blankItems = Object.fromEntries(FIRST_AID_ITEMS.map(i => [i.key, true]));
-  const blank = { siteId: "", checkDate: today, checkedBy: "", checkedByRosterId: null as number | null, defectsFound: "", notes: "", ...blankItems };
+  const blank = { siteId: workingSiteId ? String(workingSiteId) : "", checkDate: today, checkedBy: "", checkedByRosterId: null as number | null, defectsFound: "", notes: "", ...blankItems };
   const [form, setForm] = useState<Record<string, any>>(blank);
   const [saving, setSaving] = useState(false);
 
@@ -596,10 +600,11 @@ function IncidentDialog({
 }) {
   const { toast } = useToast();
   const apiFetch = useSwimTrackApi();
+  const workingSiteId = useWorkingSiteId();
   const photoEvidence = useNewRecordPhotoEvidence("swim_incident", open && !incident);
   const today = new Date().toISOString().split("T")[0];
   const blank = {
-    siteId: "", incidentDate: today, incidentTime: "", incidentType: "near_miss", severity: "low",
+    siteId: workingSiteId ? String(workingSiteId) : "", incidentDate: today, incidentTime: "", incidentType: "near_miss", severity: "low",
     personsInvolved: "", description: "", actionTaken: "", reportedTo: "",
     reportedDate: "", outcome: "", notes: "",
   };

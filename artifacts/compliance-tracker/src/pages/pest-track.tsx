@@ -3,6 +3,7 @@ import { useSayItFill, withSpokenNote, type SayItFill } from "@/lib/say-it-fill"
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -173,7 +174,8 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
   const { toast } = useToast();
   const isEdit = !!visit;
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState(() => ({
+  const workingSiteId = useWorkingSiteId();
+  const initialForm = () => ({
     visitDate:          visit?.visitDate ?? new Date().toISOString().slice(0, 10),
     contractorName:     visit?.contractorName ?? config.pest_contractor_name ?? "",
     contractorCompany:  visit?.contractorCompany ?? config.pest_contractor_company ?? "",
@@ -185,8 +187,12 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
     signedOffBy:        visit?.signedOffBy ?? "",
      signedOffByRosterId: visit?.signedOffByRosterId ?? null,
     notes:              visit?.notes ?? "",
-    siteId:             String(visit?.siteId ?? ""),
-  }));
+    // A new visit starts on the user's working site.
+    siteId:             visit ? String(visit.siteId ?? "") : workingSiteId ? String(workingSiteId) : "",
+  });
+  const [form, setForm] = useState(initialForm);
+  // The dialog stays mounted: refill the form each time it opens.
+  useEffect(() => { if (open) setForm(initialForm()); }, [open, visit]);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }));
@@ -318,7 +324,8 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites, spoken }: {
   // if it was removed from the list, so editing an old record still works.
   const pestTypeOpts = withValue(pickOptions(formOptions, "pest_types"), activity?.pestType);
   const evidenceTypeOpts = withValue(pickOptions(formOptions, "pest_evidence_types"), activity?.evidenceType);
-  const [form, setForm] = useState(() => ({
+  const workingSiteId = useWorkingSiteId();
+  const initialForm = () => ({
     recordedDate: activity?.recordedDate ?? new Date().toISOString().slice(0, 10),
     pestType:     activity?.pestType ?? "rodent",
     evidenceType: activity?.evidenceType ?? "live_sighting",
@@ -328,8 +335,12 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites, spoken }: {
     recordedBy:   activity?.recordedBy ?? "", recordedByRosterId: activity?.recordedByRosterId ?? null,
     resolved:     activity?.resolved ?? false,
     notes:        activity?.notes ?? "",
-    siteId:       String(activity?.siteId ?? ""),
-  }));
+    // A new record starts on the user's working site.
+    siteId:       activity ? String(activity.siteId ?? "") : workingSiteId ? String(workingSiteId) : "",
+  });
+  const [form, setForm] = useState(initialForm);
+  // The dialog stays mounted: refill the form each time it opens.
+  useEffect(() => { if (open) setForm(initialForm()); }, [open, activity]);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }));
@@ -691,7 +702,7 @@ export default function PestTrackPage() {
               <p className="text-xs text-muted-foreground">Pest control visits and activity log</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {canAdmin && (
               <Button data-testid="button-download-pest-register" variant="outline" size="sm"
                 className="rounded-sm gap-1.5 h-8 text-xs" onClick={handleDownloadRegister}

@@ -45,6 +45,7 @@ import {
   hotTubsTable,
   hotTubChecksTable,
   treeInspectionsTable,
+  treesTable,
   bikesTable,
   bikeHireRecordsTable,
   bikeChecksTable,
@@ -337,6 +338,7 @@ green-track/
   spraying-records.csv           — spraying, spreading and top dressing records
   spraying-record-products.csv   — products and quantities on each record
 tree-track/
+  trees.csv                      — tree register
   inspections.csv                — tree inspection records
 bike-track/
   bikes.csv                      — bike register
@@ -768,6 +770,7 @@ router.get(
         await out.csv("green-track/spraying-record-products.csv", async () => (await db.execute(sql`SELECT ap.*, p.name AS product_name, p.unit, p.mapp_number FROM green_application_products ap JOIN green_products p ON p.id = ap.product_id AND p.client_id = ap.client_id WHERE ap.client_id = ${cid} ORDER BY ap.application_id DESC, ap.id`)).rows);
 
         // ── TreeTrack ─────────────────────────────────────────────────────────
+        await out.csv("tree-track/trees.csv", () => db.select().from(treesTable).where(eq(treesTable.clientId, cid)));
         await out.csv("tree-track/inspections.csv", () => db.select().from(treeInspectionsTable).where(eq(treeInspectionsTable.clientId, cid)));
 
         // ── BikeTrack ─────────────────────────────────────────────────────────

@@ -63,6 +63,7 @@ import {
 import { SOUND_LEVEL_MIN_DB } from "@/lib/fire-sound-level";
 import { StringListEditor } from "@/components/string-list-editor";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { useSiteFilterId, useWorkingSiteId } from "@/hooks/use-working-site";
 import { sortByLabel } from "@/lib/sort-options";
 import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import {
@@ -95,6 +96,18 @@ const CHECK_TYPE_LABELS: Record<AnyCheckType, string> = {
   alarm_service:    "6-monthly fire alarm service",
   extinguisher_service: "Annual fire extinguisher service",
   night_walk:       "Night fire walk (night porter, 22:00 / 02:00 / 06:00)",
+};
+
+/** Location examples that fit each check, so a drill isn't shown a door example. */
+const LOCATION_PLACEHOLDER: Partial<Record<AnyCheckType, string>> = {
+  alarm:                   "e.g. CP3, first floor fire exit",
+  emergency_lights:        "e.g. Ground floor corridor and stairwell",
+  emergency_lights_annual: "e.g. Whole building, all fittings",
+  extinguishers:           "e.g. Kitchen, CO₂ and wet chemical",
+  extinguisher_service:    "e.g. Whole building, 14 extinguishers",
+  fire_doors:              "e.g. Kitchen to restaurant door, ground floor",
+  fire_drill:              "e.g. Assembly point, front car park",
+  alarm_service:           "e.g. Main panel, reception",
 };
 
 /** Walks that tick each of the site's escape routes. */
@@ -1064,6 +1077,13 @@ function RecordCheckDialog({
   const createCheck = useCreateFireSafetyCheck();
   const { data: sites } = useListSites();
   const { data: config } = useGetFireSafetyConfig();
+  const workingSiteId = useWorkingSiteId();
+
+  // A new check starts on the page's site, else the user's working site.
+  useEffect(() => {
+    const initial = siteId ?? workingSiteId ?? undefined;
+    if (open && initial !== undefined) setSelectedSite(initial);
+  }, [open]);
 
   useEffect(() => {
     if (!open || !preset) return;
@@ -1370,7 +1390,7 @@ function RecordCheckDialog({
           {checkType !== "fire_walk" && checkType !== "night_walk" && checkType !== "alarm_panel" && checkType !== "alarm" && (
             <div className="space-y-1.5">
               <Label>Location <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Input value={location} onChange={e => setLocation(e.target.value)} placeholder="e.g. Ground floor near kitchen" className="rounded-sm" />
+              <Input value={location} onChange={e => setLocation(e.target.value)} placeholder={LOCATION_PLACEHOLDER[checkType] ?? "e.g. Ground floor"} className="rounded-sm" />
             </div>
           )}
 
@@ -1652,7 +1672,8 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
               {((!isAlarm && !isNightWalk) || check.location) && (
                 <div className="space-y-1.5">
                   <Label>{isAlarm ? "Location / Call Point" : "Location"}</Label>
-                  <Input value={location} onChange={e => setLocation(e.target.value)} className="rounded-sm" />
+                  <Input value={location} onChange={e => setLocation(e.target.value)} className="rounded-sm"
+                    placeholder={LOCATION_PLACEHOLDER[checkType]} />
                 </div>
               )}
             </>
@@ -1687,7 +1708,7 @@ export default function FireSafetyPage() {
   const hasFiretrack = hasService("firetrack");
 
   const [filterType, setFilterType] = useState<AnyCheckType | "">("");
-  const [filterSite, setFilterSite] = useState<number | undefined>(undefined);
+  const [filterSite, setFilterSite] = useSiteFilterId();
   useSayItSite(filterSite);
   const [recordOpen, setRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<AnyCheckType | undefined>(undefined);

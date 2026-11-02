@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { db } from "@workspace/db";
 import { roomTrackChecksTable, roomTrackRoomsTable, sitesTable } from "@workspace/db/schema";
 import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
@@ -28,7 +29,7 @@ const CheckCreateBody = z.object({
   checkedBy: z.string().trim().max(200).optional().nullable(),
   checkedByRosterId: z.number().int().positive().optional().nullable(),
 });
-const CheckUpdateBody = CheckCreateBody.partial().omit({ roomId: true, checkDate: true }).extend({
+const CheckUpdateBody = partialUpdate(CheckCreateBody).omit({ roomId: true, checkDate: true }).extend({
   roomId: z.number().int().positive().optional(),
   checkDate: dateString.optional(),
 });

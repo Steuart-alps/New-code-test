@@ -87,6 +87,8 @@ try {
     if (path.endsWith("/api/storage/status")) {
       return route.fulfill({ json: { state: "not_limited", canManage: true, autoTopUp: false, usedBytes: 0, capacityBytes: null } });
     }
+    // KitchenTrack's "This month" summary (#273) is an object, not a list; without it the card stays hidden.
+    if (path.endsWith("/api/food-safety/month-summary")) return route.fulfill({ status: 404, json: { error: "Not found" } });
     return route.fulfill({ json: [] });
   });
 
