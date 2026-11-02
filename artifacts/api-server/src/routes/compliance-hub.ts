@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@workspace/db";
@@ -41,7 +42,7 @@ const ActionBody = z.object({
   evidenceReference: z.string().trim().max(1000).optional().nullable(),
 });
 
-const ActionUpdateBody = ActionBody.partial().extend({
+const ActionUpdateBody = partialUpdate(ActionBody).extend({
   status: z.enum(["open", "in_progress", "awaiting_verification", "verified"]).optional(),
   verificationNotes: z.string().trim().max(4000).optional().nullable(),
 });

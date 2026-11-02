@@ -53,7 +53,11 @@
       "undici@6": "6.29.1",
       "uuid": "11.1.1",
       "yaml": "2.8.3",
-      "ws": "8.21.0"
+      "ws": "8.21.0",
+      "minimatch@<11.0.1": "11.0.3",
+      "chromium-edge-launcher@0.2": "0.3.0",
+      "glob@13": "14.0.3",
+      "@expo/cli>zod": "4.6.7"
     },
     "patchedDependencies": {
       "image-size-safe@2.0.3": "patches/image-size-safe@2.0.3.patch"

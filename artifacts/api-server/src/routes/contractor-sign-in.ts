@@ -171,9 +171,9 @@ const SignInBody = z.object({
   email: z.string().trim().max(320).email("Enter a valid email address").optional().or(z.literal("")).transform((value) => value || null),
   visitReason: optionalText(300),
   briefingVersion: z.string().max(64),
-  fireAcknowledged: z.literal(true, { errorMap: () => ({ message: "Tick to confirm you have read the fire procedure" }) }),
-  asbestosAcknowledged: z.literal(true, { errorMap: () => ({ message: "Tick to confirm you have read the asbestos information" }) }),
-  declaration: z.literal(true, { errorMap: () => ({ message: "Tick to confirm the declaration" }) }),
+  fireAcknowledged: z.literal(true, { error: "Tick to confirm you have read the fire procedure" }),
+  asbestosAcknowledged: z.literal(true, { error: "Tick to confirm you have read the asbestos information" }),
+  declaration: z.literal(true, { error: "Tick to confirm the declaration" }),
   signature: z.string().max(400_000).regex(SIGNATURE, "Sign in the box"),
   // Hidden from people; automated form-fillers tend to complete it.
   website: z.string().max(500).optional(),

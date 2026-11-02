@@ -3,6 +3,7 @@
  * Manages configurable cleaning task templates + dated completion logs.
  */
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
@@ -184,7 +185,7 @@ router.put("/tasks/:id", requireAuth, denyViewers, async (req, res) => {
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-  const parsed = taskBody.partial().safeParse(req.body);
+  const parsed = partialUpdate(taskBody).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
   const existing = await db.execute(sql`

@@ -171,7 +171,7 @@ router.put("/:token", async (req, res) => {
     await notifyManagers(row, "compliance details");
     return res.json({ success: true });
   } catch (err: any) {
-    if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors[0]?.message ?? "Validation error" });
+    if (err instanceof z.ZodError) return res.status(400).json({ error: err.issues[0]?.message ?? "Validation error" });
     req.log?.error({ err }, "contractor-portal PUT error");
     return res.status(500).json({ error: "Server error" });
   }
@@ -265,7 +265,7 @@ router.post("/:token/certificates", async (req, res) => {
     await notifyManagers(row, "certificate records");
     return res.status(201).json((result.rows ?? [])[0] ?? {});
   } catch (err: any) {
-    if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors[0]?.message ?? "Validation error" });
+    if (err instanceof z.ZodError) return res.status(400).json({ error: err.issues[0]?.message ?? "Validation error" });
     req.log?.error({ err }, "contractor-portal cert create error");
     return res.status(500).json({ error: "Server error" });
   }

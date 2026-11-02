@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { treeInspectionsTable, treesTable, sitesTable, TREE_CHECK_TYPES, TREE_RISK_ZONES, type Tree } from "@workspace/db/schema";
@@ -62,7 +63,7 @@ const createSchema = z.object({
   notes: z.string().max(5000).nullable().optional(),
 });
 
-const updateSchema = createSchema.partial().omit({ checkType: true });
+const updateSchema = partialUpdate(createSchema).omit({ checkType: true });
 
 const treeSchema = z.object({
   ref: z.string().trim().min(1).max(100),
@@ -77,7 +78,7 @@ const treeSchema = z.object({
   notes: z.string().max(5000).nullable().optional(),
   removedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
 });
-const treeUpdateSchema = treeSchema.partial();
+const treeUpdateSchema = partialUpdate(treeSchema);
 
 function readInspection<T extends { result: string; actionSeverity?: string | null }>(inspection: T) {
   const legacySeverity = ["monitor", "action_required", "urgent_action"].includes(inspection.result)
