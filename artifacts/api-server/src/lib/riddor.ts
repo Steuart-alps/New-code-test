@@ -25,9 +25,13 @@ export function isRiddorCategory(value: unknown): value is RiddorCategory {
   return typeof value === "string" && (RIDDOR_CATEGORIES as readonly string[]).includes(value);
 }
 
-/** Every category except over-3-day injuries is reportable to the HSE. */
-export function isReportableRiddorCategory(category: RiddorCategory): boolean {
-  return category !== "over_3_day_record_only";
+/**
+ * Every category except over-3-day injuries is reportable to the HSE. In
+ * Northern Ireland, RIDDOR (Northern Ireland) 1997 still makes over-3-day
+ * injuries reportable (to HSENI), so every category is.
+ */
+export function isReportableRiddorCategory(category: RiddorCategory, northernIreland = false): boolean {
+  return northernIreland || category !== "over_3_day_record_only";
 }
 
 export type RiddorDeadlineState = "reported" | "overdue" | "due" | "on_diagnosis" | "record_only";
@@ -55,14 +59,17 @@ export function ukToday(now: Date = new Date()): string {
 export function riddorDeadline(
   incident: { riddorCategory: string | null; incidentDate: string; reportedToHse: boolean },
   today: string = ukToday(),
+  northernIreland = false,
 ): RiddorDeadline | null {
   const category = incident.riddorCategory;
   if (!isRiddorCategory(category)) return null;
   const notifyWithoutDelay = NOTIFY_WITHOUT_DELAY.has(category);
-  const window = REPORT_WINDOW_DAYS[category];
+  // RIDDOR (NI) 1997: injury and dangerous occurrence reports within 10 days,
+  // over-3-day injuries included.
+  const window = northernIreland && category !== "occupational_disease" ? 10 : REPORT_WINDOW_DAYS[category];
   const reportBy = window === undefined ? null : addDays(incident.incidentDate, window);
   let state: RiddorDeadlineState;
-  if (category === "over_3_day_record_only") state = "record_only";
+  if (category === "over_3_day_record_only" && !northernIreland) state = "record_only";
   else if (incident.reportedToHse) state = "reported";
   else if (reportBy === null) state = "on_diagnosis";
   else state = today > reportBy ? "overdue" : "due";
@@ -70,6 +77,6 @@ export function riddorDeadline(
 }
 
 /** Adds the computed RIDDOR deadline to an incident response. */
-export function withRiddorDeadline<T extends { riddorCategory: string | null; incidentDate: string; reportedToHse: boolean }>(incident: T) {
-  return { ...incident, riddorDeadline: riddorDeadline(incident) };
+export function withRiddorDeadline<T extends { riddorCategory: string | null; incidentDate: string; reportedToHse: boolean }>(incident: T, northernIreland = false) {
+  return { ...incident, riddorDeadline: riddorDeadline(incident, ukToday(), northernIreland) };
 }

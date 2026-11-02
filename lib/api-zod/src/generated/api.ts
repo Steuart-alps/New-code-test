@@ -6266,7 +6266,8 @@ export const GetIncidentConfigResponse = zod.object({
   "incident_departments": zod.string().optional(),
   "incident_default_reporter": zod.string().optional(),
   "incident_show_investigation": zod.string().optional(),
-  "incident_locations": zod.string().optional()
+  "incident_locations": zod.string().optional(),
+  "regulator_nation": zod.string().optional().describe('The nation in the Compliance Hub profile (england, wales, scotland, northern_ireland or multi_nation), or empty. Northern Ireland reports go to HSENI. Read only.')
 })
 
 
@@ -6284,7 +6285,8 @@ export const UpdateIncidentConfigResponse = zod.object({
   "incident_departments": zod.string().optional(),
   "incident_default_reporter": zod.string().optional(),
   "incident_show_investigation": zod.string().optional(),
-  "incident_locations": zod.string().optional()
+  "incident_locations": zod.string().optional(),
+  "regulator_nation": zod.string().optional().describe('The nation in the Compliance Hub profile (england, wales, scotland, northern_ireland or multi_nation), or empty. Northern Ireland reports go to HSENI. Read only.')
 })
 
 

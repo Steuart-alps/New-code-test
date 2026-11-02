@@ -11646,6 +11646,10 @@ components:
           type: string
         incident_locations:
           type: string
+        regulator_nation:
+          type: string
+          readOnly: true
+          description: The nation in the Compliance Hub profile (england, wales, scotland, northern_ireland or multi_nation), or empty. Northern Ireland reports go to HSENI. Read only.
 
     CoshhCheckType:
       type: string
