@@ -5,6 +5,7 @@ import QRCode from "qrcode";
 import { generateSecret, generateToken, verifyToken, keyUri } from "../lib/totp";
 import { getUserWithClientByEmail } from "../lib/auth";
 import { verifyPassword, hashPassword } from "../lib/auth";
+import { MIN_PASSWORD_LENGTH, passwordProblem } from "../lib/passwordPolicy";
 import { getUserById } from "../lib/auth";
 import { requireAuth, isPlatformOperator, getClientId } from "../middleware/requireAuth";
 import {
@@ -796,6 +797,12 @@ router.post("/auth/reset-password", resetPasswordRateLimit, async (req, res) => 
     res.status(400).json({ error: "Invalid request" });
     return;
   }
+  // 422, not 400, so a weak password doesn't count as a failed token guess.
+  const weak = passwordProblem(body.data.password);
+  if (weak) {
+    res.status(422).json({ error: weak, code: "WEAK_PASSWORD" });
+    return;
+  }
 
   const passwordHash = await hashPassword(body.data.password);
   const [hashed, legacy = hashed] = storedCredentialCandidates(body.data.token);
@@ -870,6 +877,11 @@ const RegisterBody = z.object({
 });
 
 router.post("/auth/register", registrationRateLimit, async (req, res) => {
+  const weakPassword = passwordProblem(req.body?.password, typeof req.body?.email === "string" ? req.body.email : null);
+  if (weakPassword && typeof req.body?.password === "string" && req.body.password.length >= MIN_PASSWORD_LENGTH) {
+    res.status(400).json({ error: weakPassword, code: "WEAK_PASSWORD" });
+    return;
+  }
   const body = RegisterBody.safeParse(req.body);
   if (!body.success) {
     res.status(400).json({ error: "Please provide a valid name, email, and password (min 8 characters)." });

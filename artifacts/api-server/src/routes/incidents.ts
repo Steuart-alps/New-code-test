@@ -46,6 +46,8 @@ const createSchema = z.object({
   description: z.string().min(1).max(10000),
   involvedName: z.string().min(1).max(200),
   involvedJobTitle: z.string().max(200).nullable().optional(),
+  involvedAddress: z.string().max(500).nullable().optional(),
+  reporterAddress: z.string().max(500).nullable().optional(),
   involvedEmploymentType: z.enum(EMPLOYMENT_TYPES).default("employee"),
   injuriesSustained: z.string().max(5000).nullable().optional(),
   firstAidGiven: z.boolean().default(false),
@@ -118,11 +120,12 @@ function validateRiddorRecord(data: {
 }
 
 /**
- * Injury details are health data: staff who are not managers (see
- * canReadHealthData) and viewers see the incident with injuriesSustained = null.
+ * Injury details are health data, and home addresses are personal data: staff
+ * who are not managers (see canReadHealthData) and viewers see the incident
+ * with injuriesSustained, involvedAddress and reporterAddress = null.
  */
-function redactHealthData<T extends { injuriesSustained?: string | null }>(req: Parameters<typeof canReadHealthData>[0], row: T): T {
-  return canReadHealthData(req) ? row : { ...row, injuriesSustained: null };
+function redactHealthData<T extends { injuriesSustained?: string | null; involvedAddress?: string | null; reporterAddress?: string | null }>(req: Parameters<typeof canReadHealthData>[0], row: T): T {
+  return canReadHealthData(req) ? row : { ...row, injuriesSustained: null, involvedAddress: null, reporterAddress: null };
 }
 
 async function canAccessSite(clientId: number, siteId: number | null | undefined, deptId: number | null) {
@@ -398,7 +401,11 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   const { riddorRationale, submittedAt, submissionEvidence, submissionReceipt, ...updateData } = parsed.data;
   // Staff who can't read injury details get them back as null; saving the
   // form must not wipe what a manager recorded (adding details is allowed).
-  if (!canReadHealthData(req) && !updateData.injuriesSustained?.trim()) delete updateData.injuriesSustained;
+  if (!canReadHealthData(req)) {
+    if (!updateData.injuriesSustained?.trim()) delete updateData.injuriesSustained;
+    if (!updateData.involvedAddress?.trim()) delete updateData.involvedAddress;
+    if (!updateData.reporterAddress?.trim()) delete updateData.reporterAddress;
+  }
   const riddorChanged = ["riddorReportable", "riddorCategory", "reportedToHse", "hseReference", "hseReportDate"]
     .some(k => k in updateData && (updateData as any)[k] !== (existing as any)[k]);
   const hasRiddorRecord = riddorChanged || !!riddorRationale?.trim() || !!submittedAt || !!submissionEvidence?.trim()

@@ -141,6 +141,8 @@ interface Incident {
   description: string;
   involvedName: string;
   involvedJobTitle: string | null;
+  involvedAddress?: string | null;
+  reporterAddress?: string | null;
   involvedEmploymentType: EmploymentType;
   injuriesSustained: string | null;
   firstAidGiven: boolean;
@@ -413,6 +415,8 @@ const emptyForm = () => ({
   description: "",
   involvedName: "",
   involvedJobTitle: "",
+  involvedAddress: "",
+  reporterAddress: "",
   involvedEmploymentType: "employee" as EmploymentType,
   injuriesSustained: "",
   firstAidGiven: false,
@@ -697,6 +701,8 @@ ${rows.map(r => `<tr>
       description: r.description,
       involvedName: r.involvedName,
       involvedJobTitle: r.involvedJobTitle ?? "",
+      involvedAddress: r.involvedAddress ?? "",
+      reporterAddress: r.reporterAddress ?? "",
       involvedEmploymentType: r.involvedEmploymentType,
       injuriesSustained: r.injuriesSustained ?? "",
       firstAidGiven: r.firstAidGiven,
@@ -781,6 +787,8 @@ ${rows.map(r => `<tr>
         description: form.description.trim(),
         involvedName: form.involvedName.trim(),
         involvedJobTitle: form.involvedJobTitle.trim() || null,
+        involvedAddress: form.involvedAddress.trim() || null,
+        reporterAddress: form.reporterAddress.trim() || null,
         involvedEmploymentType: form.involvedEmploymentType,
         injuriesSustained: form.injuriesSustained.trim() || null,
         firstAidGiven: form.firstAidGiven,
@@ -1312,6 +1320,14 @@ ${rows.map(r => `<tr>
                     </div>
                   </div>
                   <div>
+                    <Label htmlFor="incident-involved-address">Home address</Label>
+                    <Textarea id="incident-involved-address" placeholder="Needed for the accident book. Only managers can see it once saved."
+                      value={form.involvedAddress}
+                      onChange={e => setForm(f => ({ ...f, involvedAddress: e.target.value }))}
+                      autoComplete="off" spellCheck={false}
+                      className="mt-1 rounded-sm" rows={2} />
+                  </div>
+                  <div>
                     <Label>Employment Status *</Label>
                     <Select value={form.involvedEmploymentType} onValueChange={v => setForm(f => ({ ...f, involvedEmploymentType: v as EmploymentType }))}>
                       <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
@@ -1363,6 +1379,14 @@ ${rows.map(r => `<tr>
                     value={form.reportedBy}
                     onChange={e => setForm(f => ({ ...f, reportedBy: e.target.value }))}
                     className="mt-1 rounded-sm" />
+                </div>
+                <div>
+                  <Label htmlFor="incident-reporter-address">Address of the person reporting (if not the injured person)</Label>
+                  <Textarea id="incident-reporter-address" placeholder="Leave blank if the injured person reported it or a member of staff is reporting at work"
+                    value={form.reporterAddress}
+                    onChange={e => setForm(f => ({ ...f, reporterAddress: e.target.value }))}
+                    autoComplete="off" spellCheck={false}
+                    className="mt-1 rounded-sm" rows={2} />
                 </div>
 
                 {editItem ? <CheckPhotoUploader entityType="incident" entityId={editItem.id} /> : media.picker}

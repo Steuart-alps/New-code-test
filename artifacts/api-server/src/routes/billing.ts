@@ -1121,7 +1121,8 @@ router.get("/invoices", requireAuth, requireRole("consultant", "client_admin"), 
   if (!clientId) { res.status(400).json({ error: "clientId required" }); return; }
 
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
-  if (!client?.stripeCustomerId) return void res.status(400).json({ error: "No Stripe customer for this client" });
+  // No payment yet (a trial, or a free account): there are no invoices to show.
+  if (!client?.stripeCustomerId) return void res.json({ invoices: [] });
 
   try {
     const stripe = await getUncachableStripeClient();

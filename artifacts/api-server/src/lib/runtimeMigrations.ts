@@ -2327,6 +2327,11 @@ async function runRuntimeMigrationsOnce() {
     await migrateRecordSignatures();
     await addFireAlarmPanelToSavedPremisesChecks();
 
+    // ---- Accident book addresses (Nov 2026) ----
+    // Mirrors lib/db/src/schema/incidents.ts involvedAddress / reporterAddress.
+    await db.execute(sql`ALTER TABLE "incidents" ADD COLUMN IF NOT EXISTS "involved_address" text`);
+    await db.execute(sql`ALTER TABLE "incidents" ADD COLUMN IF NOT EXISTS "reporter_address" text`);
+
     // ---- A compliance check done in house by a competent person (Oct 2026) ----
     // Mirrors lib/db/src/schema/compliance-items.ts completedInHouseBy.
     await db.execute(sql`ALTER TABLE "compliance_items" ADD COLUMN IF NOT EXISTS "completed_in_house_by" text`);

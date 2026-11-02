@@ -42,7 +42,7 @@ export default function PrivacyPage() {
           <li><strong>Hosting and email providers</strong> — to run the application, store data, and deliver service emails.</li>
           <li><strong>Google Cloud Storage</strong> — to store photos and files attached to records.</li>
           <li><strong>Sentry</strong> — to tell us when something breaks. Error reports hold technical details such as the error, the page and the browser; we remove form contents, cookies, links that grant access and email addresses before they are sent.</li>
-          <li><strong>Anthropic</strong> — only when someone asks ComplyTrack to suggest actions from an uploaded audit or inspection report, or to read a photo or document of their appliance list into PATtrack. The file is sent to Anthropic's AI to read; Anthropic doesn't use it to train its AI. A person checks every suggestion before anything is saved.</li>
+          <li><strong>Anthropic</strong> — the AI that reads documents and lists for ComplyTrack, used only by businesses with ComplyTrack's AI features. It reads what someone asks it to: an audit or inspection report (to suggest actions), a certificate (including certificates a contractor emails to the business's ComplyTrack address), or a photo, PDF or spreadsheet of a list such as appliances, contractors, staff, machines, rooms or supplier allergens. These can include people's names. Anthropic doesn't use them to train its AI. What it reads is shown to a person to check, and nothing is added to the business's records until they confirm it.</li>
           <li><strong>Expo, Apple and Google</strong> — to deliver push notifications to the mobile app. They receive the device token and the notification text, not your records.</li>
         </ul>
         <p>
