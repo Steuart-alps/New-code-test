@@ -35,6 +35,11 @@ export {
   OVERRIDE_REASON_REQUIRED_CODE,
   setRecordSignatureHandler,
   signatureRequiredInfo,
+  setCorrectiveActionHandler,
+  correctiveActionRequiredInfo,
+  correctiveActionsHeaderValue,
+  CORRECTIVE_ACTIONS_HEADER,
+  CORRECTIVE_ACTION_REQUIRED_CODE,
   RECORD_SIGNATURE_HEADER,
   SIGNATURE_REQUIRED_CODE,
   callerChoseClientId,
@@ -43,4 +48,5 @@ export {
 export type {
   AuthTokenGetter, ApiMutationObserver, CsrfTokenProvider, OverrideReasonHandler, OverrideReasonRequest,
   RecordSignatureHandler, RecordSignatureRequest,
+  CorrectiveActionHandler, CorrectiveActionRequest, CorrectiveActionFailure,
 } from "./custom-fetch";

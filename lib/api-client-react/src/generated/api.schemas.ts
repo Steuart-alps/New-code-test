@@ -1118,6 +1118,145 @@ export interface GreenTrackApplicationUpdate {
   products?: GreenTrackApplicationProductInput[];
 }
 
+/**
+ * How busy the area under the tree is
+ */
+export type TreeTrackTreeInputRiskZone = typeof TreeTrackTreeInputRiskZone[keyof typeof TreeTrackTreeInputRiskZone];
+
+
+export const TreeTrackTreeInputRiskZone = {
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+} as const;
+
+export interface TreeTrackTreeInput {
+  /** Tag number, name or group, such as T12 */
+  ref: string;
+  species?: string | null;
+  siteId?: number | null;
+  /** Where the tree is, in words */
+  location?: string | null;
+  /** what3words address, stored as word.word.word */
+  what3words?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  /** How busy the area under the tree is */
+  riskZone?: TreeTrackTreeInputRiskZone;
+  /**
+     * @minimum 1
+     * @maximum 60
+     */
+  inspectionIntervalMonths?: number;
+  notes?: string | null;
+  /** Day the tree was felled or removed */
+  removedAt?: string | null;
+}
+
+/**
+ * How busy the area under the tree is
+ */
+export type TreeTrackTreeUpdateRiskZone = typeof TreeTrackTreeUpdateRiskZone[keyof typeof TreeTrackTreeUpdateRiskZone];
+
+
+export const TreeTrackTreeUpdateRiskZone = {
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+} as const;
+
+export interface TreeTrackTreeUpdate {
+  /** Tag number, name or group, such as T12 */
+  ref?: string;
+  species?: string | null;
+  siteId?: number | null;
+  /** Where the tree is, in words */
+  location?: string | null;
+  /** what3words address, stored as word.word.word */
+  what3words?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  /** How busy the area under the tree is */
+  riskZone?: TreeTrackTreeUpdateRiskZone;
+  /**
+     * @minimum 1
+     * @maximum 60
+     */
+  inspectionIntervalMonths?: number;
+  notes?: string | null;
+  /** Day the tree was felled or removed */
+  removedAt?: string | null;
+}
+
+/**
+ * How busy the area under the tree is
+ */
+export type TreeTrackTreeRiskZone = typeof TreeTrackTreeRiskZone[keyof typeof TreeTrackTreeRiskZone];
+
+
+export const TreeTrackTreeRiskZone = {
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+} as const;
+
+export interface TreeTrackTree {
+  id: number;
+  clientId: number;
+  /** Tag number, name or group, such as T12 */
+  ref: string;
+  species?: string | null;
+  siteId?: number | null;
+  /** Where the tree is, in words */
+  location?: string | null;
+  /** what3words address, stored as word.word.word */
+  what3words?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  /** How busy the area under the tree is */
+  riskZone: TreeTrackTreeRiskZone;
+  /**
+     * @minimum 1
+     * @maximum 60
+     */
+  inspectionIntervalMonths: number;
+  notes?: string | null;
+  /** Day the tree was felled or removed */
+  removedAt?: string | null;
+  createdBy?: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * The latest inspection found a problem
+ */
+export type TreeTrackTreeWithStatusOpenIssue = {
+  checkDate?: string;
+  severity?: string | null;
+} | null;
+
+export type TreeTrackTreeWithStatusStatus = typeof TreeTrackTreeWithStatusStatus[keyof typeof TreeTrackTreeWithStatusStatus];
+
+
+export const TreeTrackTreeWithStatusStatus = {
+  ok: 'ok',
+  due_soon: 'due_soon',
+  overdue: 'overdue',
+  never: 'never',
+} as const;
+
+export type TreeTrackTreeWithStatus = TreeTrackTree & ({
+  /** Last routine inspection (visual, detailed or risk assessment) */
+  lastInspected?: string | null;
+  lastCheckDate?: string | null;
+  lastCheckType?: string | null;
+  /** The latest inspection found a problem */
+  openIssue?: TreeTrackTreeWithStatusOpenIssue;
+  nextDue?: string | null;
+  status: TreeTrackTreeWithStatusStatus;
+});
+
 export interface GreenTrackHourReadingInput {
   machineId: number;
   readingDate: string;
@@ -4509,6 +4648,45 @@ export interface KitchenClosedDaysCreated {
   created: string[];
 }
 
+export interface KitchenMonthSummarySite {
+  siteId: number | null;
+  siteName: string | null;
+  /** The site's first diary record; days before it are not counted. */
+  startedOn: string | null;
+  daysCounted: number;
+  recordedDays: number;
+  draftDays: number;
+  closedDays: number;
+  missedDays: number;
+  missedDates: string[];
+  failedReadings: number;
+  actionsRaised: number;
+  actionsOpen: number;
+}
+
+export type KitchenMonthSummaryTotals = {
+  daysCounted: number;
+  recordedDays: number;
+  draftDays: number;
+  closedDays: number;
+  missedDays: number;
+  failedReadings: number;
+  actionsRaised: number;
+  actionsResolved: number;
+  actionsOpen: number;
+  actionsOverdue: number;
+};
+
+export interface KitchenMonthSummary {
+  month: string;
+  from: string;
+  /** The last day counted (yesterday, or the month's last day). Null when no day has finished yet. */
+  through: string | null;
+  today: string;
+  sites: KitchenMonthSummarySite[];
+  totals: KitchenMonthSummaryTotals;
+}
+
 export interface FoodSafetyMonthlySummary {
   year: number;
   month: number;
@@ -4688,6 +4866,11 @@ export const LegionellaCheckResult = {
   action_required: 'action_required',
 } as const;
 
+/**
+ * Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
+ */
+export type LegionellaCheckFindings = {[key: string]: string} | null;
+
 export interface LegionellaCheck {
   id: number;
   clientId: number;
@@ -4700,6 +4883,10 @@ export interface LegionellaCheck {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** The named cold water tank or calorifier (equipment list item) the check was made on. */
+  equipmentId?: number | null;
+  /** Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail. */
+  findings?: LegionellaCheckFindings;
   createdAt: string;
   updatedAt: string;
 }
@@ -4711,6 +4898,11 @@ export const CreateLegionellaCheckRequestResult = {
   pass: 'pass',
   fail: 'fail',
 } as const;
+
+/**
+ * Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
+ */
+export type CreateLegionellaCheckRequestFindings = {[key: string]: string} | null;
 
 /**
  * temperature is required for calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, and cold_nonsent_temp checks.
@@ -4726,6 +4918,8 @@ export type CreateLegionellaCheckRequest = unknown & ({
   performedBy?: string | null;
   /** A cold water tank or calorifier on the equipment list (its site must match siteId). */
   equipmentId?: number | null;
+  /** Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail. */
+  findings?: CreateLegionellaCheckRequestFindings;
 });
 
 export type UpdateLegionellaCheckRequestResult = typeof UpdateLegionellaCheckRequestResult[keyof typeof UpdateLegionellaCheckRequestResult];
@@ -4735,6 +4929,11 @@ export const UpdateLegionellaCheckRequestResult = {
   pass: 'pass',
   fail: 'fail',
 } as const;
+
+/**
+ * Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.
+ */
+export type UpdateLegionellaCheckRequestFindings = {[key: string]: string} | null;
 
 /**
  * For an existing temperature check, temperature is required. New results use pass or fail.
@@ -4747,6 +4946,10 @@ export interface UpdateLegionellaCheckRequest {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Move the check to another named tank or calorifier at the same site. */
+  equipmentId?: number | null;
+  /** Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail. */
+  findings?: UpdateLegionellaCheckRequestFindings;
 }
 
 export type LegionellaStatusLastResult = typeof LegionellaStatusLastResult[keyof typeof LegionellaStatusLastResult] | null;
@@ -5555,6 +5758,14 @@ export type UpdateHotTubConfigParams = {
 siteId: number;
 };
 
+export type ListTreeTrackTreesParams = {
+siteId?: number;
+/**
+ * Include trees marked felled or removed
+ */
+includeRemoved?: boolean;
+};
+
 export type ListGreenTrackHourReadingsParams = {
 machineId?: number;
 limit?: number;
@@ -5671,6 +5882,14 @@ month: number;
  * Scope to a site's diary. Omit for the whole-organisation diary.
  */
 siteId?: number;
+};
+
+export type GetFoodSafetyMonthSummaryParams = {
+/**
+ * The month as YYYY-MM. Defaults to the business's current month.
+ * @pattern ^[0-9]{4}-[0-9]{2}$
+ */
+month?: string;
 };
 
 export type GetFoodSafetyMissingDatesParams = {

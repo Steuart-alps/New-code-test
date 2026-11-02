@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { getApiErrorMessage } from "@/lib/api";
-import { LIST_KINDS, WORKBOOK_TABS, availableListKinds, guessListKind, guessListKindFromName, type ListKind } from "@/lib/list-kinds";
+import { LIST_KINDS, WORKBOOK_TABS, availableListKinds, guessListKindFromName, guessListKindFromSheet, type ListKind } from "@/lib/list-kinds";
 import { readSpreadsheet, spreadsheetTabNames } from "@/lib/spreadsheet";
 import { TRACK_SETUP, TRACK_SETUP_TABS, planTrackSetup, type PlanGroup } from "@/lib/track-setup";
 import { QUESTIONS_TAB } from "@/lib/setup-info-sheets";
@@ -45,6 +45,8 @@ const CSV_IMPORTS: Partial<Record<ListKind, ImportCsvType>> = {
   "room-track-rooms": "room-track-rooms",
   contractors: "contractors",
   "fire-call-points": "fire-call-points",
+  "legionella-outlets": "legionella-outlets",
+  "compliance-checks": "compliance-checks",
 };
 
 /** "KitchenTrack fridges and freezers and FireTrack call points". */
@@ -83,7 +85,7 @@ export function UploadLists() {
         // A setup "What we need from you" workbook has several tabs: the
         // list is the tab named for it, which its import reads too.
         const tabs = await spreadsheetTabNames(file);
-        const workbookKind = kinds.find(candidate => tabs.some(tab => tab.trim().toLowerCase() === WORKBOOK_TABS[candidate].toLowerCase()));
+        const workbookKind = kinds.find(candidate => tabs.some(tab => tab.trim().toLowerCase() === WORKBOOK_TABS[candidate]?.toLowerCase()));
         // "How many …?" answers and lists of fridges, sentinel taps, hot tubs
         // or bikes set the tracks up too (alongside any list it has).
         const setupTabs = tabs.filter(tab => TRACK_SETUP_TABS[tab.trim().toLowerCase()]);
@@ -104,7 +106,7 @@ export function UploadLists() {
           return;
         }
         const sheet = await readSpreadsheet(file, workbookKind ? { sheet: WORKBOOK_TABS[workbookKind] } : {});
-        const kind = workbookKind ?? guessListKind(sheet.headers, file.name, kinds);
+        const kind = workbookKind ?? guessListKindFromSheet(sheet, file.name, kinds);
         update(item.id, kind
           ? { kind, state: "ready", note: `${sheet.rows.length} row${sheet.rows.length === 1 ? "" : "s"}, sorted by its column headings` }
           : { state: "choose", note: "Its column headings don't say which list it is. Choose one." });

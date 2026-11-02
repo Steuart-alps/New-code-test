@@ -4175,6 +4175,120 @@ export const ImportFireCallPointsResponse = zod.object({
 
 
 /**
+ * @summary Download the CSV template for uploading LegionellaTrack outlets, tanks and calorifiers (managers)
+ */
+export const GetLegionellaOutletImportTemplateResponse = zod.unknown()
+
+
+/**
+ * The browser sends the spreadsheet's header row and cell text: Name, Type (Hot, Cold, TMV, Little used, Cold water tank or Calorifier), Location and Site. Outlets join the site's outlet list; cold water tanks and calorifiers join the equipment list, where tank checks name them. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error.
+ * @summary Preview or import a spreadsheet of LegionellaTrack outlets, tanks and calorifiers (managers)
+ */
+export const ImportLegionellaOutletsBody = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "preview": zod.boolean().optional(),
+  "siteId": zod.number().nullish().describe('The site for rows whose Site cell is blank.')
+})
+
+export const ImportLegionellaOutletsResponse = zod.object({
+  "preview": zod.boolean(),
+  "committed": zod.boolean(),
+  "summary": zod.object({
+  "total": zod.number(),
+  "create": zod.number(),
+  "update": zod.number(),
+  "skip": zod.number(),
+  "error": zod.number()
+}),
+  "rows": zod.array(zod.object({
+  "row": zod.number(),
+  "action": zod.enum(['create', 'update', 'skip', 'error']),
+  "label": zod.string(),
+  "reasons": zod.array(zod.string())
+})),
+  "ignoredHeaders": zod.array(zod.string()),
+  "error": zod.string().optional()
+})
+
+
+/**
+ * @summary Download the CSV template for importing suppliers' allergen information (managers)
+ */
+export const GetAllergenIngredientImportTemplateResponse = zod.unknown()
+
+
+/**
+ * The browser sends the spreadsheet's header row and cell text: a column per allergen (Y, N or May) or Contains and May contain lists. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error. Rows match existing ingredients by site and name; changed allergens update every dish using the ingredient, each with a change log entry.
+ * @summary Preview or import suppliers' allergen information as KitchenTrack ingredients (managers)
+ */
+export const ImportAllergenIngredientsBody = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "preview": zod.boolean().optional(),
+  "siteId": zod.number().nullish().describe('The site for rows whose Site cell is blank.')
+})
+
+export const ImportAllergenIngredientsResponse = zod.object({
+  "preview": zod.boolean(),
+  "committed": zod.boolean(),
+  "summary": zod.object({
+  "total": zod.number(),
+  "create": zod.number(),
+  "update": zod.number(),
+  "skip": zod.number(),
+  "error": zod.number()
+}),
+  "rows": zod.array(zod.object({
+  "row": zod.number(),
+  "action": zod.enum(['create', 'update', 'skip', 'error']),
+  "label": zod.string(),
+  "reasons": zod.array(zod.string())
+})),
+  "ignoredHeaders": zod.array(zod.string()),
+  "error": zod.string().optional()
+})
+
+
+/**
+ * @summary Download the CSV template for importing compliance checks (owners and consultants)
+ */
+export const GetComplianceCheckImportTemplateResponse = zod.unknown()
+
+
+/**
+ * The browser sends the spreadsheet's rows; headings below a title row are found. Each line is matched to ComplyTrack's own check where there is one, then to an existing check with that title at the site. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error. siteId is the site for rows whose Site cell is blank.
+ * @summary Preview or import a business's compliance checklist (owners and consultants)
+ */
+export const ImportComplianceChecksBody = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "preview": zod.boolean().optional(),
+  "siteId": zod.number().nullish().describe('The site for rows whose Site cell is blank.')
+})
+
+export const ImportComplianceChecksResponse = zod.object({
+  "preview": zod.boolean(),
+  "committed": zod.boolean(),
+  "summary": zod.object({
+  "total": zod.number(),
+  "create": zod.number(),
+  "update": zod.number(),
+  "skip": zod.number(),
+  "error": zod.number()
+}),
+  "rows": zod.array(zod.object({
+  "row": zod.number(),
+  "action": zod.enum(['create', 'update', 'skip', 'error']),
+  "label": zod.string(),
+  "reasons": zod.array(zod.string())
+})),
+  "ignoredHeaders": zod.array(zod.string()),
+  "error": zod.string().optional()
+})
+
+
+/**
  * @summary The AI features add-on, whether this business has it, and how much of its allowance is used
  */
 export const getAiAddonResponseOnePercentUsedMin = 0;
@@ -4327,7 +4441,7 @@ export const ReadPatRegisterListResponse = zod.object({
  * @summary Whether ComplyTrack can read a photo or document list for an import, and this month's use
  */
 export const GetImportListReadingParams = zod.object({
-  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster'])
+  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster', 'allergen-ingredients', 'legionella-outlets'])
 })
 
 export const getImportListReadingResponseAiPercentUsedMin = 0;
@@ -4362,11 +4476,11 @@ export const GetImportListReadingResponse = zod.object({
 
 
 /**
- * Claude reads the file and returns rows in the import's own columns (RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment or the staff roster). Nothing is saved: the browser sends the rows through the import's usual preview. The file is not stored. Off until the server has an Anthropic API key; readings share the business's monthly number with the PAT register reading.
+ * Claude reads the file and returns rows in the import's own columns (RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment, the staff roster or KitchenTrack suppliers' allergen information). Nothing is saved: the browser sends the rows through the import's usual preview. The file is not stored. Off until the server has an Anthropic API key; readings share the business's monthly number with the PAT register reading.
  * @summary Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
  */
 export const ReadImportListParams = zod.object({
-  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster'])
+  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster', 'allergen-ingredients', 'legionella-outlets'])
 })
 
 export const readImportListBodyFileNameMax = 255;
@@ -5040,6 +5154,153 @@ export const UpdateHotTubCheckResponse = zod.object({
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
+
+
+/**
+ * @summary The tree register, each tree with its last inspection and when it is next due
+ */
+export const ListTreeTrackTreesQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional(),
+  "includeRemoved": zod.coerce.boolean().optional().describe('Include trees marked felled or removed')
+})
+
+export const listTreeTrackTreesResponseOneInspectionIntervalMonthsMax = 60;
+
+
+
+export const ListTreeTrackTreesResponseItem = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "ref": zod.string().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(listTreeTrackTreesResponseOneInspectionIntervalMonthsMax),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed'),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+}).and(zod.object({
+  "lastInspected": zod.date().nullish().describe('Last routine inspection (visual, detailed or risk assessment)'),
+  "lastCheckDate": zod.date().nullish(),
+  "lastCheckType": zod.string().nullish(),
+  "openIssue": zod.object({
+  "checkDate": zod.date().optional(),
+  "severity": zod.string().nullish()
+}).nullish().describe('The latest inspection found a problem'),
+  "nextDue": zod.date().nullish(),
+  "status": zod.enum(['ok', 'due_soon', 'overdue', 'never'])
+}))
+export const ListTreeTrackTreesResponse = zod.array(ListTreeTrackTreesResponseItem)
+
+
+/**
+ * @summary Add a tree to the register (Owners and consultants)
+ */
+export const createTreeTrackTreeBodyInspectionIntervalMonthsMax = 60;
+
+
+
+export const CreateTreeTrackTreeBody = zod.object({
+  "ref": zod.string().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).optional().describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(createTreeTrackTreeBodyInspectionIntervalMonthsMax).optional(),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed')
+})
+
+export const createTreeTrackTreeResponseInspectionIntervalMonthsMax = 60;
+
+
+
+export const CreateTreeTrackTreeResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "ref": zod.string().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(createTreeTrackTreeResponseInspectionIntervalMonthsMax),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed'),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Change a tree on the register, or mark it felled or removed (Owners and consultants)
+ */
+export const UpdateTreeTrackTreeParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const updateTreeTrackTreeBodyInspectionIntervalMonthsMax = 60;
+
+
+
+export const UpdateTreeTrackTreeBody = zod.object({
+  "ref": zod.string().optional().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).optional().describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(updateTreeTrackTreeBodyInspectionIntervalMonthsMax).optional(),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed')
+})
+
+export const updateTreeTrackTreeResponseInspectionIntervalMonthsMax = 60;
+
+
+
+export const UpdateTreeTrackTreeResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "ref": zod.string().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(updateTreeTrackTreeResponseInspectionIntervalMonthsMax),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed'),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Delete a tree added by mistake; one with inspections is marked felled instead (Owners and consultants)
+ */
+export const DeleteTreeTrackTreeParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteTreeTrackTreeResponse = zod.void()
 
 
 /**
@@ -6642,6 +6903,51 @@ export const GetFoodSafetySummaryResponse = zod.object({
 
 
 /**
+ * For every site the user can see: diary days recorded, in draft, closed and missed (counted up to yesterday, from the site's first diary record), and the KitchenTrack actions raised in the month and still open.
+ * @summary KitchenTrack month summary for Owners and Managers
+ */
+export const getFoodSafetyMonthSummaryQueryMonthRegExp = new RegExp('^[0-9]{4}-[0-9]{2}$');
+
+
+export const GetFoodSafetyMonthSummaryQueryParams = zod.object({
+  "month": zod.coerce.string().regex(getFoodSafetyMonthSummaryQueryMonthRegExp).optional().describe('The month as YYYY-MM. Defaults to the business\'s current month.')
+})
+
+export const GetFoodSafetyMonthSummaryResponse = zod.object({
+  "month": zod.string(),
+  "from": zod.date(),
+  "through": zod.date().nullable().describe('The last day counted (yesterday, or the month\'s last day). Null when no day has finished yet.'),
+  "today": zod.date(),
+  "sites": zod.array(zod.object({
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "startedOn": zod.date().nullable().describe('The site\'s first diary record; days before it are not counted.'),
+  "daysCounted": zod.number(),
+  "recordedDays": zod.number(),
+  "draftDays": zod.number(),
+  "closedDays": zod.number(),
+  "missedDays": zod.number(),
+  "missedDates": zod.array(zod.date()),
+  "failedReadings": zod.number(),
+  "actionsRaised": zod.number(),
+  "actionsOpen": zod.number()
+})),
+  "totals": zod.object({
+  "daysCounted": zod.number(),
+  "recordedDays": zod.number(),
+  "draftDays": zod.number(),
+  "closedDays": zod.number(),
+  "missedDays": zod.number(),
+  "failedReadings": zod.number(),
+  "actionsRaised": zod.number(),
+  "actionsResolved": zod.number(),
+  "actionsOpen": zod.number(),
+  "actionsOverdue": zod.number()
+})
+})
+
+
+/**
  * @summary List missing and unsubmitted food safety diary dates in a bounded range
  */
 export const GetFoodSafetyMissingDatesQueryParams = zod.object({
@@ -6817,6 +7123,8 @@ export const ListLegionellaChecksResponseItem = zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('The named cold water tank or calorifier (equipment list item) the check was made on.'),
+  "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -6835,7 +7143,8 @@ export const CreateLegionellaCheckBody = zod.unknown().and(zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
-  "equipmentId": zod.number().nullish().describe('A cold water tank or calorifier on the equipment list (its site must match siteId).')
+  "equipmentId": zod.number().nullish().describe('A cold water tank or calorifier on the equipment list (its site must match siteId).'),
+  "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.')
 })).describe('temperature is required for calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, and cold_nonsent_temp checks.')
 
 export const CreateLegionellaCheckResponse = zod.object({
@@ -6849,6 +7158,8 @@ export const CreateLegionellaCheckResponse = zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('The named cold water tank or calorifier (equipment list item) the check was made on.'),
+  "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -6991,7 +7302,9 @@ export const UpdateLegionellaCheckBody = zod.object({
   "siteId": zod.number().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "performedBy": zod.string().nullish()
+  "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('Move the check to another named tank or calorifier at the same site.'),
+  "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.')
 }).describe('For an existing temperature check, temperature is required. New results use pass or fail.')
 
 export const UpdateLegionellaCheckResponse = zod.object({
@@ -7005,6 +7318,8 @@ export const UpdateLegionellaCheckResponse = zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('The named cold water tank or calorifier (equipment list item) the check was made on.'),
+  "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })

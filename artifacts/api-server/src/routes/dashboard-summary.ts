@@ -1012,7 +1012,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
         let overdueCount = 0;
         let dueSoonCount = 0;
-        const hasAny = lastByType.size > 0;
+        let hasAny = lastByType.size > 0;
 
         for (const [ct, freqDays] of Object.entries(FREQ)) {
           const lastDate = lastByType.get(ct);
@@ -1028,6 +1028,43 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
             items.push({ label: CHECK_LABELS[ct] ?? ct, detail: daysUntil === 0 ? "Due today" : `Due in ${plural(daysUntil, "day")}`, path: "/tree-track" });
           }
         }
+
+        // Trees on the register, each due on its own interval from its last
+        // routine inspection; a tree never inspected is due now.
+        const treeRows = rows(await db.execute(sql`
+          SELECT t.ref,
+            (MAX(i.check_date) FILTER (WHERE i.check_type IN ('visual_assessment', 'detailed_assessment', 'risk_assessment'))
+              + make_interval(months => t.inspection_interval_months))::date AS next_due
+          FROM (SELECT * FROM trees WHERE client_id = ${clientId} AND removed_at IS NULL ${siteClause}) t
+          LEFT JOIN tree_inspections i ON i.tree_id = t.id AND i.client_id = t.client_id
+          GROUP BY t.id, t.ref, t.inspection_interval_months
+          ORDER BY next_due NULLS FIRST, t.ref
+        `));
+        const treeItems: TrackItem[] = [];
+        let treesOverdue = 0;
+        let treesDueSoon = 0;
+        for (const tree of treeRows as Array<{ ref: string; next_due: string | Date | null }>) {
+          const nextDue = tree.next_due == null ? null
+            : typeof tree.next_due === "string" ? tree.next_due.slice(0, 10) : tree.next_due.toISOString().slice(0, 10);
+          const daysUntil = nextDue ? toUtcDays(nextDue) - todayDays : null;
+          if (daysUntil === null || daysUntil < 0) {
+            treesOverdue++;
+            treeItems.push({ label: `Tree ${tree.ref}`, detail: daysUntil === null ? "Not inspected yet" : `Inspection overdue by ${plural(Math.abs(daysUntil), "day")}`, path: "/tree-track" });
+          } else if (daysUntil <= 30) {
+            treesDueSoon++;
+            treeItems.push({ label: `Tree ${tree.ref}`, detail: daysUntil === 0 ? "Inspection due today" : `Inspection due in ${plural(daysUntil, "day")}`, path: "/tree-track" });
+          }
+        }
+        // A long register stays one line on the dashboard rather than a wall of trees.
+        if (treeItems.length > 5) {
+          items.push(...treeItems.slice(0, 4));
+          items.push({ label: `${treeItems.length - 4} more trees`, detail: "Due or overdue for inspection", path: "/tree-track" });
+        } else {
+          items.push(...treeItems);
+        }
+        overdueCount += treesOverdue;
+        dueSoonCount += treesDueSoon;
+        if (treeRows.length > 0) hasAny = true;
 
         if (overdueCount > 0) { status = "overdue"; badge = `${overdueCount} overdue`; }
         else if (dueSoonCount > 0) { status = "attention"; badge = `${dueSoonCount} due soon`; }

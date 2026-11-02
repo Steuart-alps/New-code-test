@@ -47,7 +47,7 @@ export const EXTENDED_AUDITED_TABLES = [
   "task_completions", "tasks",
   "track_action_templates", "track_actions", "track_control_profiles", "track_evidence",
   "track_evidence_requirements", "track_owners",
-  "tree_inspections",
+  "tree_inspections", "trees",
 ] as const;
 
 async function installAuditTriggers(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], tables: readonly string[]) {

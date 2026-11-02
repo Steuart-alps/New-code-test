@@ -180,9 +180,10 @@ async function main() {
   }
   expectStatus("manager bearer: malformed siteId on fire status", (await manager("GET", "/fire-safety/status?siteId=abc")).status, 400);
 
-  // ── Viewer bearer: reads, never writes ─────────────────────────────────────
-  expectStatus("viewer bearer: fire config for own site", (await viewer("GET", `/fire-safety/config?siteId=${siteAlpha}`)).status, 200);
-  expectStatus("viewer bearer: legionella status for own site", (await viewer("GET", `/legionella/status?siteId=${siteAlpha}`)).status, 200);
+  // ── Viewer bearer: own training only, never writes ─────────────────────────
+  // Viewers see only their own TrainTrack records, so track controls are closed to them.
+  expectStatus("viewer bearer: no fire config, even for own site", (await viewer("GET", `/fire-safety/config?siteId=${siteAlpha}`)).status, 403);
+  expectStatus("viewer bearer: no legionella status, even for own site", (await viewer("GET", `/legionella/status?siteId=${siteAlpha}`)).status, 403);
   expectStatus("viewer bearer: cannot change the fire profile", (await viewer("PUT", `/fire-safety/config?siteId=${siteAlpha}`, {
     controlProfile: { riskAssessmentReference: "tampered" },
   })).status, 403);

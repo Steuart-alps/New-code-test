@@ -8,14 +8,18 @@ import { API_BASE, getApiErrorMessage } from "@/lib/api";
 import { downloadBlob, getDownloadErrorMessage } from "@/lib/download";
 import { downloadCsvAsExcel, downloadExcel, readSpreadsheet } from "@/lib/spreadsheet";
 import { SpreadsheetDropZone, isSpreadsheetFile, usePastedFile } from "@/components/spreadsheet-drop-zone";
-import { ListReadNote, ListReadingPanel, isPhotoOrPdf, useListReading, type ListReadResult } from "@/components/ai-list-reader";
+import { ListReadNote, ListReadingPanel, isPhotoOrPdf, useListReading, type ListReadResult, type ListReadingKind } from "@/components/ai-list-reader";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-export type ImportCsvType = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points";
+export type ImportCsvType = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "allergen-ingredients" | "legionella-outlets" | "compliance-checks";
 
-const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string; required: string; optional: string; matching: string; template: string; sheet: string }> = {
+const IMPORTS: Record<ImportCsvType, {
+  title: string; noun: string; one: string; required: string; optional: string; matching: string; template: string; sheet: string;
+  /** What a blank cell does, when it is not "leaves the detail unchanged". */
+  blankCells?: string;
+}> = {
   "pat-appliances": {
     title: "Upload appliance register",
     noun: "appliances",
@@ -57,6 +61,40 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     template: "firetrack-call-points-template",
     sheet: "Call points",
   },
+  // A supplier's allergen matrix or product list (api-server lib/allergenImport.ts).
+  "allergen-ingredients": {
+    title: "Import suppliers' allergen information",
+    noun: "ingredients",
+    one: "ingredient",
+    required: "Ingredient, and either a column for each allergen (Y, N or May) or a Contains column",
+    optional: "Supplier, Product code, May contain, Site (blank = every site), Notes",
+    matching: "Use the supplier's own allergen sheet as it is: long headings such as \"Cereals containing gluten\" are recognised. Rows match existing ingredients by site and name; changed allergens update every dish using the ingredient, with a change log entry. Check every allergen against the supplier's information before you import.",
+    template: "kitchentrack-supplier-allergens-template",
+    sheet: "Allergens",
+    blankCells: "A blank allergen cell means the ingredient does not contain it; other blank cells leave existing details unchanged.",
+  },
+  // Outlets join the site's outlet list; tanks and calorifiers the equipment
+  // list (api-server routes/csv-imports.ts planLegionellaOutlets).
+  "legionella-outlets": {
+    title: "Upload outlets and tanks",
+    noun: "outlets and tanks",
+    one: "outlet or tank",
+    required: "Outlet or tank (its name), Type (Hot, Cold, TMV, Little used, Cold water tank or Calorifier)",
+    optional: "Location, Site (leave blank for the site chosen here)",
+    matching: "Use your own names, such as \"Ladies toilets, basin 1\" or \"Tank 1 (roof void)\". A tap with hot and cold is two rows. Rows match what is already listed by site and name.",
+    template: "legionellatrack-outlets-and-tanks-template",
+    sheet: "Outlets and tanks",
+  },
+  "compliance-checks": {
+    title: "Import compliance checks from a spreadsheet",
+    noun: "compliance checks",
+    one: "compliance check",
+    required: "Check (or Item)",
+    optional: "Repeat (or Time period: Annual, 6 monthly, 5 years), Last done, Next due (DD/MM/YYYY), Contractor, Contractor phone, Contractor email, Site (leave blank for the site chosen here), Category, Notes",
+    matching: "Your own checklist works as it is, with a title above the headings. Each line is matched to ComplyTrack's own check where there is one (so \"Fire Alarm Maintenance\" updates the check FireTrack shows), then to a check you already have with that name. Newer dates already in ComplyTrack are kept. Headings, in-house routines and weekly checks are skipped.",
+    template: "compliance-checks-template",
+    sheet: "Compliance checks",
+  },
 };
 
 type RowAction = "create" | "update" | "skip" | "error";
@@ -88,8 +126,10 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, 
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [file, setFile] = useState<File | null>(null);
-  // A photo or document read by ComplyTrack instead of a spreadsheet (AI add-on).
-  const reading = useListReading(type, open, siteId);
+  // A photo or document read by ComplyTrack instead of a spreadsheet (AI
+  // add-on); compliance checks come from a spreadsheet only.
+  const readable = type !== "compliance-checks";
+  const reading = useListReading(readable ? type as ListReadingKind : "contractors", open && readable, siteId);
   const [readFromList, setReadFromList] = useState<ListReadResult | null>(null);
   const [sheet, setSheet] = useState<{ headers: string[]; rows: string[][] } | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
@@ -100,7 +140,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, 
   const startedWith = useRef<File | null>(null);
   useEffect(() => {
     if (!open) { startedWith.current = null; return; }
-    if (!initialFile || !reading.loaded || startedWith.current === initialFile) return;
+    if (!initialFile || (readable && !reading.loaded) || startedWith.current === initialFile) return;
     startedWith.current = initialFile;
     dropped(initialFile);
   }, [open, initialFile, reading.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -222,7 +262,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, 
           <div className="space-y-1 rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
             <p><span className="font-medium text-foreground">Required column{config.required.includes(",") ? "s" : ""}:</span> {config.required}</p>
             <p><span className="font-medium text-foreground">Optional:</span> {config.optional}</p>
-            <p>Put the column headings in the first row. {config.matching} Blank cells leave existing details unchanged. Sites are matched by name. Up to 1,000 rows per file.</p>
+            <p>{type === "compliance-checks" ? "" : "Put the column headings in the first row. "}{config.matching} {config.blankCells ?? "Blank cells leave existing details unchanged."} Sites are matched by name. Up to 1,000 rows per file.</p>
             <p className="flex flex-wrap items-center gap-x-2">
               <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => void downloadTemplate("xlsx")} data-testid={`button-download-${type}-template`}>
                 <Download className="mr-1 h-3.5 w-3.5" /> Download the Excel template
@@ -236,7 +276,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, 
           {!file ? (
             <>
               <SpreadsheetDropZone onFile={dropped} aiReading={reading.canRead} testId={`input-${type}-file`} />
-              <ListReadingPanel reading={reading} kind={type} noun={config.noun} onFile={selected => void readList(selected)} onSpreadsheet={selected => void choose(selected)} />
+              {readable && <ListReadingPanel reading={reading} kind={type as ListReadingKind} noun={config.noun} onFile={selected => void readList(selected)} onSpreadsheet={selected => void choose(selected)} />}
             </>
           ) : (
             <div className="flex items-center gap-3 rounded-lg border bg-muted/20 p-3">
@@ -256,7 +296,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, 
 
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
-          {readFromList && <ListReadNote result={readFromList} noun={config.noun} one={config.one} kind={type} onDownload={downloadReadRows} />}
+          {readFromList && <ListReadNote result={readFromList} noun={config.noun} one={config.one} kind={type as ListReadingKind} onDownload={downloadReadRows} />}
 
           {summary && (
             <div className="grid grid-cols-2 gap-2 rounded-md border bg-muted/30 p-3 sm:grid-cols-4" data-testid="import-summary">
@@ -317,8 +357,8 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, 
 
 /**
  * "Import spreadsheet" button plus its dialog, for register pages. Hidden for users
- * the API would refuse: viewers, and staff other than PATTrack department
- * managers.
+ * the API would refuse: viewers, and staff other than department managers
+ * (PATTrack appliances and KitchenTrack ingredients only).
  */
 export function ImportCsvButton({ type, onImported, className, siteId, label = "Import spreadsheet" }: {
   type: ImportCsvType; onImported?: () => void; className?: string; siteId?: number | null; label?: string;
@@ -326,7 +366,10 @@ export function ImportCsvButton({ type, onImported, className, siteId, label = "
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const isAdmin = user?.role === "consultant" || user?.role === "client_admin";
-  const allowed = isAdmin || (type === "pat-appliances" && (user?.role === "client_manager" || (user?.role === "client_staff" && user.isDepartmentManager === true)));
+  // PATTrack appliances and KitchenTrack ingredients: managers too.
+  const managersToo = type === "pat-appliances" || type === "allergen-ingredients";
+  const allowed = isAdmin || (managersToo && (user?.role === "client_manager" || (user?.role === "client_staff" && user.isDepartmentManager === true)))
+    || (type === "legionella-outlets" && user?.role === "client_manager");
   if (!allowed) return null;
   return (
     <>

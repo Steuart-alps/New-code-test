@@ -761,11 +761,11 @@ ${rows.map(r => `<tr>
   return (
     <AppLayout title="TrainTrack">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <p className="text-sm text-muted-foreground mt-1">
           Training certificates, document sign-offs, and internal training records
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {canMutate && (
             <FormOptionsEditor
               optionKey="traintrack_types"
@@ -792,7 +792,7 @@ ${rows.map(r => `<tr>
       {showFireDrills && <DrillAttendanceCard siteId={siteFilter === "all" ? undefined : Number(siteFilter)} trackLink />}
 
       {/* Tabs */}
-      <div className="flex border-b border-border">
+      <div className="flex border-b border-border overflow-x-auto">
         {tabDef.map(({ key, label, Icon, count }) => (
           <button
             key={key}

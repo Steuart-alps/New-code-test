@@ -50,7 +50,8 @@ const KITCHEN_CLOSING_ITEMS: ChecklistItem[] = [
   { label: "Cooling foods placed into refrigeration correctly", checked: false },
   { label: "Walk-in fridge temperature recorded on All In One Record", checked: false },
   { label: "Under-counter fridge temperature recorded on All In One Record", checked: false },
-  { label: "Freezer temperature recorded on All In One Record", checked: false },
+  { label: "Standalone fridges temperature recorded on All In One Record", checked: false },
+  { label: "Freezers temperature recorded on All In One Record", checked: false },
   // 2. Equipment
   { section: "Equipment", label: "Ovens switched off (unless required overnight)", checked: false },
   { label: "Hobs and grills cleaned and turned off", checked: false },
