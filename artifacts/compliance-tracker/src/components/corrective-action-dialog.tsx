@@ -20,6 +20,48 @@ const MAX_LENGTH = 1000;
  * save is sent again with the answers (then signed). Each answer goes on the
  * action the fail opens on its track. Cancelling leaves the save unsent.
  */
+/**
+ * An example that fits what failed, read from the fail's own words and the
+ * track it was saved on. The first match wins, so the most specific come first.
+ */
+const EXAMPLES: [RegExp, string][] = [
+  [/first.?aid/, "first aid kit restocked and the missing items noted"],
+  [/probe/, "probe recalibrated, or replaced and checked again in iced and boiling water"],
+  [/allergen/, "allergen chart updated and kitchen team told"],
+  [/emergency.?light/, "bulb replaced and retested, or reported to maintenance"],
+  [/fire.?door|self.?clos/, "door closer adjusted so the door shuts fully, or repair booked"],
+  [/extinguisher/, "extinguisher replaced and put back on its bracket"],
+  [/escape route|fire.?walk|night.?walk|fire exit/, "boxes moved and the fire exit cleared"],
+  [/drill/, "repeat drill booked and staff told where the assembly point is"],
+  [/alarm|call.?point|panel/, "fire alarm engineer called, panel back to normal after reset"],
+  [/hot.?tub|\bspa\b|\btub\b/, "tub closed, water adjusted and retested before reopening"],
+  [/pool|swim|bather|lifeguard|surveillance/, "pool closed to bathers, dosing adjusted and water retested"],
+  [/sanitiser|chlorine|bromine|\bph\b/, "closed to bathers, dosing adjusted and water retested before reopening"],
+  [/storage temp/, "tank lid and insulation checked, water hygiene contractor told"],
+  [/tank/, "tank lid refitted and a clean booked with the water hygiene contractor"],
+  [/calorifier/, "calorifier set point checked and water hygiene contractor called"],
+  [/shower/, "shower head descaled and disinfected again"],
+  [/tmv|mixing valve/, "TMV adjusted and retested, outlet out of use until it passes"],
+  [/legionella|outlet|sentinel|flush|\btap\b|cold water|hot water/, "outlet flushed and retested, water hygiene contractor told"],
+  [/freezer|fridge|chill|cold|cooling|delivery/, "moved food to another fridge and called the engineer"],
+  [/cook|\bcore\b|reheat|hot.?hold|sous.?vide/, "cooked for longer and probed again at 75°C"],
+  [/clean|hygiene|dirty|grease/, "area cleaned again and checked by the supervisor"],
+  [/\bpat\b|appliance|electrical|plug|cable/, "appliance taken out of use and labelled, repair booked"],
+  [/bike|brake|tyre|helmet/, "bike taken off hire until the fault is fixed"],
+  [/machine|mower|puwer|green|\bshed\b|tractor|spray/, "machine taken out of use and reported to the mechanic"],
+  [/\btree/, "area fenced off and the tree surgeon booked"],
+  [/pest|rodent|droppings|fly/, "pest contractor called and the gap sealed"],
+  [/\broom\b|bedroom|housekeeping/, "fault reported to maintenance and room taken off sale until fixed"],
+  [/hazard|premises|slip|\btrip|spill/, "area made safe and coned off, repair reported to maintenance"],
+];
+
+export function correctiveActionExample(label: string, url: string): string {
+  const failed = label.toLowerCase();
+  const track = url.toLowerCase();
+  const found = EXAMPLES.find(([words]) => words.test(failed)) ?? EXAMPLES.find(([words]) => words.test(track));
+  return `For example: ${found ? found[1] : "put right straight away, or reported to the manager to arrange"}`;
+}
+
 export function CorrectiveActionDialog() {
   const [current, setCurrent] = useState<Pending | null>(null);
   const queue = useRef<Pending[]>([]);
@@ -119,7 +161,7 @@ function CorrectiveActionForm({ request, onCancel, onDone }: {
               rows={2}
               autoFocus={index === 0}
               aria-invalid={showError || undefined}
-              placeholder="For example: bulb replaced and retested, or reported to maintenance"
+              placeholder={correctiveActionExample(failure.label, request.url)}
               onChange={(e) => setAnswers(prev => ({ ...prev, [failure.key]: e.target.value }))}
             />
             {showError && <p className="text-xs text-destructive" role="alert">Say what was done about this fail.</p>}

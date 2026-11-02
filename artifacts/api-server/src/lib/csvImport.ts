@@ -1,7 +1,7 @@
 /**
  * Register CSV imports (PATTrack appliances, RoomTrack rooms, contractors,
  * FireTrack call points, KitchenTrack ingredients from suppliers' allergen
- * information).
+ * information, LegionellaTrack outlets and tanks).
  *
  * Mirrors the staff-roster reconciliation: the browser reads the spreadsheet
  * (Excel or CSV) and sends its header row and cell text; the API maps the
@@ -14,7 +14,7 @@ import { PAT_APPLIANCE_TYPES } from "@workspace/db/schema";
 import { ALLERGEN_KEYS } from "./allergenRecipes";
 import { ALLERGEN_COLUMN_LABELS, ALLERGEN_COLUMN_PREFIXES, allergensInText, parseAllergenCell } from "./allergenImport";
 
-export const CSV_IMPORT_TYPES = ["pat-appliances", "room-track-rooms", "contractors", "fire-call-points", "allergen-ingredients"] as const;
+export const CSV_IMPORT_TYPES = ["pat-appliances", "room-track-rooms", "contractors", "fire-call-points", "allergen-ingredients", "legionella-outlets"] as const;
 export type CsvImportType = (typeof CSV_IMPORT_TYPES)[number];
 
 export function isCsvImportType(value: unknown): value is CsvImportType {
@@ -92,7 +92,34 @@ export const CSV_IMPORT_COLUMNS: Record<CsvImportType, CsvImportColumn[]> = {
     { key: "site", label: "Site", aliases: ["site", "sitename"], max: 200, example: "" },
     { key: "notes", label: "Notes", aliases: ["notes", "note", "comments"], max: 2000, example: "" },
   ],
+  // Outlets go on the site's monitored outlet list; cold water tanks and
+  // calorifiers go on the equipment list, where tank checks name them.
+  "legionella-outlets": [
+    { key: "name", label: "Outlet or tank", aliases: ["outletortank", "name", "outlet", "outletname", "sentineloutlet", "sentinel", "outletref", "outletreference", "tank", "tankname", "asset", "assetname", "reference", "ref"], required: true, max: 200, example: "Ladies toilets, basin 1" },
+    { key: "type", label: "Type", aliases: ["type", "outlettype", "kind", "category", "hotorcold", "hotcold"], required: true, max: 100, example: "Hot" },
+    { key: "location", label: "Location", aliases: ["location", "where", "area", "room", "position", "description"], max: 200, example: "Clubhouse ground floor" },
+    { key: "site", label: "Site", aliases: ["site", "sitename"], max: 200, example: "" },
+  ],
 };
+
+export type LegionellaListType = "hot" | "cold" | "tmv" | "little_used" | "cold_water_tank" | "calorifier";
+export const LEGIONELLA_LIST_TYPE_WORDS = "Hot, Cold, TMV, Little used, Cold water tank or Calorifier";
+
+/**
+ * A LegionellaTrack list's Type cell: an outlet type, or a cold water tank or
+ * calorifier (which go on the equipment list). Null when it is not one.
+ */
+export function legionellaListType(value: string | null | undefined): LegionellaListType | null {
+  const v = normaliseHeader(value ?? "");
+  if (!v) return null;
+  if (/tank|cwst|cistern/.test(v)) return "cold_water_tank";
+  if (/calorifier|cylinder/.test(v)) return "calorifier";
+  if (/tmv|mix|blend|thermostatic/.test(v)) return "tmv";
+  if (/littleused|infrequent|lowuse|rarelyused|seldom|flush/.test(v)) return "little_used";
+  if (v.startsWith("hot") || v === "h") return "hot";
+  if (v.startsWith("cold") || v === "c") return "cold";
+  return null;
+}
 
 /** The natural key each register is matched on, for the template help text. */
 export const CSV_IMPORT_KEYS: Record<CsvImportType, string> = {
@@ -101,6 +128,7 @@ export const CSV_IMPORT_KEYS: Record<CsvImportType, string> = {
   contractors: "Email",
   "fire-call-points": "Site + call point",
   "allergen-ingredients": "Site + ingredient name",
+  "legionella-outlets": "Site + name (outlets), or site + name + type (tanks and calorifiers)",
 };
 
 export const normaliseHeader = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");

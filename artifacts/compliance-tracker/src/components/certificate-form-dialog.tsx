@@ -42,6 +42,32 @@ export const DEFECT_CODE_OPTIONS: Array<{ value: CertificateDefectCode; label: s
 ];
 const BLOCKING_CODES = new Set<string>(["C1", "C2", "FI", "ID", "AR"]);
 
+/** Defect examples that match the kind of certificate, so a gas record isn't shown an electrical example. */
+function defectPlaceholders(checkName?: string): { description: string; location: string } {
+  const n = (checkName ?? "").toLowerCase();
+  if (/gas|boiler|oil|oftec|kitchen appliance|catering/.test(n))
+    return { description: "What the certificate says, e.g. Flue spillage test failed on boiler 2", location: "Location (optional), e.g. Plant room" };
+  if (/alarm|detect/.test(n))
+    return { description: "What the certificate says, e.g. Smoke detector in store room not responding", location: "Location (optional), e.g. Zone 3, first floor" };
+  if (/emergency light/.test(n))
+    return { description: "What the certificate says, e.g. Fitting failed 3-hour duration test", location: "Location (optional), e.g. Rear stairwell" };
+  if (/extinguisher|fire door|sprinkler|dry riser|suppression/.test(n))
+    return { description: "What the certificate says, e.g. Extinguisher pressure low, replaced", location: "Location (optional), e.g. Kitchen exit" };
+  if (/loler|lift|hoist|crane|forklift|loader|lifting|platform|mewp/.test(n))
+    return { description: "What the certificate says, e.g. Worn lifting chain, take out of use", location: "Location (optional), e.g. Goods lift" };
+  if (/legionella|water|tank|tmv/.test(n))
+    return { description: "What the certificate says, e.g. Sediment in cold water tank, clean needed", location: "Location (optional), e.g. Roof void tank" };
+  if (/asbestos/.test(n))
+    return { description: "What the certificate says, e.g. Damaged pipe lagging, remove or seal", location: "Location (optional), e.g. Boiler room" };
+  if (/pressure|compressor|air receiver|pssr/.test(n))
+    return { description: "What the certificate says, e.g. Safety valve overdue for testing", location: "Location (optional), e.g. Workshop compressor" };
+  if (/ventilation|\blev\b|extract|duct|canopy/.test(n))
+    return { description: "What the certificate says, e.g. Grease build-up in canopy ductwork", location: "Location (optional), e.g. Main kitchen canopy" };
+  if (/eicr|electric|\bpat\b|wiring|installation|lightning|solar|ev charg/.test(n))
+    return { description: "What the certificate says, e.g. No RCD protection to sockets", location: "Location (optional), e.g. Kitchen DB2" };
+  return { description: "What the certificate says, e.g. Repair needed before next use", location: "Location (optional), e.g. Plant room" };
+}
+
 type DefectDraft = { code: CertificateDefectCode; description: string; location: string };
 
 const selectClass = "w-full h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
@@ -78,6 +104,7 @@ export function CertificateFormDialog({
   const [defectError, setDefectError] = useState<string | null>(null);
   const [savingDefects, setSavingDefects] = useState(false);
   const isItemCertificate = !!itemId;
+  const defectExamples = defectPlaceholders(suggestedName ?? certificate?.name);
   const suggestedCertificateName = suggestedName?.trim()
     ? /certificate|licen[cs]e|registration|check/i.test(suggestedName)
       ? suggestedName.trim()
@@ -305,9 +332,9 @@ export function CertificateFormDialog({
                       <Trash2 className="w-4 h-4" />
                     </Button>
                   </div>
-                  <Input aria-label="Defect description" placeholder="What the certificate says, e.g. No RCD protection to sockets"
+                  <Input aria-label="Defect description" placeholder={defectExamples.description}
                     value={d.description} maxLength={1000} onChange={(e) => updateDefect(index, { description: e.target.value })} />
-                  <Input aria-label="Defect location" placeholder="Location (optional), e.g. Kitchen DB2"
+                  <Input aria-label="Defect location" placeholder={defectExamples.location}
                     value={d.location} maxLength={300} onChange={(e) => updateDefect(index, { location: e.target.value })} />
                   <p className="text-xs text-muted-foreground">
                     {BLOCKING_CODES.has(d.code)

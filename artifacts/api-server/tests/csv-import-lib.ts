@@ -3,7 +3,7 @@
 // suppliers' allergen information.
 // Run through test:csv-import-lib.
 import assert from "node:assert/strict";
-import { csvCell, importTemplateCsv, mapImportRows, parseImportDate, splitListCell } from "../src/lib/csvImport";
+import { csvCell, importTemplateCsv, legionellaListType, mapImportRows, parseImportDate, splitListCell } from "../src/lib/csvImport";
 
 // Formula injection: = + - @ (after whitespace/BOM/zero-width), full-width forms, leading tab/CR.
 for (const value of ["=1+1", "+44", "-2", "@SUM(A1)", "  =cmd", "﻿=cmd", "​@x", "＝1", "\tHello", "\rHello"]) {
@@ -116,6 +116,18 @@ assert.ok(contractors.rows[2].errors.some((error) => error.includes("200 charact
   const allergenTemplate = importTemplateCsv("allergen-ingredients");
   assert.ok(allergenTemplate.includes('"Ingredient","Supplier","Product code","Celery","Gluten"'));
   assert.ok(!allergenTemplate.includes('"Contains"'));
+}
+
+// LegionellaTrack outlets and tanks: the Type cell in everyday words.
+{
+  const types: Array<[string, string | null]> = [
+    ["Hot", "hot"], ["hot water", "hot"], ["H", "hot"], ["Cold", "cold"], ["cold tap", "cold"],
+    ["TMV", "tmv"], ["Mixer", "tmv"], ["Thermostatic mixing valve", "tmv"], ["Little used", "little_used"], ["Infrequently used", "little_used"],
+    ["Cold water storage tank", "cold_water_tank"], ["CWST", "cold_water_tank"], ["Tank", "cold_water_tank"],
+    ["Calorifier", "calorifier"], ["Hot water cylinder", "calorifier"], ["Warm", null], ["", null],
+  ];
+  for (const [cell, type] of types) assert.equal(legionellaListType(cell), type, cell);
+  assert.ok(importTemplateCsv("legionella-outlets").includes('"Outlet or tank","Type","Location","Site"'));
 }
 
 console.log("csv-import-lib: all checks passed");

@@ -17,7 +17,7 @@ import { REGISTER_FILE_WORDING, REGISTER_READING_MAX_BYTES, type RegisterReading
  * ANTHROPIC_API_KEY is set (reportReadingConfigured).
  */
 
-export const LIST_READING_KINDS = ["room-track-rooms", "contractors", "fire-call-points", "greentrack-equipment", "staff-roster", "allergen-ingredients"] as const;
+export const LIST_READING_KINDS = ["room-track-rooms", "contractors", "fire-call-points", "greentrack-equipment", "staff-roster", "allergen-ingredients", "legionella-outlets"] as const;
 export type ListReadingKind = typeof LIST_READING_KINDS[number];
 export const isListReadingKind = (value: unknown): value is ListReadingKind =>
   typeof value === "string" && (LIST_READING_KINDS as readonly string[]).includes(value);
@@ -124,6 +124,17 @@ const KINDS: Record<ListReadingKind, ListKind> = {
       NOTES,
     ],
     guidance: "Return one row per product. Take allergens only from what the file states: an allergen box or matrix, ingredients in bold, \"contains\" or \"may contain\" statements. Never work out allergens from the product's name or from what it usually contains. Wheat, barley, rye, oats and spelt are Gluten; almonds, hazelnuts, walnuts, cashews, pecans, Brazil nuts, pistachios and macadamias are Tree nuts; prawns, crab and lobster are Crustaceans; mussels, oysters and squid are Molluscs. Leave Contains null, and set unclear, when the file does not say which allergens a product has.",
+  },
+  "legionella-outlets": {
+    noun: "outlets and tanks",
+    columns: [
+      { key: "name", label: "Outlet or tank", description: "The outlet's or tank's name exactly as written, e.g. \"Ladies toilets, basin 1\" or \"Tank 1\".", max: 200 },
+      { key: "type", label: "Type", description: "Hot, Cold, TMV (thermostatic mixing valve), Little used, Cold water tank or Calorifier.", max: 100,
+        enum: ["Hot", "Cold", "TMV", "Little used", "Cold water tank", "Calorifier"] },
+      { key: "location", label: "Location", description: "Where it is, e.g. \"Clubhouse ground floor\".", max: 200 },
+      SITE,
+    ],
+    guidance: "Return one row per water outlet (tap, shower, basin), cold water storage tank or calorifier on the list, such as a Legionella risk assessment's sentinel outlet or asset list. An outlet with both hot and cold taps is two rows, one Hot and one Cold. Leave out pipework, valves and pumps.",
   },
 };
 

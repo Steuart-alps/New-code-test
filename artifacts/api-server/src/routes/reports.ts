@@ -130,7 +130,7 @@ router.get("/reports/risk-acknowledgements", requireAuth, async (req, res) => {
 
   const parsed = riskAcknowledgementsSchema.safeParse(req.query);
   if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Invalid params" });
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid params" });
   }
 
   const scope = await resolveReportScope(req, res, clientId, parsed.data.siteId, parsed.data.departmentId);
@@ -316,7 +316,7 @@ router.get("/reports/compliance", requireAuth, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
   const parsed = complianceSchema.safeParse(req.query);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Invalid params" });
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid params" });
 
   const { from, to } = parsed.data;
 
@@ -485,7 +485,7 @@ router.get("/reports/compliance-trend", requireAuth, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
   const parsed = trendSchema.safeParse(req.query);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Invalid params" });
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid params" });
 
   const { months } = parsed.data;
 

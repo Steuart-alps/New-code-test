@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-export type ImportCsvType = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "allergen-ingredients";
+export type ImportCsvType = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "allergen-ingredients" | "legionella-outlets";
 
 const IMPORTS: Record<ImportCsvType, {
   title: string; noun: string; one: string; required: string; optional: string; matching: string; template: string; sheet: string;
@@ -72,6 +72,18 @@ const IMPORTS: Record<ImportCsvType, {
     template: "kitchentrack-supplier-allergens-template",
     sheet: "Allergens",
     blankCells: "A blank allergen cell means the ingredient does not contain it; other blank cells leave existing details unchanged.",
+  },
+  // Outlets join the site's outlet list; tanks and calorifiers the equipment
+  // list (api-server routes/csv-imports.ts planLegionellaOutlets).
+  "legionella-outlets": {
+    title: "Upload outlets and tanks",
+    noun: "outlets and tanks",
+    one: "outlet or tank",
+    required: "Outlet or tank (its name), Type (Hot, Cold, TMV, Little used, Cold water tank or Calorifier)",
+    optional: "Location, Site (leave blank for the site chosen here)",
+    matching: "Use your own names, such as \"Ladies toilets, basin 1\" or \"Tank 1 (roof void)\". A tap with hot and cold is two rows. Rows match what is already listed by site and name.",
+    template: "legionellatrack-outlets-and-tanks-template",
+    sheet: "Outlets and tanks",
   },
 };
 
@@ -344,7 +356,8 @@ export function ImportCsvButton({ type, onImported, className, siteId, label = "
   const isAdmin = user?.role === "consultant" || user?.role === "client_admin";
   // PATTrack appliances and KitchenTrack ingredients: managers too.
   const managersToo = type === "pat-appliances" || type === "allergen-ingredients";
-  const allowed = isAdmin || (managersToo && (user?.role === "client_manager" || (user?.role === "client_staff" && user.isDepartmentManager === true)));
+  const allowed = isAdmin || (managersToo && (user?.role === "client_manager" || (user?.role === "client_staff" && user.isDepartmentManager === true)))
+    || (type === "legionella-outlets" && user?.role === "client_manager");
   if (!allowed) return null;
   return (
     <>

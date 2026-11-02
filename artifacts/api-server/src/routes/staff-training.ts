@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { staffTrainingRecordsTable, usersTable } from "@workspace/db/schema";
@@ -16,7 +17,7 @@ const CreateBody = z.object({
   notes: z.string().nullable().optional(),
 });
 
-const UpdateBody = CreateBody.partial();
+const UpdateBody = partialUpdate(CreateBody);
 
 // GET /staff-training — list all records for this client
 router.get("/staff-training", requireAuth, async (req, res) => {

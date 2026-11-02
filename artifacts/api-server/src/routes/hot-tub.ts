@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { hotTubChecksTable, sitesTable, HOT_TUB_CHECK_TYPES, trackControlProfilesTable, auditEventsTable } from "@workspace/db/schema";
@@ -123,7 +124,7 @@ router.put("/tubs/:id", requireAuth, denyViewers, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-  const parsed = tubSchema.partial().safeParse(req.body);
+  const parsed = partialUpdate(tubSchema).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const d = parsed.data;
   const existingResult = await db.execute(sql`
@@ -173,7 +174,7 @@ router.delete("/tubs/:id", requireAuth, denyViewers, async (req, res) => {
   res.status(204).end();
 });
 
-const updateSchema = createSchema.partial().omit({ checkType: true });
+const updateSchema = partialUpdate(createSchema).omit({ checkType: true });
 // Creation only: the mobile outbox's device entry ID (see clientEntryReplay).
 const postSchema = createSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
