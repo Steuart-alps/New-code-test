@@ -204,6 +204,7 @@
     "test:fix-track-contractor-approval": "bash tests/run-fix-track-contractor-approval.sh",
     "test:fix-track-assign-contractor": "bash tests/run-fresh-schema.sh tests/fix-track-assign-contractor.mjs",
     "test:contractor-sign-in": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/contractor-sign-in.mjs",
+    "test:contractor-tests": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/contractor-tests.mjs",
     "test:record-signatures": "FRESH_SCHEMA_BASE=push FRESH_SCHEMA_RECORD_SIGNATURES=1 bash tests/run-fresh-schema.sh tests/record-signatures.mjs",
     "test:corrective-actions": "FRESH_SCHEMA_BASE=push FRESH_SCHEMA_RECORD_SIGNATURES=1 FRESH_SCHEMA_CORRECTIVE_ACTIONS=1 bash tests/run-fresh-schema.sh tests/corrective-actions.mjs",
     "test:contractor-token-security": "bash tests/run-fresh-schema.sh tests/contractor-token-security.mjs",

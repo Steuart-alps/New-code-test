@@ -57,6 +57,15 @@ const EXCLUDED = {
   "POST /api/site-sign-in/:token/sign-in": tokenLink,
   "POST /api/site-sign-in/:token/visit": tokenLink,
   "POST /api/site-sign-in/:token/sign-out": tokenLink,
+  "GET /api/contractor-tests/:token": tokenLink,
+  "POST /api/contractor-tests/:token/sign-in": tokenLink,
+  "POST /api/contractor-tests/:token/session": tokenLink,
+  "POST /api/contractor-tests/:token/sign-out": tokenLink,
+  "GET /api/contractor-tests/:token/items": tokenLink,
+  "PUT /api/contractor-tests/:token/items/:applianceId/result": tokenLink,
+  "POST /api/contractor-tests/:token/items": tokenLink,
+  "POST /api/contractor-tests/:token/certificate": tokenLink,
+  "POST /api/contractor-tests/:token/sign-off": tokenLink,
 };
 
 // Same method and path declared in two files. Express runs the first; the

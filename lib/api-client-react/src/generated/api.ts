@@ -82,6 +82,7 @@ import type {
   CreateKitchenClosedDaysParams,
   CreateLegionellaCheckRequest,
   CreatePATApplianceRequest,
+  CreatePATContractorVisitRequest,
   CreatePATTestRequest,
   CreatePremisesInspectionRequest,
   CreatePrivacyRecordParams,
@@ -222,6 +223,7 @@ import type {
   ListKitchenClosedDaysParams,
   ListLegionellaChecksParams,
   ListMyTrainingRecords200,
+  ListPATContractorVisitsParams,
   ListPATTestsParams,
   ListPremisesInspectionsParams,
   ListPublicLinkAccessParams,
@@ -234,6 +236,10 @@ import type {
   OrderFireCallPointsRequest,
   OwnTrainingRecord,
   PATAppliance,
+  PATContractorVisit,
+  PATContractorVisitDetail,
+  PATContractorVisitLink,
+  PATContractorVisits,
   PATTest,
   PATTrackConfig,
   PATTrackStatus,
@@ -261,6 +267,7 @@ import type {
   RecordFoodSafetyColdReadingParams,
   RecordSignature,
   RecordSignatureToken,
+  RenewPATContractorVisitLinkRequest,
   RequestFeedbackScreenshotUploadBody,
   RequestSetupAssistParams,
   RequestUploadUrlBody,
@@ -15126,6 +15133,382 @@ export const useDeletePATPresetTemplate = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeletePATPresetTemplateMutationOptions(options));
+    }
+
+export const getListPATContractorVisitsUrl = (params?: ListPATContractorVisitsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/pat-track/contractor-visits?${stringifiedParams}` : `/api/pat-track/contractor-visits`
+}
+
+/**
+ * @summary Contractor testing visits at the caller's sites, newest first (not Viewers)
+ */
+export const listPATContractorVisits = async (params?: ListPATContractorVisitsParams, options?: RequestInit): Promise<PATContractorVisits> => {
+
+  return customFetch<PATContractorVisits>(getListPATContractorVisitsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPATContractorVisitsQueryKey = (params?: ListPATContractorVisitsParams,) => {
+    return [
+    `/api/pat-track/contractor-visits`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListPATContractorVisitsQueryOptions = <TData = Awaited<ReturnType<typeof listPATContractorVisits>>, TError = ErrorType<unknown>>(params?: ListPATContractorVisitsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPATContractorVisits>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPATContractorVisitsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPATContractorVisits>>> = ({ signal }) => listPATContractorVisits(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPATContractorVisits>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListPATContractorVisitsQueryResult = NonNullable<Awaited<ReturnType<typeof listPATContractorVisits>>>
+export type ListPATContractorVisitsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Contractor testing visits at the caller's sites, newest first (not Viewers)
+ */
+
+export function useListPATContractorVisits<TData = Awaited<ReturnType<typeof listPATContractorVisits>>, TError = ErrorType<unknown>>(
+ params?: ListPATContractorVisitsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPATContractorVisits>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListPATContractorVisitsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreatePATContractorVisitUrl = () => {
+
+
+
+
+  return `/api/pat-track/contractor-visits`
+}
+
+/**
+ * The link is returned once; only its digest is kept. It works from set-up until two days after the last visit day, for this site only.
+ * @summary Set up a contractor's testing visit and email them the link (Owners and Managers)
+ */
+export const createPATContractorVisit = async (createPATContractorVisitRequest: CreatePATContractorVisitRequest, options?: RequestInit): Promise<PATContractorVisitLink> => {
+
+  return customFetch<PATContractorVisitLink>(getCreatePATContractorVisitUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createPATContractorVisitRequest)
+  }
+);}
+
+
+
+
+
+export const getCreatePATContractorVisitMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPATContractorVisit>>, TError,{data: BodyType<CreatePATContractorVisitRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPATContractorVisit>>, TError,{data: BodyType<CreatePATContractorVisitRequest>}, TContext> => {
+
+const mutationKey = ['createPATContractorVisit'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPATContractorVisit>>, {data: BodyType<CreatePATContractorVisitRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPATContractorVisit(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePATContractorVisitMutationResult = NonNullable<Awaited<ReturnType<typeof createPATContractorVisit>>>
+    export type CreatePATContractorVisitMutationBody = BodyType<CreatePATContractorVisitRequest>
+    export type CreatePATContractorVisitMutationError = ErrorType<void>
+
+    /**
+ * @summary Set up a contractor's testing visit and email them the link (Owners and Managers)
+ */
+export const useCreatePATContractorVisit = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPATContractorVisit>>, TError,{data: BodyType<CreatePATContractorVisitRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createPATContractorVisit>>,
+        TError,
+        {data: BodyType<CreatePATContractorVisitRequest>},
+        TContext
+      > => {
+      return useMutation(getCreatePATContractorVisitMutationOptions(options));
+    }
+
+export const getGetPATContractorVisitUrl = (id: number,) => {
+
+
+
+
+  return `/api/pat-track/contractor-visits/${id}`
+}
+
+/**
+ * @summary One visit with every result, each sign-in and the sign-off signature
+ */
+export const getPATContractorVisit = async (id: number, options?: RequestInit): Promise<PATContractorVisitDetail> => {
+
+  return customFetch<PATContractorVisitDetail>(getGetPATContractorVisitUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPATContractorVisitQueryKey = (id: number,) => {
+    return [
+    `/api/pat-track/contractor-visits/${id}`
+    ] as const;
+    }
+
+
+export const getGetPATContractorVisitQueryOptions = <TData = Awaited<ReturnType<typeof getPATContractorVisit>>, TError = ErrorType<void>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPATContractorVisit>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPATContractorVisitQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPATContractorVisit>>> = ({ signal }) => getPATContractorVisit(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPATContractorVisit>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPATContractorVisitQueryResult = NonNullable<Awaited<ReturnType<typeof getPATContractorVisit>>>
+export type GetPATContractorVisitQueryError = ErrorType<void>
+
+
+/**
+ * @summary One visit with every result, each sign-in and the sign-off signature
+ */
+
+export function useGetPATContractorVisit<TData = Awaited<ReturnType<typeof getPATContractorVisit>>, TError = ErrorType<void>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPATContractorVisit>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPATContractorVisitQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRenewPATContractorVisitLinkUrl = (id: number,) => {
+
+
+
+
+  return `/api/pat-track/contractor-visits/${id}/new-link`
+}
+
+/**
+ * @summary Replace an open visit's link (the old one stops working) and email the new one
+ */
+export const renewPATContractorVisitLink = async (id: number,
+    renewPATContractorVisitLinkRequest?: RenewPATContractorVisitLinkRequest, options?: RequestInit): Promise<PATContractorVisitLink> => {
+
+  return customFetch<PATContractorVisitLink>(getRenewPATContractorVisitLinkUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(renewPATContractorVisitLinkRequest)
+  }
+);}
+
+
+
+
+
+export const getRenewPATContractorVisitLinkMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renewPATContractorVisitLink>>, TError,{id: number;data?: BodyType<RenewPATContractorVisitLinkRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof renewPATContractorVisitLink>>, TError,{id: number;data?: BodyType<RenewPATContractorVisitLinkRequest>}, TContext> => {
+
+const mutationKey = ['renewPATContractorVisitLink'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof renewPATContractorVisitLink>>, {id: number;data?: BodyType<RenewPATContractorVisitLinkRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  renewPATContractorVisitLink(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RenewPATContractorVisitLinkMutationResult = NonNullable<Awaited<ReturnType<typeof renewPATContractorVisitLink>>>
+    export type RenewPATContractorVisitLinkMutationBody = BodyType<RenewPATContractorVisitLinkRequest> | undefined
+    export type RenewPATContractorVisitLinkMutationError = ErrorType<void>
+
+    /**
+ * @summary Replace an open visit's link (the old one stops working) and email the new one
+ */
+export const useRenewPATContractorVisitLink = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renewPATContractorVisitLink>>, TError,{id: number;data?: BodyType<RenewPATContractorVisitLinkRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof renewPATContractorVisitLink>>,
+        TError,
+        {id: number;data?: BodyType<RenewPATContractorVisitLinkRequest>},
+        TContext
+      > => {
+      return useMutation(getRenewPATContractorVisitLinkMutationOptions(options));
+    }
+
+export const getEndPATContractorVisitUrl = (id: number,) => {
+
+
+
+
+  return `/api/pat-track/contractor-visits/${id}/end`
+}
+
+/**
+ * @summary Close a visit's link early; results already logged stay on PATrack
+ */
+export const endPATContractorVisit = async (id: number, options?: RequestInit): Promise<PATContractorVisit> => {
+
+  return customFetch<PATContractorVisit>(getEndPATContractorVisitUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getEndPATContractorVisitMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endPATContractorVisit>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof endPATContractorVisit>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['endPATContractorVisit'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof endPATContractorVisit>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  endPATContractorVisit(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type EndPATContractorVisitMutationResult = NonNullable<Awaited<ReturnType<typeof endPATContractorVisit>>>
+
+    export type EndPATContractorVisitMutationError = ErrorType<void>
+
+    /**
+ * @summary Close a visit's link early; results already logged stay on PATrack
+ */
+export const useEndPATContractorVisit = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endPATContractorVisit>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof endPATContractorVisit>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getEndPATContractorVisitMutationOptions(options));
     }
 
 export const getGetDailyTrackHistoryUrl = (params: GetDailyTrackHistoryParams,) => {

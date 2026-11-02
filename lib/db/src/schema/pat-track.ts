@@ -70,12 +70,19 @@ export const patTestsTable = pgTable("pat_tests", {
   // submission is recognised instead of creating a duplicate. Not a credential.
   clientEntryId: text("client_entry_id"),
   clientEntryHash: text("client_entry_hash"),
+  // Logged by a contractor through their testing link (contractor_test_visits);
+  // one test per appliance per visit. Not a foreign key, to keep the schema
+  // files free of an import cycle; the visit row is never deleted on its own.
+  contractorTestVisitId: integer("contractor_test_visit_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [
   uniqueIndex("UQ_pat_tests_client_entry_id")
     .on(table.clientId, table.clientEntryId)
     .where(sql`${table.clientEntryId} IS NOT NULL`),
+  uniqueIndex("UQ_pat_tests_contractor_visit_appliance")
+    .on(table.contractorTestVisitId, table.applianceId)
+    .where(sql`${table.contractorTestVisitId} IS NOT NULL`),
 ]);
 
 // Certificate-level PAT register. The legacy appliance/test register above is

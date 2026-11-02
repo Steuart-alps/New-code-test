@@ -64,7 +64,7 @@ const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingm
 const STORED_TYPES: ReadonlySet<AllowedUploadType> = new Set([
   "application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "image/avif",
 ]);
-const EXTENSIONS: Record<string, string> = {
+export const EXTENSIONS: Record<string, string> = {
   "application/pdf": ".pdf", "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", [DOCX_TYPE]: ".docx",
 };
 

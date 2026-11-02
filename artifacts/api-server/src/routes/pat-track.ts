@@ -7,8 +7,12 @@ import { requireAuth, requireClientAdmin, getClientId, denyViewers, getActiveDep
 import { historicalTestDepartmentScope } from "../lib/patLegacyHistoryScope";
 import { departmentSiteId, siteVisibleSql, siteVisibleToDepartment } from "../lib/departmentSites";
 import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
+import { patContractorVisitsRouter } from "./contractor-tests";
 
 const router = Router();
+
+// Contractors logging their tests through a link (routes/contractor-tests.ts).
+router.use("/contractor-visits", requireAuth, patContractorVisitsRouter);
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
