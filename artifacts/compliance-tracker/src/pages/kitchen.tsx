@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { takeLinkParams } from "@/lib/deep-link";
 import { ChecklistItemRow } from "@/components/checklist-item-row";
+import { PassAllButton } from "@/components/pass-all-button";
 import { checklistProgress, submitHint, withResult, itemResult, type ChecklistResult } from "@/lib/checklist-results";
 import { scrollPageToTop } from "@/lib/page-scroll";
 import { AppLayout } from "@/components/layout";
@@ -2249,15 +2250,18 @@ function KitchenChecklistCard({
           </div>
         )}
 
+        {!submitted && !(templateLoading && !existing) && (
+          <div className="mb-4">
+            <PassAllButton remaining={progress.remaining} total={items.length} onPassAll={passRemaining} />
+          </div>
+        )}
+
         {!submitted && (
           <div className="space-y-3 border-t pt-3">
             <div className="grid grid-cols-2 gap-3">
               <StaffPerformerSelect label="Completed by" value={completedBy} onChange={edit(setCompletedBy)} onRosterIdChange={edit(setStaffRosterId)} />
               {canAdmin && <div className="space-y-1"><Label className="text-xs">Manager note</Label><Input value={managerNote} onChange={e => edit(setManagerNote)(e.target.value)} placeholder="Optional" className="h-8 text-sm" /></div>}
             </div>
-            {progress.remaining > 0 && progress.answered > 0 && (
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={passRemaining}>Mark the {progress.remaining} remaining as Pass</Button>
-            )}
             {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => save(false)} disabled={saving} className="flex-1">{saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save draft"}</Button>
