@@ -16,7 +16,8 @@ import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { getApiErrorMessage } from "@/lib/api";
 import { LIST_KINDS, WORKBOOK_TABS, availableListKinds, guessListKind, guessListKindFromName, type ListKind } from "@/lib/list-kinds";
 import { readSpreadsheet, spreadsheetTabNames } from "@/lib/spreadsheet";
-import { TRACK_SETUP_TABS } from "@/lib/track-setup";
+import { TRACK_SETUP, TRACK_SETUP_TABS, planTrackSetup, type PlanGroup } from "@/lib/track-setup";
+import { QUESTIONS_TAB } from "@/lib/setup-info-sheets";
 import { cn } from "@/lib/utils";
 
 /**
@@ -45,6 +46,12 @@ const CSV_IMPORTS: Partial<Record<ListKind, ImportCsvType>> = {
   contractors: "contractors",
   "fire-call-points": "fire-call-points",
 };
+
+/** "KitchenTrack fridges and freezers and FireTrack call points". */
+function describeTracks(groups: PlanGroup[]): string {
+  const labels = [...new Set(groups.map(group => TRACK_SETUP[group.kind].label))];
+  return labels.length > 1 ? `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}` : labels[0];
+}
 
 /** The page body, without the app frame (also used by its browser test). */
 export function UploadLists() {
@@ -77,15 +84,24 @@ export function UploadLists() {
         // list is the tab named for it, which its import reads too.
         const tabs = await spreadsheetTabNames(file);
         const workbookKind = kinds.find(candidate => tabs.some(tab => tab.trim().toLowerCase() === WORKBOOK_TABS[candidate].toLowerCase()));
-        // Fridges, outlets, hot tubs, bikes or "Counts per site": the tracks
-        // are set up from the workbook too (alongside any list it has).
+        // "How many …?" answers and lists of fridges, sentinel taps, hot tubs
+        // or bikes set the tracks up too (alongside any list it has).
         const setupTabs = tabs.filter(tab => TRACK_SETUP_TABS[tab.trim().toLowerCase()]);
-        if (setupTabs.length && !workbookKind) {
-          update(item.id, { setup: true, state: "ready", note: `Sets up your tracks from: ${setupTabs.join(", ")}` });
+        const plan = setupTabs.length
+          ? planTrackSetup(await Promise.all(setupTabs.map(async name => ({ name, ...(await readSpreadsheet(file, { sheet: name })) }))))
+          : null;
+        const setupNote = plan?.groups.length ? `Sets up ${describeTracks(plan.groups)}` : null;
+        if (setupNote && !workbookKind) {
+          update(item.id, { setup: true, state: "ready", note: setupNote });
           return;
         }
-        if (setupTabs.length) {
-          setItems(list => [...list, { id: nextId.current++, file, kind: null, state: "ready", setup: true, note: `Sets up your tracks from: ${setupTabs.join(", ")}` }]);
+        if (setupNote) {
+          setItems(list => [...list, { id: nextId.current++, file, kind: null, state: "ready", setup: true, note: setupNote }]);
+        }
+        // A setup form with only answers to read (Compliance Checks, DocTrack…).
+        if (!workbookKind && tabs.some(tab => tab.trim().toLowerCase() === QUESTIONS_TAB.toLowerCase())) {
+          update(item.id, { state: "done", note: "Nothing here to add automatically. Send it to your ALPS consultant, or enter your answers in ComplyTrack." });
+          return;
         }
         const sheet = await readSpreadsheet(file, workbookKind ? { sheet: WORKBOOK_TABS[workbookKind] } : {});
         const kind = workbookKind ?? guessListKind(sheet.headers, file.name, kinds);

@@ -23,9 +23,12 @@ export const TRACK_SETUP: Record<TrackSetupKind, { label: string; service: strin
 export const TRACK_SETUP_TABS: Record<string, TrackSetupKind | "counts"> = {
   "fridges and freezers": "cold-units",
   outlets: "outlets",
+  "sentinel taps": "outlets",
   "hot tubs": "hot-tubs",
   bikes: "bikes",
   "counts per site": "counts",
+  // The setup forms' "How many …?" questions, one answer column per site.
+  questions: "counts",
 };
 
 export type OutletType = "hot" | "cold" | "calorifier" | "tmv" | "little_used";
@@ -81,10 +84,10 @@ const OUTLET_TYPES: Record<string, OutletType> = {
 /** A track's own list tab: one item per named line. */
 export function planFromListTab(kind: TrackSetupKind, headers: string[], rows: string[][], skipped: string[]): PlanGroup[] {
   const groups: PlanGroup[] = [];
-  const name = column(headers, "name", "outlet name", "reference", "call point");
-  const type = column(headers, "type");
+  const name = column(headers, "name", "outlet name", "tap", "reference", "call point");
+  const type = column(headers, "type", "hot or cold");
   const site = column(headers, "site");
-  const location = column(headers, "location");
+  const location = column(headers, "location", "where");
   const description = column(headers, "description");
   const bikeName = kind === "bikes" ? column(headers, "name") : -1;
   const bikeRef = kind === "bikes" ? column(headers, "reference", "ref") : -1;
@@ -123,23 +126,31 @@ const COUNTED: Record<string, { kind: TrackSetupKind; name: (n: number) => strin
 
 const MAX_COUNT = 200;
 
-/** "Counts per site": a column per site, numbered items for each count. */
+/** "How many fridges?" and "Fridges" both count fridges. */
+const countedItem = (text: string) => COUNTED[normalise(text).replace(/^(roughly )?how many /, "")];
+
+/**
+ * "Counts per site" or a setup form's Questions tab: a column per site,
+ * numbered items for each count. A lone "Answer" column (no sites known when
+ * the form was downloaded) is the whole business.
+ */
 export function planFromCounts(headers: string[], rows: string[][], skipped: string[]): PlanGroup[] {
   const groups: PlanGroup[] = [];
-  const item = column(headers, "item");
+  const item = column(headers, "item", "question");
   const notes = column(headers, "notes");
   if (item < 0) return groups;
   const siteColumns = headers.map((header, index) => ({ header: header.trim(), index }))
     .filter(({ header, index }) => index > item && index !== notes && header);
   for (const row of rows) {
-    const counted = COUNTED[normalise(cell(row, item))];
+    const counted = countedItem(cell(row, item));
     if (!counted) continue;
-    for (const { header, index } of siteColumns) {
+    for (const { header: label, index } of siteColumns) {
+      const header = normalise(label) === "answer" ? "" : label;
       const raw = cell(row, index);
       if (!raw) continue;
       const count = Number(raw);
       if (!Number.isInteger(count) || count < 0 || count > MAX_COUNT) {
-        skipped.push(`${cell(row, item)} at ${header}: "${raw}" isn't a number from 0 to ${MAX_COUNT}`);
+        skipped.push(`${cell(row, item)}${header ? ` at ${header}` : ""}: "${raw}" isn't a number from 0 to ${MAX_COUNT}`);
         continue;
       }
       for (let n = 1; n <= count; n++) {
@@ -152,7 +163,8 @@ export function planFromCounts(headers: string[], rows: string[][], skipped: str
 
 /**
  * The whole plan for a workbook's tabs. A track's named list wins over the
- * counts for the same site, so "Walk-in fridge" isn't added again as "Fridge 3".
+ * counts for the same site, so "Walk-in fridge" isn't added again as "Fridge 3"
+ * (except outlets: named sentinel taps and counted showers are both added).
  */
 export function planTrackSetup(tabs: { name: string; headers: string[]; rows: string[][] }[]): TrackSetupPlan {
   const skipped: string[] = [];
@@ -164,7 +176,9 @@ export function planTrackSetup(tabs: { name: string; headers: string[]; rows: st
     if (kind === "counts") counted.push(...planFromCounts(tab.headers, tab.rows, skipped));
     else listed.push(...planFromListTab(kind, tab.headers, tab.rows, skipped));
   }
-  const hasList = (group: PlanGroup) => listed.some((other) => other.kind === group.kind && (other.siteName ?? "").toLowerCase() === (group.siteName ?? "").toLowerCase());
+  // Sentinel taps and counted showers are different outlets, so both are added.
+  const hasList = (group: PlanGroup) => group.kind !== "outlets"
+    && listed.some((other) => other.kind === group.kind && (other.siteName ?? "").toLowerCase() === (group.siteName ?? "").toLowerCase());
   return { groups: [...listed, ...counted.filter((group) => !hasList(group))].filter((group) => group.items.length), skipped };
 }
 

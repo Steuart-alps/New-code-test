@@ -94,15 +94,15 @@ function InfoSheetDownloads({ context }: { context: InfoSheetContext }) {
       <div className="flex gap-3">
         <FileSpreadsheet className="w-5 h-5 mt-0.5 shrink-0 text-primary" aria-hidden="true" />
         <div className="space-y-1">
-          <p className="text-sm font-semibold">What we need from you: Excel checklists</p>
-          <p className="text-sm text-muted-foreground">One workbook for each track, with a tab for every list to gather. Lists such as staff, contractors and equipment can be uploaded straight back in: choose the whole workbook in "Import spreadsheet". Or send them to ALPS with a setup request.</p>
+          <p className="text-sm font-semibold">What we need from you: simple Excel forms</p>
+          <p className="text-sm text-muted-foreground">A few quick questions for each track (how many fridges and freezers, which taps are sentinel outlets, who your contractors are and what they do), plus any lists you already have. You add the detail once you're in. Upload the filled-in forms in Upload your lists and your tracks are set up from them, or send them to ALPS.</p>
         </div>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
         {main.map((sheet) => <SheetButton key={sheet.key} sheet={sheet} context={context} />)}
       </div>
       <details className="group">
-        <summary className="cursor-pointer text-sm font-medium text-primary hover:underline">Checklists for each track ({tracks.length})</summary>
+        <summary className="cursor-pointer text-sm font-medium text-primary hover:underline">Forms for each track ({tracks.length})</summary>
         <div className="grid gap-2 sm:grid-cols-2 pt-3">
           {tracks.map((sheet) => <SheetButton key={sheet.key} sheet={sheet} context={context} />)}
         </div>

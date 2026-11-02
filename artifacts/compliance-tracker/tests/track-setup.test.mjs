@@ -60,4 +60,31 @@ import { planTrackSetup, describeItems } from "../src/lib/track-setup.ts";
   assert.ok(plan.skipped.some((line) => line.startsWith("Mystery tap")));
   assert.deepEqual(plan.groups.find((g) => g.kind === "bikes").items, [{ name: "B01", description: "Blue Raleigh", type: "ebike" }]);
 }
+{
+  // The setup forms: "How many …?" on the Questions tab, one answer column per
+  // site (or a lone Answer column for the whole business), and sentinel taps.
+  const kitchen = planTrackSetup([
+    { name: "Questions", headers: ["Question", "Clubhouse", "Lodges", "Notes"], rows: [
+      ["How many kitchens?", "1", "", ""],
+      ["How many fridges?", "3", "1", ""],
+      ["How many freezers?", "2", "", ""],
+      ["Do you have a HACCP or food safety plan? (Yes/No)", "Yes", "", ""],
+    ] },
+  ]);
+  const clubhouse = kitchen.groups.find((g) => g.kind === "cold-units" && g.siteName === "Clubhouse");
+  assert.deepEqual(clubhouse.items.map((i) => i.name), ["Fridge 1", "Fridge 2", "Fridge 3", "Freezer 1", "Freezer 2"]);
+  assert.equal(kitchen.groups.find((g) => g.siteName === "Lodges").items.length, 1);
+  assert.deepEqual(kitchen.skipped, [], "Yes/No answers and uncounted questions are left alone");
+  const whole = planTrackSetup([{ name: "Questions", headers: ["Question", "Answer", "Notes"], rows: [["How many hot tubs?", "2", ""], ["How many hire bikes?", "x", ""]] }]);
+  assert.deepEqual(whole.groups.map((g) => [g.kind, g.siteName, g.items.length]), [["hot-tubs", null, 2]], "a lone Answer column is the whole business");
+  assert.deepEqual(whole.skipped, ['How many hire bikes?: "x" isn\'t a number from 0 to 200']);
+  const water = planTrackSetup([
+    { name: "Questions", headers: ["Question", "Clubhouse", "Notes"], rows: [["How many showers?", "2", ""]] },
+    { name: "Sentinel taps", headers: ["Tap", "Where", "Hot or cold", "Site"], rows: [["Kitchen sink", "Main kitchen", "Hot", "Clubhouse"], ["Gents basin", "", "Cold", "Clubhouse"]] },
+  ]);
+  assert.deepEqual(water.groups.find((g) => g.kind === "outlets" && g.source === "list").items,
+    [{ name: "Kitchen sink", type: "hot", location: "Main kitchen" }, { name: "Gents basin", type: "cold", location: undefined }], "sentinel taps become outlets");
+  assert.deepEqual(water.groups.find((g) => g.kind === "outlets" && g.source === "count").items.map((i) => i.name), ["Shower 1", "Shower 2"],
+    "counted showers are added as well as the named taps");
+}
 console.log("Track setup from workbooks: counts, named lists and what is left out all check out.");
