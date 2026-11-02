@@ -13,6 +13,11 @@ import { chromium, firefox, webkit } from "@playwright/test";
 //     to drop it;
 //   - a drop that carries only a file:// link (Safari, dragging straight out
 //     of the Mac Photos app) is held and explained, never opened;
+//   - an email attachment the email app embeds in the drop (a data: or blob:
+//     address in its HTML, as Mail does) is taken as a file, on the box or
+//     beside it;
+//   - an email attachment the browser can't read (a promised file, or the
+//     email app's own address), or a webmail link, is explained, not ignored;
 //   - text and links can still be dropped into text boxes;
 //   - a HEIC photo the browser can read is turned into a JPEG;
 //   - a box that takes only spreadsheets (Import spreadsheet) gets a
@@ -141,8 +146,52 @@ try {
     const page = await open();
     const link = "file:///Users/someone/Pictures/Photos%20Library.photoslibrary/originals/7/7F67F344.jpeg";
     assert.equal(await drop(page, "[data-testid='beside-first']", { data: { "text/uri-list": link } }), true, "the browser must not open the file link");
-    await page.getByText("The browser didn't pass the photo on", { exact: true }).waitFor();
+    await page.getByText("The file didn't come through", { exact: true }).waitFor();
     assert.match(await toastText(page), /onto your desktop first/);
+    assert.deepEqual(await filesIn(page, "first"), []);
+    await page.close();
+  });
+
+  await test("an email attachment embedded in the drop is added", async () => {
+    const page = await open();
+    const inline = `data:image/png;base64,${PNG.toString("base64")}`;
+    // On the box: only HTML comes with the drag, no file.
+    assert.equal(await drop(page, "[data-testid='media-first'] p", {
+      data: { "text/html": `<a href="${inline}" download="Light fitting.png">Light fitting.png</a>` },
+    }), true);
+    await page.waitForFunction(() => window.__files.first?.length === 1);
+    // Beside the box, from a blob: address the page can read.
+    const blobUrl = await page.evaluate((bytes) => URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "image/png" })), [...PNG]);
+    assert.equal(await drop(page, "[data-testid='beside-first']", {
+      data: { "text/html": `<img src="${blobUrl}" alt="photo">`, "text/uri-list": blobUrl },
+    }), true);
+    await page.waitForFunction(() => window.__files.first?.length === 2);
+    assert.deepEqual(await filesIn(page, "first"), [
+      { name: "Light fitting.png", type: "image/png" },
+      { name: "photo.png", type: "image/png" },
+    ]);
+    await page.close();
+  });
+
+  await test("an email attachment the browser can't read is explained, not ignored", async () => {
+    const page = await open();
+    // Mail's own address for the attachment, which the page can't open.
+    assert.equal(await drop(page, "[data-testid='media-first'] p", {
+      data: { "text/html": `<img src="blob:${baseUrl}/00000000-0000-0000-0000-000000000000">`, "text/uri-list": "message:%3C1234@example.com%3E" },
+    }), true, "the box takes the drag instead of ignoring it");
+    await page.getByText("The file didn't come through", { exact: true }).waitFor();
+    assert.match(await toastText(page), /onto your desktop first/);
+    assert.deepEqual(await filesIn(page, "first"), []);
+    await page.close();
+  });
+
+  await test("a webmail attachment link says to download it first", async () => {
+    const page = await open();
+    assert.equal(await drop(page, "[data-testid='media-first'] p", {
+      data: { "text/uri-list": "https://outlook.office.com/mail/attachment/abc", "text/plain": "https://outlook.office.com/mail/attachment/abc" },
+    }), true);
+    await page.getByText("That's a link, not a file", { exact: true }).waitFor();
+    assert.match(await toastText(page), /Download the attachment first/);
     assert.deepEqual(await filesIn(page, "first"), []);
     await page.close();
   });

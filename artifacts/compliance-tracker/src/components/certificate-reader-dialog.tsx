@@ -107,8 +107,10 @@ function sentBy(inbox: CertificateInboxItem): string {
  * certificates the AI sorts to their checks, checked and saved one by one.
  * Without the AI the same files are filled in by hand.
  */
-export function CertificateReaderDialog({ open, onOpenChange, itemId = null, inbox = null, onFiled }: {
+export function CertificateReaderDialog({ open, onOpenChange, itemId = null, inbox = null, onFiled, initialFiles = null }: {
   open: boolean;
+  /** Files dropped on the page that opened the reader (e.g. a check's Certificates box): read straight away. */
+  initialFiles?: File[] | null;
   onOpenChange: (open: boolean) => void;
   /** The check the reader was opened from; the certificate is filed there. */
   itemId?: number | null;
@@ -151,6 +153,16 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null, inb
   // Without the AI (no add-on, or its allowance used) certificates can still be uploaded and filled in by hand.
   const canUpload = !!status.data;
   const { isDragging, dropZoneProps } = useFileDrop((chosen) => void read(chosen), !inbox && canUpload && busy === null && !draft);
+
+  // Files dropped on the page that opened the reader are read once it knows
+  // whether the AI is available.
+  const startedWith = useRef<File[] | null>(null);
+  useEffect(() => {
+    if (!initialFiles?.length || !status.data || startedWith.current === initialFiles) return;
+    startedWith.current = initialFiles;
+    void read(initialFiles);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFiles, status.data]);
 
   function reset() {
     setFiles([]); setBatch([]); setPosition(0); setSavedCount(0); setLeftOut([]); stored.current.clear();
