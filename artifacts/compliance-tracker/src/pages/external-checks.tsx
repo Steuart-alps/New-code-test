@@ -4,7 +4,7 @@ import { AppLayout } from "@/components/layout";
 import { useListComplianceItems, useSendReminderForItem, useListSites } from "@workspace/api-client-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAppMutations } from "@/hooks/use-app-data";
-import { toast } from "sonner";
+import { toast } from "@/hooks/use-toast";
 import { StatusBadge, PriorityBadge, NeedsActionBadge } from "@/components/badges";
 import { CheckStatusWithCertificate } from "@/components/certificates-outstanding-card";
 import { CompleteCheckDialog } from "@/components/complete-check-dialog";
@@ -83,9 +83,9 @@ export default function ExternalChecksPage() {
         throw new Error(body.error ?? "Failed to load starter pack");
       }
       await queryClient.invalidateQueries();
-      toast.success("Starter pack loaded — categories and example checks added.");
+      toast({ title: "Starter pack loaded — categories and example checks added." });
     } catch (err: any) {
-      toast.error(err.message ?? "Couldn't load starter pack");
+      toast({ title: err.message ?? "Couldn't load starter pack", variant: "destructive" });
     } finally {
       setLoadingStarter(false);
     }
@@ -154,8 +154,8 @@ export default function ExternalChecksPage() {
   const { deleteItem, updateItemStatus, triggerReminders } = useAppMutations();
   const sendOne = useSendReminderForItem({
     mutation: {
-      onSuccess: (data: any) => toast.success(data?.message ?? "Reminder sent"),
-      onError: (err: any) => toast.error(err?.message ?? "Failed to send reminder"),
+      onSuccess: (data: any) => toast({ title: data?.message ?? "Reminder sent" }),
+      onError: (err: any) => toast({ title: err?.message ?? "Failed to send reminder", variant: "destructive" }),
     },
   });
 

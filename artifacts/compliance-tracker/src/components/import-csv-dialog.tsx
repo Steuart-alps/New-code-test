@@ -4,6 +4,7 @@ import { Download, FileSpreadsheet, Loader2, Upload, X } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
+import { useFileDrop } from "@/hooks/use-file-drop";
 import { API_BASE, getApiErrorMessage } from "@/lib/api";
 import { downloadBlob, getDownloadErrorMessage } from "@/lib/download";
 import { downloadCsvAsExcel, downloadExcel, readSpreadsheet } from "@/lib/spreadsheet";
@@ -365,18 +366,23 @@ export function ImportCsvButton({ type, onImported, className, siteId, label = "
 }) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
+  const [droppedFile, setDroppedFile] = useState<File | null>(null);
   const isAdmin = user?.role === "consultant" || user?.role === "client_admin";
   // PATTrack appliances and KitchenTrack ingredients: managers too.
   const managersToo = type === "pat-appliances" || type === "allergen-ingredients";
   const allowed = isAdmin || (managersToo && (user?.role === "client_manager" || (user?.role === "client_staff" && user.isDepartmentManager === true)))
     || (type === "legionella-outlets" && user?.role === "client_manager");
+  // A spreadsheet dragged onto the button, or anywhere on a page whose only
+  // upload is this button, opens the import with that file.
+  const drop = useFileDrop((files) => { setDroppedFile(files[0] ?? null); setOpen(true); }, allowed && !open, isSpreadsheetFile);
   if (!allowed) return null;
   return (
     <>
-      <Button type="button" variant="outline" size="sm" className={className} onClick={() => setOpen(true)} data-testid={`button-import-${type}`}>
+      <Button type="button" variant="outline" size="sm" className={cn(className, drop.isDragging && "ring-2 ring-primary")}
+        onClick={() => { setDroppedFile(null); setOpen(true); }} data-testid={`button-import-${type}`} {...drop.dropZoneProps}>
         <Upload className="mr-1 h-4 w-4" /> {label}
       </Button>
-      <ImportCsvDialog type={type} open={open} onOpenChange={setOpen} onImported={onImported} siteId={siteId} />
+      <ImportCsvDialog type={type} open={open} onOpenChange={setOpen} onImported={onImported} siteId={siteId} initialFile={droppedFile} />
     </>
   );
 }

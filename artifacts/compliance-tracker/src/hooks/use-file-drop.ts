@@ -2,7 +2,14 @@ import { useEffect, useId, useRef, useState, type DragEvent } from "react";
 import { toast } from "@/hooks/use-toast";
 import { heicToJpeg, isHeic } from "@/lib/media-upload";
 
-type DropZone = { enabled: boolean; deliver: (files: File[]) => void };
+type DropZone = {
+  enabled: boolean;
+  /** Which files a drop beside the box may send to it (all, when left out). */
+  accepts?: (file: File) => boolean;
+  deliver: (files: File[]) => void;
+};
+
+const takesAll = (zone: DropZone, files: File[]) => !zone.accepts || files.every((file) => zone.accepts!(file));
 
 // Every mounted attach box, by the id in its data-file-drop-zone attribute, so
 // a file dropped beside the box (not on it) can still reach it.
@@ -32,6 +39,7 @@ function explainUnreadableDrop() {
     title: "The browser didn't pass the photo on",
     description: "Drag the photo out of Photos onto your desktop first, then drag it in from there, or use Choose files.",
     variant: "destructive",
+    stay: true,
   });
 }
 
@@ -56,20 +64,23 @@ async function canRead(file: File) {
  * go to `onFiles` exactly as if they had been picked, so the box's own type and
  * size checks still apply. HEIC photos (the Mac Photos app's usual format) are
  * turned into JPEG first where the browser can read them. Nothing happens while
- * `enabled` is false.
+ * `enabled` is false. With `accepts`, a file dropped beside the box (not on
+ * it) only goes to the box when it is a file the box takes, such as a
+ * spreadsheet for an Import spreadsheet button.
  */
-export function useFileDrop(onFiles: (files: File[]) => void, enabled = true) {
+export function useFileDrop(onFiles: (files: File[]) => void, enabled = true, accepts?: (file: File) => boolean) {
   const [isDragging, setIsDragging] = useState(false);
   // dragenter/dragleave also fire for child elements; count them so the
   // highlight only clears when the pointer leaves the box itself.
   const depth = useRef(0);
   const id = useId();
-  const latest = useRef({ onFiles, enabled });
-  latest.current = { onFiles, enabled };
+  const latest = useRef({ onFiles, enabled, accepts });
+  latest.current = { onFiles, enabled, accepts };
 
   useEffect(() => {
     zones.set(id, {
       get enabled() { return latest.current.enabled; },
+      get accepts() { return latest.current.accepts; },
       deliver(files) {
         void Promise.all(files.map(async (file) => (await canRead(file)) ? heicToJpeg(file) : null)).then((ready) => {
           const usable = ready.filter((file): file is File => file !== null);
@@ -173,12 +184,15 @@ export function installStrayFileDropGuard() {
     const underPointer = event.target instanceof Element
       ? zones.get(event.target.closest<HTMLElement>("[data-file-drop-zone]")?.dataset.fileDropZone ?? "")
       : undefined;
-    const targets = underPointer?.enabled ? [underPointer] : visibleZones();
+    const targets = underPointer?.enabled && takesAll(underPointer, files)
+      ? [underPointer]
+      : visibleZones().filter((zone) => takesAll(zone, files));
     if (targets.length === 1) {
       targets[0]!.deliver(files);
       return;
     }
     toast({
+      stay: true,
       title: "Drop it on an upload box",
       description: targets.length === 0
         ? "This page doesn't take files. Open the record first, then drag the file onto its photos or upload box."
