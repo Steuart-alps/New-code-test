@@ -83,7 +83,7 @@ assert.deepEqual(membership(adminGroups), {
   core: ["/dashboard", "/portfolio"],
   setup: ["/settings", "/sites", "/users", "/staff-roster", "/upload-lists", "/equipment"],
   compliance: ["/external", "/contractors", "/calendar", "/compliance-hub"],
-  safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh-track", "/asbestos"],
+  safety: ["/fire-safety", "/legionella", "/incidents", "/coshh-track", "/asbestos"],
   "food-water": ["/kitchen", "/allergens", "/aqua-track", "/hot-tub"],
   operations: ["/fix-track", "/premises-track", "/room-track", "/tree-track", "/bike-track", "/pat-track", "/pest-track", "/daily-track-am", "/daily-track-pm"],
   greenkeeping: ["/green-track"],
@@ -95,7 +95,7 @@ assert.deepEqual(membership(adminGroups), {
 assert.deepEqual(membership(userGroups), {
   core: ["/dashboard"],
   compliance: ["/external", "/contractors", "/calendar", "/compliance-hub"],
-  safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh-track", "/asbestos"],
+  safety: ["/fire-safety", "/legionella", "/incidents", "/coshh-track", "/asbestos"],
   "food-water": ["/kitchen", "/allergens", "/aqua-track", "/hot-tub"],
   operations: ["/fix-track", "/premises-track", "/room-track", "/tree-track", "/bike-track", "/pat-track", "/pest-track", "/daily-track-am", "/daily-track-pm"],
   greenkeeping: ["/green-track"],
@@ -199,5 +199,11 @@ assert.deepEqual(togglePinnedHref(full, "/0"), full.slice(1), "A full list can s
 const allHrefs = userGroups.flatMap(g => g.items.map(i => i.href));
 assert.ok(!allHrefs.includes("/coshh"), "No separate COSHH register link");
 assert.ok(allHrefs.includes("/coshh-track"), "COSHHTrack is in the menu");
+
+// SafeTrack lives inside DocTrack: one menu link, shown for either module.
+assert.ok(!allHrefs.includes("/safe-track"), "No separate SafeTrack link (it opens DocTrack)");
+const docItem = allItems.find(i => i.href === "/doc-track");
+assert.ok(isNavItemPinnable(docItem, key => key === "safetrack"), "A SafeTrack business sees DocTrack");
+assert.ok(isNavItemPinnable(docItem, key => key === "doctrack"), "A DocTrack business sees DocTrack");
 
 console.log("Nav groups visibility regression tests passed.");

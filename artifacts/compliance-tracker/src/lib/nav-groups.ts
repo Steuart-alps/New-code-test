@@ -112,7 +112,6 @@ export function getNavGroups({ isConsultant, canAdmin, canManageUsers = canAdmin
       items: [
         { href: "/fire-safety",    label: "FireTrack",       icon: Flame,           serviceKey: "firetrack" },
         { href: "/legionella",     label: "LegionellaTrack", icon: Droplets,        serviceKey: "legionellatrack" },
-        { href: "/safe-track",     label: "SafeTrack",       icon: ShieldCheck,     serviceKey: "safetrack" },
         { href: "/incidents",      label: "IncidentTrack",   icon: AlertOctagon,    serviceKey: "incidenttrack" },
         { href: "/coshh-track",    label: "COSHHTrack",      icon: Beaker,          serviceKey: "coshhtrack" },
         { href: "/asbestos",       label: "Asbestos Register", icon: ShieldAlert },
@@ -160,7 +159,7 @@ export function getNavGroups({ isConsultant, canAdmin, canManageUsers = canAdmin
       title: "People & Training",
       defaultOpen: false,
       items: [
-        { href: "/doc-track",      label: "DocTrack",        icon: FolderOpen,      serviceKey: "doctrack" },
+        { href: "/doc-track",      label: "DocTrack",        icon: FolderOpen,      serviceKeys: ["doctrack", "safetrack"] },
         { href: "/train-track",    label: "TrainTrack",      icon: BookOpen,        serviceKey: "traintrack" },
       ],
     },
