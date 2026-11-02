@@ -22,7 +22,7 @@ export const EXTENDED_AUDITED_TABLES = [
   "bike_checks", "bike_hire_records", "bike_services", "bikes",
   "categories", "certificate_defects", "check_photos", "checklist_templates", "client_documents",
   "compliance_actions", "compliance_items", "contractor_certificates",
-  "contractor_email_queue", "contractor_sign_in_sites", "contractor_sign_ins", "contractor_visit_not_needed", "contractors",
+  "contractor_email_queue", "contractor_sign_in_sites", "contractor_sign_ins", "contractor_test_visits", "contractor_visit_not_needed", "contractors",
   "coshh_acknowledgements", "coshh_assessments", "coshh_checks",
   "coshh_substances", "daily_checklist_submissions", "daily_checklist_teams", "daily_checklists",
   "daily_manager_signoffs", "departments", "doc_acknowledgements",
@@ -47,7 +47,7 @@ export const EXTENDED_AUDITED_TABLES = [
   "task_completions", "tasks",
   "track_action_templates", "track_actions", "track_control_profiles", "track_evidence",
   "track_evidence_requirements", "track_owners",
-  "tree_inspections",
+  "tree_inspections", "trees",
 ] as const;
 
 async function installAuditTriggers(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], tables: readonly string[]) {

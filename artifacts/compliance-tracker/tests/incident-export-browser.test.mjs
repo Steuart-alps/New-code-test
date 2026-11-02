@@ -219,6 +219,10 @@ const SCREEN_RIDDOR = { Reported: "reported", Outstanding: "outstanding", "—":
 
 async function openRegister(page) {
   await page.goto(`${baseUrl}/tests/incident-export-harness.html`, { waitUntil: "domcontentloaded" });
+  // The register starts on the user's working site (an Owner's first site);
+  // these checks start from All sites.
+  await page.getByRole("combobox", { name: "Filter incidents by site" }).getByText(SITES[0].name).waitFor();
+  await choose(page, "Filter incidents by site", "All sites");
   await page.getByText(`Showing ${INCIDENTS.length} of ${INCIDENTS.length} records`).waitFor();
 }
 

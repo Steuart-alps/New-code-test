@@ -1,21 +1,26 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Download, FileSpreadsheet, Loader2, Upload, X } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
+import { useFileDrop } from "@/hooks/use-file-drop";
 import { API_BASE, getApiErrorMessage } from "@/lib/api";
 import { downloadBlob, getDownloadErrorMessage } from "@/lib/download";
 import { downloadCsvAsExcel, downloadExcel, readSpreadsheet } from "@/lib/spreadsheet";
 import { SpreadsheetDropZone, isSpreadsheetFile, usePastedFile } from "@/components/spreadsheet-drop-zone";
-import { ListReadNote, ListReadingPanel, isPhotoOrPdf, useListReading, type ListReadResult } from "@/components/ai-list-reader";
+import { ListReadNote, ListReadingPanel, isPhotoOrPdf, useListReading, type ListReadResult, type ListReadingKind } from "@/components/ai-list-reader";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-export type ImportCsvType = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points";
+export type ImportCsvType = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "allergen-ingredients" | "legionella-outlets" | "compliance-checks";
 
-const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string; required: string; optional: string; matching: string; template: string }> = {
+const IMPORTS: Record<ImportCsvType, {
+  title: string; noun: string; one: string; required: string; optional: string; matching: string; template: string; sheet: string;
+  /** What a blank cell does, when it is not "leaves the detail unchanged". */
+  blankCells?: string;
+}> = {
   "pat-appliances": {
     title: "Upload appliance register",
     noun: "appliances",
@@ -24,6 +29,8 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     optional: "Asset tag, Appliance type, Site, Location, Notes",
     matching: "Rows match existing appliances by asset tag, or by name, site and location when there is no asset tag.",
     template: "pattrack-appliances-template",
+    // The tab of the same name in a setup "What we need from you" workbook.
+    sheet: "Appliances",
   },
   "room-track-rooms": {
     title: "Import rooms from a spreadsheet",
@@ -33,6 +40,7 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     optional: "Room name, Floor, Site, Notes",
     matching: "Rows match existing rooms by site and room number.",
     template: "roomtrack-rooms-template",
+    sheet: "Rooms",
   },
   contractors: {
     title: "Import contractors from a spreadsheet",
@@ -42,6 +50,7 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     optional: "Company, Phone, Address, Trades (separate with ;), Gas Safe number, Public liability expiry (DD/MM/YYYY), Notes",
     matching: "Rows match existing contractors by email address.",
     template: "contractors-template",
+    sheet: "Contractors",
   },
   "fire-call-points": {
     title: "Upload call points",
@@ -51,11 +60,46 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     optional: "Location, Site (leave blank for the site chosen here)",
     matching: "List them in the order you want them tested: new call points join the end of the rotation in file order. Rows match existing call points by site and call point name.",
     template: "firetrack-call-points-template",
+    sheet: "Call points",
+  },
+  // A supplier's allergen matrix or product list (api-server lib/allergenImport.ts).
+  "allergen-ingredients": {
+    title: "Import suppliers' allergen information",
+    noun: "ingredients",
+    one: "ingredient",
+    required: "Ingredient, and either a column for each allergen (Y, N or May) or a Contains column",
+    optional: "Supplier, Product code, May contain, Site (blank = every site), Notes",
+    matching: "Use the supplier's own allergen sheet as it is: long headings such as \"Cereals containing gluten\" are recognised. Rows match existing ingredients by site and name; changed allergens update every dish using the ingredient, with a change log entry. Check every allergen against the supplier's information before you import.",
+    template: "kitchentrack-supplier-allergens-template",
+    sheet: "Allergens",
+    blankCells: "A blank allergen cell means the ingredient does not contain it; other blank cells leave existing details unchanged.",
+  },
+  // Outlets join the site's outlet list; tanks and calorifiers the equipment
+  // list (api-server routes/csv-imports.ts planLegionellaOutlets).
+  "legionella-outlets": {
+    title: "Upload outlets and tanks",
+    noun: "outlets and tanks",
+    one: "outlet or tank",
+    required: "Outlet or tank (its name), Type (Hot, Cold, TMV, Little used, Cold water tank or Calorifier)",
+    optional: "Location, Site (leave blank for the site chosen here)",
+    matching: "Use your own names, such as \"Ladies toilets, basin 1\" or \"Tank 1 (roof void)\". A tap with hot and cold is two rows. Rows match what is already listed by site and name.",
+    template: "legionellatrack-outlets-and-tanks-template",
+    sheet: "Outlets and tanks",
+  },
+  "compliance-checks": {
+    title: "Import compliance checks from a spreadsheet",
+    noun: "compliance checks",
+    one: "compliance check",
+    required: "Check (or Item)",
+    optional: "Repeat (or Time period: Annual, 6 monthly, 5 years), Last done, Next due (DD/MM/YYYY), Contractor, Contractor phone, Contractor email, Site (leave blank for the site chosen here), Category, Notes",
+    matching: "Your own checklist works as it is, with a title above the headings. Each line is matched to ComplyTrack's own check where there is one (so \"Fire Alarm Maintenance\" updates the check FireTrack shows), then to a check you already have with that name. Newer dates already in ComplyTrack are kept. Headings, in-house routines and weekly checks are skipped.",
+    template: "compliance-checks-template",
+    sheet: "Compliance checks",
   },
 };
 
 type RowAction = "create" | "update" | "skip" | "error";
-interface ImportResult {
+export interface ImportResult {
   preview: boolean;
   committed: boolean;
   summary: { total: number; create: number; update: number; skip: number; error: number };
@@ -70,10 +114,36 @@ const ACTION_STYLE: Record<RowAction, { label: string; className: string }> = {
   error: { label: "Error", className: "bg-rose-50 text-rose-800 border-rose-200" },
 };
 
-export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }: {
+/**
+ * The preview's counts once the rows someone chose to leave out are taken
+ * off: each one counts as skipped instead of new, updated or an error.
+ */
+export function summaryLeavingOut(result: ImportResult, leftOut: ReadonlySet<number>): ImportResult["summary"] {
+  const summary = { ...result.summary };
+  for (const row of result.rows) {
+    if (!leftOut.has(row.row) || row.action === "skip") continue;
+    summary[row.action] -= 1;
+    summary.skip += 1;
+  }
+  return summary;
+}
+
+/**
+ * The spreadsheet as sent for the import, with the left-out rows emptied.
+ * The API passes over empty lines, so every other row keeps its row number.
+ */
+export function sheetLeavingOut(sheet: { headers: string[]; rows: string[][] }, leftOut: ReadonlySet<number>) {
+  if (leftOut.size === 0) return sheet;
+  // Row numbers count the heading line as row 1, as the spreadsheet does.
+  return { ...sheet, rows: sheet.rows.map((cells, index) => leftOut.has(index + 2) ? cells.map(() => "") : cells) };
+}
+
+export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, initialFile }: {
   type: ImportCsvType; open: boolean; onOpenChange: (open: boolean) => void; onImported?: () => void;
   /** FireTrack call points: the site for rows whose Site cell is blank. */
   siteId?: number | null;
+  /** A file chosen before the dialog opened ("Upload your lists"), checked as soon as it opens. */
+  initialFile?: File | null;
 }) {
   const config = IMPORTS[type];
   const { activeClientId } = useAuth();
@@ -81,17 +151,29 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [file, setFile] = useState<File | null>(null);
-  // A photo or document read by ComplyTrack instead of a spreadsheet (AI add-on).
-  const reading = useListReading(type, open, siteId);
+  // A photo or document read by ComplyTrack instead of a spreadsheet (AI
+  // add-on); compliance checks come from a spreadsheet only.
+  const readable = type !== "compliance-checks";
+  const reading = useListReading(readable ? type as ListReadingKind : "contractors", open && readable, siteId);
   const [readFromList, setReadFromList] = useState<ListReadResult | null>(null);
   const [sheet, setSheet] = useState<{ headers: string[]; rows: string[][] } | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"reading" | "reading-list" | "preview" | "import" | null>(null);
+  // Rows of the preview someone chose not to import, by row number.
+  const [leftOut, setLeftOut] = useState<ReadonlySet<number>>(new Set());
   usePastedFile(open && busy === null && !result?.committed, selected => dropped(selected));
+  // Once the AI status is known, so a photo can go to the reader.
+  const startedWith = useRef<File | null>(null);
+  useEffect(() => {
+    if (!open) { startedWith.current = null; return; }
+    if (!initialFile || (readable && !reading.loaded) || startedWith.current === initialFile) return;
+    startedWith.current = initialFile;
+    dropped(initialFile);
+  }, [open, initialFile, reading.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function reset() {
-    setFile(null); setSheet(null); setResult(null); setError(null); setBusy(null); setReadFromList(null);
+    setFile(null); setSheet(null); setResult(null); setError(null); setBusy(null); setReadFromList(null); setLeftOut(new Set());
   }
   function close() {
     if (busy === "import") return;
@@ -102,7 +184,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
   async function send(data: { headers: string[]; rows: string[][] }, preview: boolean) {
     const response = await clientApiFetch(`/imports/${type}`, { method: "POST", body: JSON.stringify({ ...data, preview, ...(siteId !== undefined ? { siteId } : {}) }) });
     const body = await response.json().catch(() => null) as (ImportResult & { error?: string }) | null;
-    if (body?.rows) setResult(body);
+    if (body?.rows) { setResult(body); if (preview) setLeftOut(new Set()); }
     if (!response.ok) throw new Error(body?.error ?? await getApiErrorMessage(response, "The import could not be checked"));
     return body as ImportResult;
   }
@@ -112,7 +194,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
     setFile(selected);
     setBusy("reading");
     try {
-      const data = await readSpreadsheet(selected);
+      const data = await readSpreadsheet(selected, { sheet: config.sheet });
       if (!data.headers.length || !data.rows.length) throw new Error("The file has no rows below the header row");
       setSheet(data);
       setBusy("preview");
@@ -165,8 +247,8 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
     setBusy("import");
     setError(null);
     try {
-      const done = await send(sheet, false);
-      toast({ title: `${config.noun[0].toUpperCase()}${config.noun.slice(1)} imported`, description: `${done.summary.create} added, ${done.summary.update} updated, ${done.summary.skip} skipped.` });
+      const done = await send(sheetLeavingOut(sheet, leftOut), false);
+      toast({ title: `${config.noun[0].toUpperCase()}${config.noun.slice(1)} imported`, description: `${done.summary.create} added, ${done.summary.update} updated, ${done.summary.skip + leftOut.size} skipped.` });
       await queryClient.invalidateQueries();
       onImported?.();
       reset();
@@ -190,7 +272,12 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
     }
   }
 
-  const summary = result?.summary;
+  const summary = result ? summaryLeavingOut(result, leftOut) : undefined;
+  const toggleLeftOut = (row: number) => setLeftOut((current) => {
+    const next = new Set(current);
+    if (!next.delete(row)) next.add(row);
+    return next;
+  });
   const canImport = !!summary && !result?.committed && summary.error === 0 && summary.create + summary.update > 0 && busy === null;
 
   return (
@@ -207,7 +294,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
           <div className="space-y-1 rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
             <p><span className="font-medium text-foreground">Required column{config.required.includes(",") ? "s" : ""}:</span> {config.required}</p>
             <p><span className="font-medium text-foreground">Optional:</span> {config.optional}</p>
-            <p>Put the column headings in the first row. {config.matching} Blank cells leave existing details unchanged. Sites are matched by name. Up to 1,000 rows per file.</p>
+            <p>{type === "compliance-checks" ? "" : "Put the column headings in the first row. "}{config.matching} {config.blankCells ?? "Blank cells leave existing details unchanged."} Sites are matched by name. Up to 1,000 rows per file.</p>
             <p className="flex flex-wrap items-center gap-x-2">
               <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => void downloadTemplate("xlsx")} data-testid={`button-download-${type}-template`}>
                 <Download className="mr-1 h-3.5 w-3.5" /> Download the Excel template
@@ -221,7 +308,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
           {!file ? (
             <>
               <SpreadsheetDropZone onFile={dropped} aiReading={reading.canRead} testId={`input-${type}-file`} />
-              <ListReadingPanel reading={reading} kind={type} noun={config.noun} onFile={selected => void readList(selected)} onSpreadsheet={selected => void choose(selected)} />
+              {readable && <ListReadingPanel reading={reading} kind={type as ListReadingKind} noun={config.noun} onFile={selected => void readList(selected)} onSpreadsheet={selected => void choose(selected)} />}
             </>
           ) : (
             <div className="flex items-center gap-3 rounded-lg border bg-muted/20 p-3">
@@ -241,7 +328,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
 
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
-          {readFromList && <ListReadNote result={readFromList} noun={config.noun} one={config.one} kind={type} onDownload={downloadReadRows} />}
+          {readFromList && <ListReadNote result={readFromList} noun={config.noun} one={config.one} kind={type as ListReadingKind} onDownload={downloadReadRows} />}
 
           {summary && (
             <div className="grid grid-cols-2 gap-2 rounded-md border bg-muted/30 p-3 sm:grid-cols-4" data-testid="import-summary">
@@ -249,7 +336,8 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
               <div><strong>{summary.update}</strong><br /><span className="text-muted-foreground">Updated</span></div>
               <div><strong>{summary.skip}</strong><br /><span className="text-muted-foreground">Skipped</span></div>
               <div><strong className={summary.error ? "text-destructive" : undefined}>{summary.error}</strong><br /><span className="text-muted-foreground">Errors</span></div>
-              {summary.error > 0 && <p className="col-span-2 text-xs text-destructive sm:col-span-4">Fix the rows marked as errors in your file and choose it again. Nothing is imported while any row has an error.</p>}
+              {summary.error > 0 && <p className="col-span-2 text-xs text-destructive sm:col-span-4">Fix the rows marked as errors in your file and choose it again, or press Leave out on them. Nothing is imported while any row has an error.</p>}
+              {!result?.committed && summary.create + summary.update + summary.error > 0 && <p className="col-span-2 text-xs text-muted-foreground sm:col-span-4">To skip a row you don't want, press Leave out next to it. Rows marked Skip are passed over for the reason shown under them.</p>}
               {result?.ignoredHeaders.length ? <p className="col-span-2 text-xs text-muted-foreground sm:col-span-4">Columns not used: {result.ignoredHeaders.join(", ")}</p> : null}
             </div>
           )}
@@ -265,11 +353,21 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {[...result.rows].sort((a, b) => Number(b.action === "error") - Number(a.action === "error") || a.row - b.row).map(row => (
-                    <tr key={row.row} data-testid={`import-row-${row.row}`}>
+                  {[...result.rows].sort((a, b) => Number(b.action === "error") - Number(a.action === "error") || a.row - b.row).map(row => {
+                    const isLeftOut = leftOut.has(row.row) && row.action !== "skip";
+                    const style = isLeftOut ? { label: "Left out", className: ACTION_STYLE.skip.className } : ACTION_STYLE[row.action];
+                    return (
+                    <tr key={row.row} data-testid={`import-row-${row.row}`} className={isLeftOut ? "text-muted-foreground" : undefined}>
                       <td className="px-2 py-1.5 align-top text-muted-foreground">{row.row}</td>
                       <td className="px-2 py-1.5 align-top">
-                        <span className={cn("inline-block rounded-sm border px-1.5 py-0.5 font-medium", ACTION_STYLE[row.action].className)}>{ACTION_STYLE[row.action].label}</span>
+                        <span className={cn("inline-block cursor-default whitespace-nowrap rounded-sm border px-1.5 py-0.5 font-medium", style.className)}>{style.label}</span>
+                        {row.action !== "skip" && !result.committed && (
+                          <button type="button" onClick={() => toggleLeftOut(row.row)} disabled={busy !== null}
+                            className="mt-1 block whitespace-nowrap text-xs font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                            data-testid={`button-leave-out-${row.row}`}>
+                            {isLeftOut ? "Put back" : "Leave out"}
+                          </button>
+                        )}
                       </td>
                       <td className="px-2 py-1.5 align-top">
                         <span className="font-medium break-words">{row.label}</span>
@@ -278,10 +376,12 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
                             {sheet.rows[row.row - 2].slice(2).filter(Boolean).join(" · ")}
                           </span>
                         )}
+                        {isLeftOut && <span className="block break-words">Not imported: you left this row out.</span>}
                         {row.reasons.map(reason => <span key={reason} className="block break-words text-muted-foreground">{reason}</span>)}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -302,23 +402,31 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
 
 /**
  * "Import spreadsheet" button plus its dialog, for register pages. Hidden for users
- * the API would refuse: viewers, and staff other than PATTrack department
- * managers.
+ * the API would refuse: viewers, and staff other than department managers
+ * (PATTrack appliances and KitchenTrack ingredients only).
  */
 export function ImportCsvButton({ type, onImported, className, siteId, label = "Import spreadsheet" }: {
   type: ImportCsvType; onImported?: () => void; className?: string; siteId?: number | null; label?: string;
 }) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
+  const [droppedFile, setDroppedFile] = useState<File | null>(null);
   const isAdmin = user?.role === "consultant" || user?.role === "client_admin";
-  const allowed = isAdmin || (type === "pat-appliances" && (user?.role === "client_manager" || (user?.role === "client_staff" && user.isDepartmentManager === true)));
+  // PATTrack appliances and KitchenTrack ingredients: managers too.
+  const managersToo = type === "pat-appliances" || type === "allergen-ingredients";
+  const allowed = isAdmin || (managersToo && (user?.role === "client_manager" || (user?.role === "client_staff" && user.isDepartmentManager === true)))
+    || (type === "legionella-outlets" && user?.role === "client_manager");
+  // A spreadsheet dragged onto the button, or anywhere on a page whose only
+  // upload is this button, opens the import with that file.
+  const drop = useFileDrop((files) => { setDroppedFile(files[0] ?? null); setOpen(true); }, allowed && !open, isSpreadsheetFile);
   if (!allowed) return null;
   return (
     <>
-      <Button type="button" variant="outline" size="sm" className={className} onClick={() => setOpen(true)} data-testid={`button-import-${type}`}>
+      <Button type="button" variant="outline" size="sm" className={cn(className, drop.isDragging && "ring-2 ring-primary")}
+        onClick={() => { setDroppedFile(null); setOpen(true); }} data-testid={`button-import-${type}`} {...drop.dropZoneProps}>
         <Upload className="mr-1 h-4 w-4" /> {label}
       </Button>
-      <ImportCsvDialog type={type} open={open} onOpenChange={setOpen} onImported={onImported} siteId={siteId} />
+      <ImportCsvDialog type={type} open={open} onOpenChange={setOpen} onImported={onImported} siteId={siteId} initialFile={droppedFile} />
     </>
   );
 }

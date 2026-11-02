@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
@@ -410,7 +411,7 @@ router.get("/risk-assessments/:id/download-url",    requireAuth, downloadUrlRout
 router.get("/risk-assessments/:id/acknowledgements", requireAuth, ackListRoute(safeRiskAssessmentsTable, "ra"));
 router.post("/risk-assessments/:id/acknowledge",     requireAuth, denyViewers, ackSaveRoute(safeRiskAssessmentsTable, "ra"));
 router.post("/risk-assessments/:id/self-acknowledge", requireAuth, selfAckRoute(safeRiskAssessmentsTable, "ra"));
-router.use("/risk-assessments", crudFor(safeRiskAssessmentsTable, raCreate, raCreate.partial()));
+router.use("/risk-assessments", crudFor(safeRiskAssessmentsTable, raCreate, partialUpdate(raCreate)));
 
 // ── SOPs ─────────────────────────────────────────────────────────────────────
 
@@ -431,7 +432,7 @@ router.get("/sops/:id/download-url",    requireAuth, downloadUrlRoute(safeSopsTa
 router.get("/sops/:id/acknowledgements", requireAuth, ackListRoute(safeSopsTable, "sop"));
 router.post("/sops/:id/acknowledge",     requireAuth, denyViewers, ackSaveRoute(safeSopsTable, "sop"));
 router.post("/sops/:id/self-acknowledge", requireAuth, selfAckRoute(safeSopsTable, "sop"));
-router.use("/sops", crudFor(safeSopsTable, sopCreate, sopCreate.partial()));
+router.use("/sops", crudFor(safeSopsTable, sopCreate, partialUpdate(sopCreate)));
 
 // ── Training Records ─────────────────────────────────────────────────────────
 
@@ -445,7 +446,7 @@ const trCreate = z.object({
   departmentId: z.number().int().nullable().optional(),
 });
 
-router.use("/training-records", crudFor(safeTrainingRecordsTable, trCreate, trCreate.partial()));
+router.use("/training-records", crudFor(safeTrainingRecordsTable, trCreate, partialUpdate(trCreate)));
 
 // ── Inductions ───────────────────────────────────────────────────────────────
 
@@ -459,7 +460,7 @@ const indCreate = z.object({
   siteId: z.number().int().nullable().optional(),
 });
 
-router.use("/inductions", crudFor(safeInductionsTable, indCreate, indCreate.partial()));
+router.use("/inductions", crudFor(safeInductionsTable, indCreate, partialUpdate(indCreate)));
 
 // ── Competency Sign-offs ─────────────────────────────────────────────────────
 
@@ -472,7 +473,7 @@ const compCreate = z.object({
   siteId: z.number().int().nullable().optional(),
 });
 
-router.use("/competency", crudFor(safeCompetencySignoffsTable, compCreate, compCreate.partial()));
+router.use("/competency", crudFor(safeCompetencySignoffsTable, compCreate, partialUpdate(compCreate)));
 
 // ── Staff Handbook ────────────────────────────────────────────────────────────
 
@@ -492,6 +493,6 @@ router.get("/handbook/:id/download-url",    requireAuth, downloadUrlRoute(safeHa
 router.get("/handbook/:id/acknowledgements", requireAuth, ackListRoute(safeHandbookTable, "handbook"));
 router.post("/handbook/:id/acknowledge",     requireAuth, denyViewers, ackSaveRoute(safeHandbookTable, "handbook"));
 router.post("/handbook/:id/self-acknowledge", requireAuth, selfAckRoute(safeHandbookTable, "handbook"));
-router.use("/handbook", crudFor(safeHandbookTable, handbookCreate, handbookCreate.partial()));
+router.use("/handbook", crudFor(safeHandbookTable, handbookCreate, partialUpdate(handbookCreate)));
 
 export default router;

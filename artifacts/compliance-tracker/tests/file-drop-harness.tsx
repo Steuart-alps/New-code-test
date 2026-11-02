@@ -3,7 +3,9 @@ import { createRoot } from "react-dom/client";
 import { PendingMediaPicker } from "../src/components/pending-media-picker";
 import { Input } from "../src/components/ui/input";
 import { Toaster } from "../src/components/ui/toaster";
-import { installStrayFileDropGuard } from "../src/hooks/use-file-drop";
+import { isSpreadsheetFile } from "../src/components/spreadsheet-drop-zone";
+import { installStrayFileDropGuard, useFileDrop } from "../src/hooks/use-file-drop";
+import { toast } from "../src/hooks/use-toast";
 import "../src/index.css";
 
 declare global {
@@ -31,13 +33,23 @@ function IssueForm({ name }: { name: string }) {
   );
 }
 
+// Like an Import spreadsheet button: takes spreadsheets only.
+function SheetButton() {
+  const drop = useFileDrop((files) => {
+    window.__files.sheet = [...(window.__files.sheet ?? []), ...files.map((file) => ({ name: file.name, type: file.type }))];
+  }, true, isSpreadsheetFile);
+  return <button type="button" data-testid="sheet-button" {...drop.dropZoneProps}>Import spreadsheet</button>;
+}
+
 function Harness() {
-  const second = new URLSearchParams(location.search).has("two");
+  const query = new URLSearchParams(location.search);
   return (
     <main className="space-y-4 p-6">
       <h1 data-testid="page-heading">FixTrack</h1>
-      <IssueForm name="first" />
-      {second && <IssueForm name="second" />}
+      {!query.has("sheet-only") && <IssueForm name="first" />}
+      {query.has("two") && <IssueForm name="second" />}
+      {(query.has("sheet") || query.has("sheet-only")) && <SheetButton />}
+      <button type="button" onClick={() => toast({ title: "Saved" })}>Show saved message</button>
       <Toaster />
     </main>
   );

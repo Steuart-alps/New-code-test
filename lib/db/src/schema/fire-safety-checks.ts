@@ -67,6 +67,10 @@ export const fireSafetyChecksTable = pgTable("fire_safety_checks", {
   soundLevelDb: real("sound_level_db"),
   soundLevelMethod: text("sound_level_method"),
   soundLevelBedhead: boolean("sound_level_bedhead"),
+  // Night fire walks (check type "night_walk"): the walk's time ("22:00",
+  // "02:00" or "06:00"; check_date is the calendar day it fell on). The
+  // walker's signature is in record_signatures, as for every check.
+  walkTime: text("walk_time"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   // Submitter's department when the row was created, set by a database
   // trigger and never changed (submitterDepartmentMigration.ts).

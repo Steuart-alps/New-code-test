@@ -82,6 +82,7 @@ import type {
   CreateKitchenClosedDaysParams,
   CreateLegionellaCheckRequest,
   CreatePATApplianceRequest,
+  CreatePATContractorVisitRequest,
   CreatePATTestRequest,
   CreatePremisesInspectionRequest,
   CreatePrivacyRecordParams,
@@ -109,6 +110,7 @@ import type {
   FireCallPointImportRequest,
   FireCallPointImportResult,
   FireDrillAttendance,
+  FireEscapeRouteList,
   FireSafetyCheck,
   FireSafetyConfig,
   FireSafetyStatus,
@@ -127,10 +129,12 @@ import type {
   GetDailyTrackHistoryParams,
   GetFeedbackScreenshotParams,
   GetFireDrillAttendanceParams,
+  GetFireEscapeRoutesParams,
   GetFireSafetyConfigParams,
   GetFireSafetyStatusParams,
   GetFoodSafetyConfigParams,
   GetFoodSafetyMissingDatesParams,
+  GetFoodSafetyMonthSummaryParams,
   GetFoodSafetyRecordByDateParams,
   GetFoodSafetySummaryParams,
   GetGreenTrackPreStartDayParams,
@@ -140,6 +144,7 @@ import type {
   GetLegionellaConfigParams,
   GetLegionellaMonitoringPlanParams,
   GetLegionellaStatusParams,
+  GetNightFireWalksParams,
   GetPATPresetTemplates200,
   GetPoolMonitoringPlanParams,
   GetPrivacyGovernanceParams,
@@ -177,6 +182,7 @@ import type {
   ImportExtinguisherPoints200,
   ImportExtinguisherPointsBody,
   ImportListReadResult,
+  ImportListSortResult,
   IncidentConfig,
   InspectionReport,
   InspectionReportDetail,
@@ -187,6 +193,7 @@ import type {
   KitchenClosedDaysCreated,
   KitchenClosedDaysInput,
   KitchenClosedDaysList,
+  KitchenMonthSummary,
   LegionellaCheck,
   LegionellaConfig,
   LegionellaStatus,
@@ -216,16 +223,23 @@ import type {
   ListKitchenClosedDaysParams,
   ListLegionellaChecksParams,
   ListMyTrainingRecords200,
+  ListPATContractorVisitsParams,
   ListPATTestsParams,
   ListPremisesInspectionsParams,
   ListPublicLinkAccessParams,
   ListRecordSignaturesParams,
+  ListTreeTrackTreesParams,
   MyCoshhSignOffs,
   MyDocumentSignOffs,
+  NightFireWalks,
   OkResponse,
   OrderFireCallPointsRequest,
   OwnTrainingRecord,
   PATAppliance,
+  PATContractorVisit,
+  PATContractorVisitDetail,
+  PATContractorVisitLink,
+  PATContractorVisits,
   PATTest,
   PATTrackConfig,
   PATTrackStatus,
@@ -253,6 +267,7 @@ import type {
   RecordFoodSafetyColdReadingParams,
   RecordSignature,
   RecordSignatureToken,
+  RenewPATContractorVisitLinkRequest,
   RequestFeedbackScreenshotUploadBody,
   RequestSetupAssistParams,
   RequestUploadUrlBody,
@@ -271,6 +286,7 @@ import type {
   SetupTeamAloneResult,
   SignTrainingRecordRequest,
   Site,
+  SiteChecklistDueTimesRequest,
   StorageStatus,
   StorageUsage,
   TestBusinessDeletionRequest,
@@ -283,6 +299,10 @@ import type {
   TrackActionMediaUploadRequest,
   TrackActionMediaUploadResponse,
   TrackSummaryPreview,
+  TreeTrackTree,
+  TreeTrackTreeInput,
+  TreeTrackTreeUpdate,
+  TreeTrackTreeWithStatus,
   UpdateCategoryRequest,
   UpdateCertificateDefectRequest,
   UpdateComplianceItemRequest,
@@ -290,6 +310,8 @@ import type {
   UpdateEquipmentItemRequest,
   UpdateFeedbackReportParams,
   UpdateFireCallPointRequest,
+  UpdateFireEscapeRoutesParams,
+  UpdateFireEscapeRoutesRequest,
   UpdateFireSafetyCheckRequest,
   UpdateFireSafetyConfigParams,
   UpdateFoodSafetyConfig200,
@@ -2814,6 +2836,79 @@ export const useDeleteSite = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteSiteMutationOptions(options));
+    }
+
+export const getSetSiteChecklistDueTimesUrl = (id: number,) => {
+
+
+
+
+  return `/api/sites/${id}/checklist-due-times`
+}
+
+/**
+ * Owners, consultants and Managers who can see the site. Times are "HH:MM" on the business's clock; null or blank uses the default (due 06:00 opening, 18:00 closing; reminders 11:00 and 21:00). A field left out keeps its time.
+ * @summary Set when the site's opening and closing checks are due, and when their reminders go out
+ */
+export const setSiteChecklistDueTimes = async (id: number,
+    siteChecklistDueTimesRequest: SiteChecklistDueTimesRequest, options?: RequestInit): Promise<Site> => {
+
+  return customFetch<Site>(getSetSiteChecklistDueTimesUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(siteChecklistDueTimesRequest)
+  }
+);}
+
+
+
+
+
+export const getSetSiteChecklistDueTimesMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setSiteChecklistDueTimes>>, TError,{id: number;data: BodyType<SiteChecklistDueTimesRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setSiteChecklistDueTimes>>, TError,{id: number;data: BodyType<SiteChecklistDueTimesRequest>}, TContext> => {
+
+const mutationKey = ['setSiteChecklistDueTimes'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setSiteChecklistDueTimes>>, {id: number;data: BodyType<SiteChecklistDueTimesRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  setSiteChecklistDueTimes(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetSiteChecklistDueTimesMutationResult = NonNullable<Awaited<ReturnType<typeof setSiteChecklistDueTimes>>>
+    export type SetSiteChecklistDueTimesMutationBody = BodyType<SiteChecklistDueTimesRequest>
+    export type SetSiteChecklistDueTimesMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Set when the site's opening and closing checks are due, and when their reminders go out
+ */
+export const useSetSiteChecklistDueTimes = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setSiteChecklistDueTimes>>, TError,{id: number;data: BodyType<SiteChecklistDueTimesRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setSiteChecklistDueTimes>>,
+        TError,
+        {id: number;data: BodyType<SiteChecklistDueTimesRequest>},
+        TContext
+      > => {
+      return useMutation(getSetSiteChecklistDueTimesMutationOptions(options));
     }
 
 export const getListContractorVisitsUrl = () => {
@@ -8243,6 +8338,253 @@ export function useGetFireSafetyStatus<TData = Awaited<ReturnType<typeof getFire
 
 
 
+export const getGetFireEscapeRoutesUrl = (params?: GetFireEscapeRoutesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/fire-safety/escape-routes?${stringifiedParams}` : `/api/fire-safety/escape-routes`
+}
+
+/**
+ * @summary A site's escape routes, ticked on each escape route sign-off and night fire walk
+ */
+export const getFireEscapeRoutes = async (params?: GetFireEscapeRoutesParams, options?: RequestInit): Promise<FireEscapeRouteList> => {
+
+  return customFetch<FireEscapeRouteList>(getGetFireEscapeRoutesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFireEscapeRoutesQueryKey = (params?: GetFireEscapeRoutesParams,) => {
+    return [
+    `/api/fire-safety/escape-routes`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetFireEscapeRoutesQueryOptions = <TData = Awaited<ReturnType<typeof getFireEscapeRoutes>>, TError = ErrorType<void>>(params?: GetFireEscapeRoutesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFireEscapeRoutes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFireEscapeRoutesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFireEscapeRoutes>>> = ({ signal }) => getFireEscapeRoutes(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFireEscapeRoutes>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFireEscapeRoutesQueryResult = NonNullable<Awaited<ReturnType<typeof getFireEscapeRoutes>>>
+export type GetFireEscapeRoutesQueryError = ErrorType<void>
+
+
+/**
+ * @summary A site's escape routes, ticked on each escape route sign-off and night fire walk
+ */
+
+export function useGetFireEscapeRoutes<TData = Awaited<ReturnType<typeof getFireEscapeRoutes>>, TError = ErrorType<void>>(
+ params?: GetFireEscapeRoutesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFireEscapeRoutes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFireEscapeRoutesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateFireEscapeRoutesUrl = (params?: UpdateFireEscapeRoutesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/fire-safety/escape-routes?${stringifiedParams}` : `/api/fire-safety/escape-routes`
+}
+
+/**
+ * @summary Replace a site's escape route list (managers)
+ */
+export const updateFireEscapeRoutes = async (updateFireEscapeRoutesRequest: UpdateFireEscapeRoutesRequest,
+    params?: UpdateFireEscapeRoutesParams, options?: RequestInit): Promise<FireEscapeRouteList> => {
+
+  return customFetch<FireEscapeRouteList>(getUpdateFireEscapeRoutesUrl(params),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(updateFireEscapeRoutesRequest)
+  }
+);}
+
+
+
+
+
+export const getUpdateFireEscapeRoutesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFireEscapeRoutes>>, TError,{data: BodyType<UpdateFireEscapeRoutesRequest>;params?: UpdateFireEscapeRoutesParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateFireEscapeRoutes>>, TError,{data: BodyType<UpdateFireEscapeRoutesRequest>;params?: UpdateFireEscapeRoutesParams}, TContext> => {
+
+const mutationKey = ['updateFireEscapeRoutes'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateFireEscapeRoutes>>, {data: BodyType<UpdateFireEscapeRoutesRequest>;params?: UpdateFireEscapeRoutesParams}> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  updateFireEscapeRoutes(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateFireEscapeRoutesMutationResult = NonNullable<Awaited<ReturnType<typeof updateFireEscapeRoutes>>>
+    export type UpdateFireEscapeRoutesMutationBody = BodyType<UpdateFireEscapeRoutesRequest>
+    export type UpdateFireEscapeRoutesMutationError = ErrorType<void>
+
+    /**
+ * @summary Replace a site's escape route list (managers)
+ */
+export const useUpdateFireEscapeRoutes = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFireEscapeRoutes>>, TError,{data: BodyType<UpdateFireEscapeRoutesRequest>;params?: UpdateFireEscapeRoutesParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateFireEscapeRoutes>>,
+        TError,
+        {data: BodyType<UpdateFireEscapeRoutesRequest>;params?: UpdateFireEscapeRoutesParams},
+        TContext
+      > => {
+      return useMutation(getUpdateFireEscapeRoutesMutationOptions(options));
+    }
+
+export const getGetNightFireWalksUrl = (params?: GetNightFireWalksParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/fire-safety/night-walks?${stringifiedParams}` : `/api/fire-safety/night-walks`
+}
+
+/**
+ * @summary Night porter fire walks (22:00, 02:00, 06:00) for each site with a night porter, tonight and the last six nights
+ */
+export const getNightFireWalks = async (params?: GetNightFireWalksParams, options?: RequestInit): Promise<NightFireWalks> => {
+
+  return customFetch<NightFireWalks>(getGetNightFireWalksUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetNightFireWalksQueryKey = (params?: GetNightFireWalksParams,) => {
+    return [
+    `/api/fire-safety/night-walks`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetNightFireWalksQueryOptions = <TData = Awaited<ReturnType<typeof getNightFireWalks>>, TError = ErrorType<void>>(params?: GetNightFireWalksParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getNightFireWalks>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetNightFireWalksQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getNightFireWalks>>> = ({ signal }) => getNightFireWalks(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getNightFireWalks>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetNightFireWalksQueryResult = NonNullable<Awaited<ReturnType<typeof getNightFireWalks>>>
+export type GetNightFireWalksQueryError = ErrorType<void>
+
+
+/**
+ * @summary Night porter fire walks (22:00, 02:00, 06:00) for each site with a night porter, tonight and the last six nights
+ */
+
+export function useGetNightFireWalks<TData = Awaited<ReturnType<typeof getNightFireWalks>>, TError = ErrorType<void>>(
+ params?: GetNightFireWalksParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getNightFireWalks>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetNightFireWalksQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getGetFireDrillAttendanceUrl = (params?: GetFireDrillAttendanceParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -8702,6 +9044,453 @@ export const useImportFireCallPoints = <TError = ErrorType<void | FireCallPointI
       return useMutation(getImportFireCallPointsMutationOptions(options));
     }
 
+export const getGetLegionellaOutletImportTemplateUrl = () => {
+
+
+
+
+  return `/api/imports/legionella-outlets/template`
+}
+
+/**
+ * @summary Download the CSV template for uploading LegionellaTrack outlets, tanks and calorifiers (managers)
+ */
+export const getLegionellaOutletImportTemplate = async ( options?: RequestInit): Promise<string> => {
+
+  return customFetch<string>(getGetLegionellaOutletImportTemplateUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetLegionellaOutletImportTemplateQueryKey = () => {
+    return [
+    `/api/imports/legionella-outlets/template`
+    ] as const;
+    }
+
+
+export const getGetLegionellaOutletImportTemplateQueryOptions = <TData = Awaited<ReturnType<typeof getLegionellaOutletImportTemplate>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLegionellaOutletImportTemplate>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetLegionellaOutletImportTemplateQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getLegionellaOutletImportTemplate>>> = ({ signal }) => getLegionellaOutletImportTemplate({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getLegionellaOutletImportTemplate>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetLegionellaOutletImportTemplateQueryResult = NonNullable<Awaited<ReturnType<typeof getLegionellaOutletImportTemplate>>>
+export type GetLegionellaOutletImportTemplateQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Download the CSV template for uploading LegionellaTrack outlets, tanks and calorifiers (managers)
+ */
+
+export function useGetLegionellaOutletImportTemplate<TData = Awaited<ReturnType<typeof getLegionellaOutletImportTemplate>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLegionellaOutletImportTemplate>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetLegionellaOutletImportTemplateQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getImportLegionellaOutletsUrl = () => {
+
+
+
+
+  return `/api/imports/legionella-outlets`
+}
+
+/**
+ * The browser sends the spreadsheet's header row and cell text: Name, Type (Hot, Cold, TMV, Little used, Cold water tank or Calorifier), Location and Site. Outlets join the site's outlet list; cold water tanks and calorifiers join the equipment list, where tank checks name them. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error.
+ * @summary Preview or import a spreadsheet of LegionellaTrack outlets, tanks and calorifiers (managers)
+ */
+export const importLegionellaOutlets = async (fireCallPointImportRequest: FireCallPointImportRequest, options?: RequestInit): Promise<FireCallPointImportResult> => {
+
+  return customFetch<FireCallPointImportResult>(getImportLegionellaOutletsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(fireCallPointImportRequest)
+  }
+);}
+
+
+
+
+
+export const getImportLegionellaOutletsMutationOptions = <TError = ErrorType<void | FireCallPointImportResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importLegionellaOutlets>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof importLegionellaOutlets>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext> => {
+
+const mutationKey = ['importLegionellaOutlets'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importLegionellaOutlets>>, {data: BodyType<FireCallPointImportRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  importLegionellaOutlets(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportLegionellaOutletsMutationResult = NonNullable<Awaited<ReturnType<typeof importLegionellaOutlets>>>
+    export type ImportLegionellaOutletsMutationBody = BodyType<FireCallPointImportRequest>
+    export type ImportLegionellaOutletsMutationError = ErrorType<void | FireCallPointImportResult>
+
+    /**
+ * @summary Preview or import a spreadsheet of LegionellaTrack outlets, tanks and calorifiers (managers)
+ */
+export const useImportLegionellaOutlets = <TError = ErrorType<void | FireCallPointImportResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importLegionellaOutlets>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof importLegionellaOutlets>>,
+        TError,
+        {data: BodyType<FireCallPointImportRequest>},
+        TContext
+      > => {
+      return useMutation(getImportLegionellaOutletsMutationOptions(options));
+    }
+
+export const getGetAllergenIngredientImportTemplateUrl = () => {
+
+
+
+
+  return `/api/imports/allergen-ingredients/template`
+}
+
+/**
+ * @summary Download the CSV template for importing suppliers' allergen information (managers)
+ */
+export const getAllergenIngredientImportTemplate = async ( options?: RequestInit): Promise<string> => {
+
+  return customFetch<string>(getGetAllergenIngredientImportTemplateUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAllergenIngredientImportTemplateQueryKey = () => {
+    return [
+    `/api/imports/allergen-ingredients/template`
+    ] as const;
+    }
+
+
+export const getGetAllergenIngredientImportTemplateQueryOptions = <TData = Awaited<ReturnType<typeof getAllergenIngredientImportTemplate>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAllergenIngredientImportTemplate>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAllergenIngredientImportTemplateQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAllergenIngredientImportTemplate>>> = ({ signal }) => getAllergenIngredientImportTemplate({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAllergenIngredientImportTemplate>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAllergenIngredientImportTemplateQueryResult = NonNullable<Awaited<ReturnType<typeof getAllergenIngredientImportTemplate>>>
+export type GetAllergenIngredientImportTemplateQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Download the CSV template for importing suppliers' allergen information (managers)
+ */
+
+export function useGetAllergenIngredientImportTemplate<TData = Awaited<ReturnType<typeof getAllergenIngredientImportTemplate>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAllergenIngredientImportTemplate>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAllergenIngredientImportTemplateQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getImportAllergenIngredientsUrl = () => {
+
+
+
+
+  return `/api/imports/allergen-ingredients`
+}
+
+/**
+ * The browser sends the spreadsheet's header row and cell text: a column per allergen (Y, N or May) or Contains and May contain lists. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error. Rows match existing ingredients by site and name; changed allergens update every dish using the ingredient, each with a change log entry.
+ * @summary Preview or import suppliers' allergen information as KitchenTrack ingredients (managers)
+ */
+export const importAllergenIngredients = async (fireCallPointImportRequest: FireCallPointImportRequest, options?: RequestInit): Promise<FireCallPointImportResult> => {
+
+  return customFetch<FireCallPointImportResult>(getImportAllergenIngredientsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(fireCallPointImportRequest)
+  }
+);}
+
+
+
+
+
+export const getImportAllergenIngredientsMutationOptions = <TError = ErrorType<void | FireCallPointImportResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importAllergenIngredients>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof importAllergenIngredients>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext> => {
+
+const mutationKey = ['importAllergenIngredients'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importAllergenIngredients>>, {data: BodyType<FireCallPointImportRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  importAllergenIngredients(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportAllergenIngredientsMutationResult = NonNullable<Awaited<ReturnType<typeof importAllergenIngredients>>>
+    export type ImportAllergenIngredientsMutationBody = BodyType<FireCallPointImportRequest>
+    export type ImportAllergenIngredientsMutationError = ErrorType<void | FireCallPointImportResult>
+
+    /**
+ * @summary Preview or import suppliers' allergen information as KitchenTrack ingredients (managers)
+ */
+export const useImportAllergenIngredients = <TError = ErrorType<void | FireCallPointImportResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importAllergenIngredients>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof importAllergenIngredients>>,
+        TError,
+        {data: BodyType<FireCallPointImportRequest>},
+        TContext
+      > => {
+      return useMutation(getImportAllergenIngredientsMutationOptions(options));
+    }
+
+export const getGetComplianceCheckImportTemplateUrl = () => {
+
+
+
+
+  return `/api/imports/compliance-checks/template`
+}
+
+/**
+ * @summary Download the CSV template for importing compliance checks (owners and consultants)
+ */
+export const getComplianceCheckImportTemplate = async ( options?: RequestInit): Promise<string> => {
+
+  return customFetch<string>(getGetComplianceCheckImportTemplateUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetComplianceCheckImportTemplateQueryKey = () => {
+    return [
+    `/api/imports/compliance-checks/template`
+    ] as const;
+    }
+
+
+export const getGetComplianceCheckImportTemplateQueryOptions = <TData = Awaited<ReturnType<typeof getComplianceCheckImportTemplate>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getComplianceCheckImportTemplate>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetComplianceCheckImportTemplateQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getComplianceCheckImportTemplate>>> = ({ signal }) => getComplianceCheckImportTemplate({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getComplianceCheckImportTemplate>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetComplianceCheckImportTemplateQueryResult = NonNullable<Awaited<ReturnType<typeof getComplianceCheckImportTemplate>>>
+export type GetComplianceCheckImportTemplateQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Download the CSV template for importing compliance checks (owners and consultants)
+ */
+
+export function useGetComplianceCheckImportTemplate<TData = Awaited<ReturnType<typeof getComplianceCheckImportTemplate>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getComplianceCheckImportTemplate>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetComplianceCheckImportTemplateQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getImportComplianceChecksUrl = () => {
+
+
+
+
+  return `/api/imports/compliance-checks`
+}
+
+/**
+ * The browser sends the spreadsheet's rows; headings below a title row are found. Each line is matched to ComplyTrack's own check where there is one, then to an existing check with that title at the site. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error. siteId is the site for rows whose Site cell is blank.
+ * @summary Preview or import a business's compliance checklist (owners and consultants)
+ */
+export const importComplianceChecks = async (fireCallPointImportRequest: FireCallPointImportRequest, options?: RequestInit): Promise<FireCallPointImportResult> => {
+
+  return customFetch<FireCallPointImportResult>(getImportComplianceChecksUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(fireCallPointImportRequest)
+  }
+);}
+
+
+
+
+
+export const getImportComplianceChecksMutationOptions = <TError = ErrorType<void | FireCallPointImportResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importComplianceChecks>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof importComplianceChecks>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext> => {
+
+const mutationKey = ['importComplianceChecks'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importComplianceChecks>>, {data: BodyType<FireCallPointImportRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  importComplianceChecks(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportComplianceChecksMutationResult = NonNullable<Awaited<ReturnType<typeof importComplianceChecks>>>
+    export type ImportComplianceChecksMutationBody = BodyType<FireCallPointImportRequest>
+    export type ImportComplianceChecksMutationError = ErrorType<void | FireCallPointImportResult>
+
+    /**
+ * @summary Preview or import a business's compliance checklist (owners and consultants)
+ */
+export const useImportComplianceChecks = <TError = ErrorType<void | FireCallPointImportResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importComplianceChecks>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof importComplianceChecks>>,
+        TError,
+        {data: BodyType<FireCallPointImportRequest>},
+        TContext
+      > => {
+      return useMutation(getImportComplianceChecksMutationOptions(options));
+    }
+
 export const getGetAiAddonUrl = () => {
 
 
@@ -9000,7 +9789,7 @@ export const useReadPatRegisterList = <TError = ErrorType<void>,
       return useMutation(getReadPatRegisterListMutationOptions(options));
     }
 
-export const getGetImportListReadingUrl = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster',) => {
+export const getGetImportListReadingUrl = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets',) => {
 
 
 
@@ -9011,7 +9800,7 @@ export const getGetImportListReadingUrl = (kind: 'room-track-rooms' | 'contracto
 /**
  * @summary Whether ComplyTrack can read a photo or document list for an import, and this month's use
  */
-export const getImportListReading = async (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster', options?: RequestInit): Promise<PatRegisterReadingStatus> => {
+export const getImportListReading = async (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets', options?: RequestInit): Promise<PatRegisterReadingStatus> => {
 
   return customFetch<PatRegisterReadingStatus>(getGetImportListReadingUrl(kind),
   {
@@ -9026,14 +9815,14 @@ export const getImportListReading = async (kind: 'room-track-rooms' | 'contracto
 
 
 
-export const getGetImportListReadingQueryKey = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster',) => {
+export const getGetImportListReadingQueryKey = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets',) => {
     return [
     `/api/imports/list-reading/${kind}`
     ] as const;
     }
 
 
-export const getGetImportListReadingQueryOptions = <TData = Awaited<ReturnType<typeof getImportListReading>>, TError = ErrorType<void>>(kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetImportListReadingQueryOptions = <TData = Awaited<ReturnType<typeof getImportListReading>>, TError = ErrorType<void>>(kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -9060,7 +9849,7 @@ export type GetImportListReadingQueryError = ErrorType<void>
  */
 
 export function useGetImportListReading<TData = Awaited<ReturnType<typeof getImportListReading>>, TError = ErrorType<void>>(
- kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
@@ -9077,7 +9866,7 @@ export function useGetImportListReading<TData = Awaited<ReturnType<typeof getImp
 
 
 
-export const getReadImportListUrl = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster',) => {
+export const getReadImportListUrl = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets',) => {
 
 
 
@@ -9086,10 +9875,10 @@ export const getReadImportListUrl = (kind: 'room-track-rooms' | 'contractors' | 
 }
 
 /**
- * Claude reads the file and returns rows in the import's own columns (RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment or the staff roster). Nothing is saved: the browser sends the rows through the import's usual preview. The file is not stored. Off until the server has an Anthropic API key; readings share the business's monthly number with the PAT register reading.
+ * Claude reads the file and returns rows in the import's own columns (RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment, the staff roster or KitchenTrack suppliers' allergen information). Nothing is saved: the browser sends the rows through the import's usual preview. The file is not stored. Off until the server has an Anthropic API key; readings share the business's monthly number with the PAT register reading.
  * @summary Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
  */
-export const readImportList = async (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster',
+export const readImportList = async (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets',
     patRegisterReadRequest: PatRegisterReadRequest, options?: RequestInit): Promise<ImportListReadResult> => {
 
   return customFetch<ImportListReadResult>(getReadImportListUrl(kind),
@@ -9106,8 +9895,8 @@ export const readImportList = async (kind: 'room-track-rooms' | 'contractors' | 
 
 
 export const getReadImportListMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets';data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets';data: BodyType<PatRegisterReadRequest>}, TContext> => {
 
 const mutationKey = ['readImportList'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -9119,7 +9908,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof readImportList>>, {kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof readImportList>>, {kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets';data: BodyType<PatRegisterReadRequest>}> = (props) => {
           const {kind,data} = props ?? {};
 
           return  readImportList(kind,data,requestOptions)
@@ -9140,14 +9929,86 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  * @summary Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
  */
 export const useReadImportList = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets';data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof readImportList>>,
         TError,
-        {kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>},
+        {kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster' | 'allergen-ingredients' | 'legionella-outlets';data: BodyType<PatRegisterReadRequest>},
         TContext
       > => {
       return useMutation(getReadImportListMutationOptions(options));
+    }
+
+export const getSortImportListUrl = () => {
+
+
+
+
+  return `/api/imports/sort-list`
+}
+
+/**
+ * For "Upload your lists", where many files are dropped at once. Claude only says which of the business's imports the file is (PAT appliances, RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment or the staff roster); the rows are read later by that import. Uses the AI allowance but not the monthly reading number. The file is not stored. Off until the server has an Anthropic API key.
+ * @summary Say which import a photo, scan, PDF or Word list belongs in (owners and consultants)
+ */
+export const sortImportList = async (patRegisterReadRequest: PatRegisterReadRequest, options?: RequestInit): Promise<ImportListSortResult> => {
+
+  return customFetch<ImportListSortResult>(getSortImportListUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(patRegisterReadRequest)
+  }
+);}
+
+
+
+
+
+export const getSortImportListMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sortImportList>>, TError,{data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof sortImportList>>, TError,{data: BodyType<PatRegisterReadRequest>}, TContext> => {
+
+const mutationKey = ['sortImportList'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sortImportList>>, {data: BodyType<PatRegisterReadRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  sortImportList(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SortImportListMutationResult = NonNullable<Awaited<ReturnType<typeof sortImportList>>>
+    export type SortImportListMutationBody = BodyType<PatRegisterReadRequest>
+    export type SortImportListMutationError = ErrorType<void>
+
+    /**
+ * @summary Say which import a photo, scan, PDF or Word list belongs in (owners and consultants)
+ */
+export const useSortImportList = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sortImportList>>, TError,{data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof sortImportList>>,
+        TError,
+        {data: BodyType<PatRegisterReadRequest>},
+        TContext
+      > => {
+      return useMutation(getSortImportListMutationOptions(options));
     }
 
 export const getUpdateFireCallPointUrl = (id: number,) => {
@@ -10321,6 +11182,304 @@ export const useUpdateHotTubCheck = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getUpdateHotTubCheckMutationOptions(options));
+    }
+
+export const getListTreeTrackTreesUrl = (params?: ListTreeTrackTreesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/tree-track/trees?${stringifiedParams}` : `/api/tree-track/trees`
+}
+
+/**
+ * @summary The tree register, each tree with its last inspection and when it is next due
+ */
+export const listTreeTrackTrees = async (params?: ListTreeTrackTreesParams, options?: RequestInit): Promise<TreeTrackTreeWithStatus[]> => {
+
+  return customFetch<TreeTrackTreeWithStatus[]>(getListTreeTrackTreesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListTreeTrackTreesQueryKey = (params?: ListTreeTrackTreesParams,) => {
+    return [
+    `/api/tree-track/trees`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListTreeTrackTreesQueryOptions = <TData = Awaited<ReturnType<typeof listTreeTrackTrees>>, TError = ErrorType<unknown>>(params?: ListTreeTrackTreesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listTreeTrackTrees>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListTreeTrackTreesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listTreeTrackTrees>>> = ({ signal }) => listTreeTrackTrees(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listTreeTrackTrees>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListTreeTrackTreesQueryResult = NonNullable<Awaited<ReturnType<typeof listTreeTrackTrees>>>
+export type ListTreeTrackTreesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary The tree register, each tree with its last inspection and when it is next due
+ */
+
+export function useListTreeTrackTrees<TData = Awaited<ReturnType<typeof listTreeTrackTrees>>, TError = ErrorType<unknown>>(
+ params?: ListTreeTrackTreesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listTreeTrackTrees>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListTreeTrackTreesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateTreeTrackTreeUrl = () => {
+
+
+
+
+  return `/api/tree-track/trees`
+}
+
+/**
+ * @summary Add a tree to the register (Owners and consultants)
+ */
+export const createTreeTrackTree = async (treeTrackTreeInput: TreeTrackTreeInput, options?: RequestInit): Promise<TreeTrackTree> => {
+
+  return customFetch<TreeTrackTree>(getCreateTreeTrackTreeUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(treeTrackTreeInput)
+  }
+);}
+
+
+
+
+
+export const getCreateTreeTrackTreeMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTreeTrackTree>>, TError,{data: BodyType<TreeTrackTreeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createTreeTrackTree>>, TError,{data: BodyType<TreeTrackTreeInput>}, TContext> => {
+
+const mutationKey = ['createTreeTrackTree'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createTreeTrackTree>>, {data: BodyType<TreeTrackTreeInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createTreeTrackTree(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateTreeTrackTreeMutationResult = NonNullable<Awaited<ReturnType<typeof createTreeTrackTree>>>
+    export type CreateTreeTrackTreeMutationBody = BodyType<TreeTrackTreeInput>
+    export type CreateTreeTrackTreeMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Add a tree to the register (Owners and consultants)
+ */
+export const useCreateTreeTrackTree = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTreeTrackTree>>, TError,{data: BodyType<TreeTrackTreeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createTreeTrackTree>>,
+        TError,
+        {data: BodyType<TreeTrackTreeInput>},
+        TContext
+      > => {
+      return useMutation(getCreateTreeTrackTreeMutationOptions(options));
+    }
+
+export const getUpdateTreeTrackTreeUrl = (id: number,) => {
+
+
+
+
+  return `/api/tree-track/trees/${id}`
+}
+
+/**
+ * @summary Change a tree on the register, or mark it felled or removed (Owners and consultants)
+ */
+export const updateTreeTrackTree = async (id: number,
+    treeTrackTreeUpdate: TreeTrackTreeUpdate, options?: RequestInit): Promise<TreeTrackTree> => {
+
+  return customFetch<TreeTrackTree>(getUpdateTreeTrackTreeUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(treeTrackTreeUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateTreeTrackTreeMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateTreeTrackTree>>, TError,{id: number;data: BodyType<TreeTrackTreeUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateTreeTrackTree>>, TError,{id: number;data: BodyType<TreeTrackTreeUpdate>}, TContext> => {
+
+const mutationKey = ['updateTreeTrackTree'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateTreeTrackTree>>, {id: number;data: BodyType<TreeTrackTreeUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateTreeTrackTree(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateTreeTrackTreeMutationResult = NonNullable<Awaited<ReturnType<typeof updateTreeTrackTree>>>
+    export type UpdateTreeTrackTreeMutationBody = BodyType<TreeTrackTreeUpdate>
+    export type UpdateTreeTrackTreeMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Change a tree on the register, or mark it felled or removed (Owners and consultants)
+ */
+export const useUpdateTreeTrackTree = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateTreeTrackTree>>, TError,{id: number;data: BodyType<TreeTrackTreeUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateTreeTrackTree>>,
+        TError,
+        {id: number;data: BodyType<TreeTrackTreeUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateTreeTrackTreeMutationOptions(options));
+    }
+
+export const getDeleteTreeTrackTreeUrl = (id: number,) => {
+
+
+
+
+  return `/api/tree-track/trees/${id}`
+}
+
+/**
+ * @summary Delete a tree added by mistake; one with inspections is marked felled instead (Owners and consultants)
+ */
+export const deleteTreeTrackTree = async (id: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteTreeTrackTreeUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteTreeTrackTreeMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteTreeTrackTree>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteTreeTrackTree>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteTreeTrackTree'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteTreeTrackTree>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteTreeTrackTree(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteTreeTrackTreeMutationResult = NonNullable<Awaited<ReturnType<typeof deleteTreeTrackTree>>>
+
+    export type DeleteTreeTrackTreeMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Delete a tree added by mistake; one with inspections is marked felled instead (Owners and consultants)
+ */
+export const useDeleteTreeTrackTree = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteTreeTrackTree>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteTreeTrackTree>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteTreeTrackTreeMutationOptions(options));
     }
 
 export const getGetBikeTrackConfigUrl = () => {
@@ -13976,6 +15135,382 @@ export const useDeletePATPresetTemplate = <TError = ErrorType<unknown>,
       return useMutation(getDeletePATPresetTemplateMutationOptions(options));
     }
 
+export const getListPATContractorVisitsUrl = (params?: ListPATContractorVisitsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/pat-track/contractor-visits?${stringifiedParams}` : `/api/pat-track/contractor-visits`
+}
+
+/**
+ * @summary Contractor testing visits at the caller's sites, newest first (not Viewers)
+ */
+export const listPATContractorVisits = async (params?: ListPATContractorVisitsParams, options?: RequestInit): Promise<PATContractorVisits> => {
+
+  return customFetch<PATContractorVisits>(getListPATContractorVisitsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPATContractorVisitsQueryKey = (params?: ListPATContractorVisitsParams,) => {
+    return [
+    `/api/pat-track/contractor-visits`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListPATContractorVisitsQueryOptions = <TData = Awaited<ReturnType<typeof listPATContractorVisits>>, TError = ErrorType<unknown>>(params?: ListPATContractorVisitsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPATContractorVisits>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPATContractorVisitsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPATContractorVisits>>> = ({ signal }) => listPATContractorVisits(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPATContractorVisits>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListPATContractorVisitsQueryResult = NonNullable<Awaited<ReturnType<typeof listPATContractorVisits>>>
+export type ListPATContractorVisitsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Contractor testing visits at the caller's sites, newest first (not Viewers)
+ */
+
+export function useListPATContractorVisits<TData = Awaited<ReturnType<typeof listPATContractorVisits>>, TError = ErrorType<unknown>>(
+ params?: ListPATContractorVisitsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPATContractorVisits>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListPATContractorVisitsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreatePATContractorVisitUrl = () => {
+
+
+
+
+  return `/api/pat-track/contractor-visits`
+}
+
+/**
+ * The link is returned once; only its digest is kept. It works from set-up until two days after the last visit day, for this site only.
+ * @summary Set up a contractor's testing visit and email them the link (Owners and Managers)
+ */
+export const createPATContractorVisit = async (createPATContractorVisitRequest: CreatePATContractorVisitRequest, options?: RequestInit): Promise<PATContractorVisitLink> => {
+
+  return customFetch<PATContractorVisitLink>(getCreatePATContractorVisitUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createPATContractorVisitRequest)
+  }
+);}
+
+
+
+
+
+export const getCreatePATContractorVisitMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPATContractorVisit>>, TError,{data: BodyType<CreatePATContractorVisitRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPATContractorVisit>>, TError,{data: BodyType<CreatePATContractorVisitRequest>}, TContext> => {
+
+const mutationKey = ['createPATContractorVisit'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPATContractorVisit>>, {data: BodyType<CreatePATContractorVisitRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPATContractorVisit(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePATContractorVisitMutationResult = NonNullable<Awaited<ReturnType<typeof createPATContractorVisit>>>
+    export type CreatePATContractorVisitMutationBody = BodyType<CreatePATContractorVisitRequest>
+    export type CreatePATContractorVisitMutationError = ErrorType<void>
+
+    /**
+ * @summary Set up a contractor's testing visit and email them the link (Owners and Managers)
+ */
+export const useCreatePATContractorVisit = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPATContractorVisit>>, TError,{data: BodyType<CreatePATContractorVisitRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createPATContractorVisit>>,
+        TError,
+        {data: BodyType<CreatePATContractorVisitRequest>},
+        TContext
+      > => {
+      return useMutation(getCreatePATContractorVisitMutationOptions(options));
+    }
+
+export const getGetPATContractorVisitUrl = (id: number,) => {
+
+
+
+
+  return `/api/pat-track/contractor-visits/${id}`
+}
+
+/**
+ * @summary One visit with every result, each sign-in and the sign-off signature
+ */
+export const getPATContractorVisit = async (id: number, options?: RequestInit): Promise<PATContractorVisitDetail> => {
+
+  return customFetch<PATContractorVisitDetail>(getGetPATContractorVisitUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPATContractorVisitQueryKey = (id: number,) => {
+    return [
+    `/api/pat-track/contractor-visits/${id}`
+    ] as const;
+    }
+
+
+export const getGetPATContractorVisitQueryOptions = <TData = Awaited<ReturnType<typeof getPATContractorVisit>>, TError = ErrorType<void>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPATContractorVisit>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPATContractorVisitQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPATContractorVisit>>> = ({ signal }) => getPATContractorVisit(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPATContractorVisit>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPATContractorVisitQueryResult = NonNullable<Awaited<ReturnType<typeof getPATContractorVisit>>>
+export type GetPATContractorVisitQueryError = ErrorType<void>
+
+
+/**
+ * @summary One visit with every result, each sign-in and the sign-off signature
+ */
+
+export function useGetPATContractorVisit<TData = Awaited<ReturnType<typeof getPATContractorVisit>>, TError = ErrorType<void>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPATContractorVisit>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPATContractorVisitQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRenewPATContractorVisitLinkUrl = (id: number,) => {
+
+
+
+
+  return `/api/pat-track/contractor-visits/${id}/new-link`
+}
+
+/**
+ * @summary Replace an open visit's link (the old one stops working) and email the new one
+ */
+export const renewPATContractorVisitLink = async (id: number,
+    renewPATContractorVisitLinkRequest?: RenewPATContractorVisitLinkRequest, options?: RequestInit): Promise<PATContractorVisitLink> => {
+
+  return customFetch<PATContractorVisitLink>(getRenewPATContractorVisitLinkUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(renewPATContractorVisitLinkRequest)
+  }
+);}
+
+
+
+
+
+export const getRenewPATContractorVisitLinkMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renewPATContractorVisitLink>>, TError,{id: number;data?: BodyType<RenewPATContractorVisitLinkRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof renewPATContractorVisitLink>>, TError,{id: number;data?: BodyType<RenewPATContractorVisitLinkRequest>}, TContext> => {
+
+const mutationKey = ['renewPATContractorVisitLink'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof renewPATContractorVisitLink>>, {id: number;data?: BodyType<RenewPATContractorVisitLinkRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  renewPATContractorVisitLink(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RenewPATContractorVisitLinkMutationResult = NonNullable<Awaited<ReturnType<typeof renewPATContractorVisitLink>>>
+    export type RenewPATContractorVisitLinkMutationBody = BodyType<RenewPATContractorVisitLinkRequest> | undefined
+    export type RenewPATContractorVisitLinkMutationError = ErrorType<void>
+
+    /**
+ * @summary Replace an open visit's link (the old one stops working) and email the new one
+ */
+export const useRenewPATContractorVisitLink = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renewPATContractorVisitLink>>, TError,{id: number;data?: BodyType<RenewPATContractorVisitLinkRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof renewPATContractorVisitLink>>,
+        TError,
+        {id: number;data?: BodyType<RenewPATContractorVisitLinkRequest>},
+        TContext
+      > => {
+      return useMutation(getRenewPATContractorVisitLinkMutationOptions(options));
+    }
+
+export const getEndPATContractorVisitUrl = (id: number,) => {
+
+
+
+
+  return `/api/pat-track/contractor-visits/${id}/end`
+}
+
+/**
+ * @summary Close a visit's link early; results already logged stay on PATrack
+ */
+export const endPATContractorVisit = async (id: number, options?: RequestInit): Promise<PATContractorVisit> => {
+
+  return customFetch<PATContractorVisit>(getEndPATContractorVisitUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getEndPATContractorVisitMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endPATContractorVisit>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof endPATContractorVisit>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['endPATContractorVisit'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof endPATContractorVisit>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  endPATContractorVisit(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type EndPATContractorVisitMutationResult = NonNullable<Awaited<ReturnType<typeof endPATContractorVisit>>>
+
+    export type EndPATContractorVisitMutationError = ErrorType<void>
+
+    /**
+ * @summary Close a visit's link early; results already logged stay on PATrack
+ */
+export const useEndPATContractorVisit = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endPATContractorVisit>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof endPATContractorVisit>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getEndPATContractorVisitMutationOptions(options));
+    }
+
 export const getGetDailyTrackHistoryUrl = (params: GetDailyTrackHistoryParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -14988,6 +16523,91 @@ export function useGetFoodSafetySummary<TData = Awaited<ReturnType<typeof getFoo
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetFoodSafetySummaryQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFoodSafetyMonthSummaryUrl = (params?: GetFoodSafetyMonthSummaryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/food-safety/month-summary?${stringifiedParams}` : `/api/food-safety/month-summary`
+}
+
+/**
+ * For every site the user can see: diary days recorded, in draft, closed and missed (counted up to yesterday, from the site's first diary record), and the KitchenTrack actions raised in the month and still open.
+ * @summary KitchenTrack month summary for Owners and Managers
+ */
+export const getFoodSafetyMonthSummary = async (params?: GetFoodSafetyMonthSummaryParams, options?: RequestInit): Promise<KitchenMonthSummary> => {
+
+  return customFetch<KitchenMonthSummary>(getGetFoodSafetyMonthSummaryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFoodSafetyMonthSummaryQueryKey = (params?: GetFoodSafetyMonthSummaryParams,) => {
+    return [
+    `/api/food-safety/month-summary`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetFoodSafetyMonthSummaryQueryOptions = <TData = Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>, TError = ErrorType<ErrorResponse>>(params?: GetFoodSafetyMonthSummaryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFoodSafetyMonthSummaryQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>> = ({ signal }) => getFoodSafetyMonthSummary(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFoodSafetyMonthSummaryQueryResult = NonNullable<Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>>
+export type GetFoodSafetyMonthSummaryQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary KitchenTrack month summary for Owners and Managers
+ */
+
+export function useGetFoodSafetyMonthSummary<TData = Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetFoodSafetyMonthSummaryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFoodSafetyMonthSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFoodSafetyMonthSummaryQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

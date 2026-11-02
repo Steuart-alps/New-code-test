@@ -810,6 +810,12 @@ export const ListSitesResponseItem = zod.object({
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
+  "openingChecksDue": zod.string().nullish().describe('When the site\'s opening checks are due (\"HH:MM\" on the business\'s clock). Null means 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('When the site\'s closing checks are due (\"HH:MM\" on the business\'s clock). Null means 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out (\"HH:MM\"). Null means 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out (\"HH:MM\"). Null means 21:00.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -824,7 +830,9 @@ export const CreateSiteBody = zod.object({
   "name": zod.string(),
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
-  "phone": zod.string().nullish()
+  "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.')
 })
 
 export const CreateSiteResponse = zod.object({
@@ -835,6 +843,12 @@ export const CreateSiteResponse = zod.object({
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
+  "openingChecksDue": zod.string().nullish().describe('When the site\'s opening checks are due (\"HH:MM\" on the business\'s clock). Null means 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('When the site\'s closing checks are due (\"HH:MM\" on the business\'s clock). Null means 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out (\"HH:MM\"). Null means 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out (\"HH:MM\"). Null means 21:00.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -855,6 +869,12 @@ export const GetSiteResponse = zod.object({
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
+  "openingChecksDue": zod.string().nullish().describe('When the site\'s opening checks are due (\"HH:MM\" on the business\'s clock). Null means 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('When the site\'s closing checks are due (\"HH:MM\" on the business\'s clock). Null means 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out (\"HH:MM\"). Null means 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out (\"HH:MM\"). Null means 21:00.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -872,7 +892,9 @@ export const UpdateSiteBody = zod.object({
   "name": zod.string().optional(),
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
-  "phone": zod.string().nullish()
+  "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.')
 })
 
 export const UpdateSiteResponse = zod.object({
@@ -883,6 +905,12 @@ export const UpdateSiteResponse = zod.object({
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
+  "openingChecksDue": zod.string().nullish().describe('When the site\'s opening checks are due (\"HH:MM\" on the business\'s clock). Null means 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('When the site\'s closing checks are due (\"HH:MM\" on the business\'s clock). Null means 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out (\"HH:MM\"). Null means 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out (\"HH:MM\"). Null means 21:00.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -896,6 +924,40 @@ export const DeleteSiteParams = zod.object({
 })
 
 export const DeleteSiteResponse = zod.void()
+
+
+/**
+ * Owners, consultants and Managers who can see the site. Times are "HH:MM" on the business's clock; null or blank uses the default (due 06:00 opening, 18:00 closing; reminders 11:00 and 21:00). A field left out keeps its time.
+ * @summary Set when the site's opening and closing checks are due, and when their reminders go out
+ */
+export const SetSiteChecklistDueTimesParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SetSiteChecklistDueTimesBody = zod.object({
+  "openingChecksDue": zod.string().nullish().describe('\"HH:MM\"; null or blank for the default 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('\"HH:MM\"; null or blank for the default 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out, \"HH:MM\"; null or blank for the default 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out, \"HH:MM\"; null or blank for the default 21:00.')
+})
+
+export const SetSiteChecklistDueTimesResponse = zod.object({
+  "departmentId": zod.number().nullish(),
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "name": zod.string(),
+  "responsiblePerson": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
+  "openingChecksDue": zod.string().nullish().describe('When the site\'s opening checks are due (\"HH:MM\" on the business\'s clock). Null means 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('When the site\'s closing checks are due (\"HH:MM\" on the business\'s clock). Null means 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out (\"HH:MM\"). Null means 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out (\"HH:MM\"). Null means 21:00.'),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
 
 
 /**
@@ -3822,7 +3884,7 @@ export const AssignFixTrackContractorResponse = zod.object({
  * @summary List fire safety logbook entries
  */
 export const ListFireSafetyChecksQueryParams = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']).optional(),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).optional(),
   "siteId": zod.coerce.number().optional()
 })
 
@@ -3835,7 +3897,7 @@ export const ListFireSafetyChecksResponseItem = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
@@ -3853,6 +3915,7 @@ export const ListFireSafetyChecksResponseItem = zod.object({
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -3870,7 +3933,7 @@ export const createFireSafetyCheckBodyStaffPresentIdsMax = 2000;
 
 
 export const CreateFireSafetyCheckBody = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "siteId": zod.number().nullish(),
@@ -3885,7 +3948,8 @@ export const CreateFireSafetyCheckBody = zod.object({
   "staffPresentIds": zod.array(zod.number()).max(createFireSafetyCheckBodyStaffPresentIdsMax).optional().describe('Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.'),
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
-  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).')
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.')
 })
 
 export const createFireSafetyCheckResponseDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
@@ -3897,7 +3961,7 @@ export const CreateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
@@ -3915,6 +3979,7 @@ export const CreateFireSafetyCheckResponse = zod.object({
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -3928,7 +3993,7 @@ export const GetFireSafetyStatusQueryParams = zod.object({
 })
 
 export const GetFireSafetyStatusResponseItem = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "frequencyDays": zod.number(),
   "lastDate": zod.string().nullish(),
   "lastResult": zod.enum(['pass', 'fail', 'action_required']).nullable(),
@@ -3940,6 +4005,95 @@ export const GetFireSafetyStatusResponseItem = zod.object({
   "sitesAffected": zod.number().optional().describe('How many of those sites are overdue or have never recorded the check.')
 })
 export const GetFireSafetyStatusResponse = zod.array(GetFireSafetyStatusResponseItem)
+
+
+/**
+ * @summary A site's escape routes, ticked on each escape route sign-off and night fire walk
+ */
+export const GetFireEscapeRoutesQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('The site. Omit for a business with no sites.')
+})
+
+export const getFireEscapeRoutesResponseRoutesItemNameMax = 200;
+
+export const getFireEscapeRoutesResponseRoutesItemLocationMax = 200;
+
+
+
+export const GetFireEscapeRoutesResponse = zod.object({
+  "siteId": zod.number().nullable(),
+  "routes": zod.array(zod.object({
+  "name": zod.string().max(getFireEscapeRoutesResponseRoutesItemNameMax).describe('e.g. \"Final fire exit door route 1\" or \"Escape stairway 2\".'),
+  "location": zod.string().max(getFireEscapeRoutesResponseRoutesItemLocationMax).nullish().describe('Where it leads, or the assembly point (optional).')
+})),
+  "shared": zod.boolean().describe('True when the site has no list of its own yet and these are the business-wide routes saved before routes were set per site.')
+})
+
+
+/**
+ * @summary Replace a site's escape route list (managers)
+ */
+export const UpdateFireEscapeRoutesQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('The site. Omit for a business with no sites.')
+})
+
+export const updateFireEscapeRoutesBodyRoutesItemNameMax = 200;
+
+export const updateFireEscapeRoutesBodyRoutesItemLocationMax = 200;
+
+export const updateFireEscapeRoutesBodyRoutesMax = 100;
+
+
+
+export const UpdateFireEscapeRoutesBody = zod.object({
+  "routes": zod.array(zod.object({
+  "name": zod.string().max(updateFireEscapeRoutesBodyRoutesItemNameMax).describe('e.g. \"Final fire exit door route 1\" or \"Escape stairway 2\".'),
+  "location": zod.string().max(updateFireEscapeRoutesBodyRoutesItemLocationMax).nullish().describe('Where it leads, or the assembly point (optional).')
+})).max(updateFireEscapeRoutesBodyRoutesMax)
+})
+
+export const updateFireEscapeRoutesResponseRoutesItemNameMax = 200;
+
+export const updateFireEscapeRoutesResponseRoutesItemLocationMax = 200;
+
+
+
+export const UpdateFireEscapeRoutesResponse = zod.object({
+  "siteId": zod.number().nullable(),
+  "routes": zod.array(zod.object({
+  "name": zod.string().max(updateFireEscapeRoutesResponseRoutesItemNameMax).describe('e.g. \"Final fire exit door route 1\" or \"Escape stairway 2\".'),
+  "location": zod.string().max(updateFireEscapeRoutesResponseRoutesItemLocationMax).nullish().describe('Where it leads, or the assembly point (optional).')
+})),
+  "shared": zod.boolean().describe('True when the site has no list of its own yet and these are the business-wide routes saved before routes were set per site.')
+})
+
+
+/**
+ * @summary Night porter fire walks (22:00, 02:00, 06:00) for each site with a night porter, tonight and the last six nights
+ */
+export const GetNightFireWalksQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const GetNightFireWalksResponse = zod.object({
+  "walkTimes": zod.array(zod.string()),
+  "graceMinutes": zod.number().describe('A walk counts as missed this many minutes after its time.'),
+  "sites": zod.array(zod.object({
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "nights": zod.array(zod.object({
+  "nightOf": zod.string().describe('The evening the night starts (YYYY-MM-DD); its 02:00 and 06:00 walks fall on the next day.'),
+  "walks": zod.array(zod.object({
+  "date": zod.string().describe('The calendar day the walk falls on (YYYY-MM-DD).'),
+  "time": zod.enum(['22:00', '02:00', '06:00']),
+  "status": zod.enum(['done', 'failed', 'due', 'missed', 'upcoming', 'not_needed']).describe('done or failed once recorded (failed = something found); due from its time until an hour after; missed after that; upcoming before its time; not_needed before the site had a night porter.'),
+  "checkId": zod.number().nullable(),
+  "performedBy": zod.string().nullable()
+}))
+})).describe('Tonight (or the night now ending) first, then the six nights before.'),
+  "missedCount": zod.number().describe('Walks missed over the nights listed.')
+})).describe('Sites with a night porter that the caller can see.')
+})
 
 
 /**
@@ -4050,6 +4204,120 @@ export const ImportFireCallPointsBody = zod.object({
 })
 
 export const ImportFireCallPointsResponse = zod.object({
+  "preview": zod.boolean(),
+  "committed": zod.boolean(),
+  "summary": zod.object({
+  "total": zod.number(),
+  "create": zod.number(),
+  "update": zod.number(),
+  "skip": zod.number(),
+  "error": zod.number()
+}),
+  "rows": zod.array(zod.object({
+  "row": zod.number(),
+  "action": zod.enum(['create', 'update', 'skip', 'error']),
+  "label": zod.string(),
+  "reasons": zod.array(zod.string())
+})),
+  "ignoredHeaders": zod.array(zod.string()),
+  "error": zod.string().optional()
+})
+
+
+/**
+ * @summary Download the CSV template for uploading LegionellaTrack outlets, tanks and calorifiers (managers)
+ */
+export const GetLegionellaOutletImportTemplateResponse = zod.unknown()
+
+
+/**
+ * The browser sends the spreadsheet's header row and cell text: Name, Type (Hot, Cold, TMV, Little used, Cold water tank or Calorifier), Location and Site. Outlets join the site's outlet list; cold water tanks and calorifiers join the equipment list, where tank checks name them. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error.
+ * @summary Preview or import a spreadsheet of LegionellaTrack outlets, tanks and calorifiers (managers)
+ */
+export const ImportLegionellaOutletsBody = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "preview": zod.boolean().optional(),
+  "siteId": zod.number().nullish().describe('The site for rows whose Site cell is blank.')
+})
+
+export const ImportLegionellaOutletsResponse = zod.object({
+  "preview": zod.boolean(),
+  "committed": zod.boolean(),
+  "summary": zod.object({
+  "total": zod.number(),
+  "create": zod.number(),
+  "update": zod.number(),
+  "skip": zod.number(),
+  "error": zod.number()
+}),
+  "rows": zod.array(zod.object({
+  "row": zod.number(),
+  "action": zod.enum(['create', 'update', 'skip', 'error']),
+  "label": zod.string(),
+  "reasons": zod.array(zod.string())
+})),
+  "ignoredHeaders": zod.array(zod.string()),
+  "error": zod.string().optional()
+})
+
+
+/**
+ * @summary Download the CSV template for importing suppliers' allergen information (managers)
+ */
+export const GetAllergenIngredientImportTemplateResponse = zod.unknown()
+
+
+/**
+ * The browser sends the spreadsheet's header row and cell text: a column per allergen (Y, N or May) or Contains and May contain lists. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error. Rows match existing ingredients by site and name; changed allergens update every dish using the ingredient, each with a change log entry.
+ * @summary Preview or import suppliers' allergen information as KitchenTrack ingredients (managers)
+ */
+export const ImportAllergenIngredientsBody = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "preview": zod.boolean().optional(),
+  "siteId": zod.number().nullish().describe('The site for rows whose Site cell is blank.')
+})
+
+export const ImportAllergenIngredientsResponse = zod.object({
+  "preview": zod.boolean(),
+  "committed": zod.boolean(),
+  "summary": zod.object({
+  "total": zod.number(),
+  "create": zod.number(),
+  "update": zod.number(),
+  "skip": zod.number(),
+  "error": zod.number()
+}),
+  "rows": zod.array(zod.object({
+  "row": zod.number(),
+  "action": zod.enum(['create', 'update', 'skip', 'error']),
+  "label": zod.string(),
+  "reasons": zod.array(zod.string())
+})),
+  "ignoredHeaders": zod.array(zod.string()),
+  "error": zod.string().optional()
+})
+
+
+/**
+ * @summary Download the CSV template for importing compliance checks (owners and consultants)
+ */
+export const GetComplianceCheckImportTemplateResponse = zod.unknown()
+
+
+/**
+ * The browser sends the spreadsheet's rows; headings below a title row are found. Each line is matched to ComplyTrack's own check where there is one, then to an existing check with that title at the site. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error. siteId is the site for rows whose Site cell is blank.
+ * @summary Preview or import a business's compliance checklist (owners and consultants)
+ */
+export const ImportComplianceChecksBody = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "preview": zod.boolean().optional(),
+  "siteId": zod.number().nullish().describe('The site for rows whose Site cell is blank.')
+})
+
+export const ImportComplianceChecksResponse = zod.object({
   "preview": zod.boolean(),
   "committed": zod.boolean(),
   "summary": zod.object({
@@ -4223,7 +4491,7 @@ export const ReadPatRegisterListResponse = zod.object({
  * @summary Whether ComplyTrack can read a photo or document list for an import, and this month's use
  */
 export const GetImportListReadingParams = zod.object({
-  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster'])
+  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster', 'allergen-ingredients', 'legionella-outlets'])
 })
 
 export const getImportListReadingResponseAiPercentUsedMin = 0;
@@ -4258,11 +4526,11 @@ export const GetImportListReadingResponse = zod.object({
 
 
 /**
- * Claude reads the file and returns rows in the import's own columns (RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment or the staff roster). Nothing is saved: the browser sends the rows through the import's usual preview. The file is not stored. Off until the server has an Anthropic API key; readings share the business's monthly number with the PAT register reading.
+ * Claude reads the file and returns rows in the import's own columns (RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment, the staff roster or KitchenTrack suppliers' allergen information). Nothing is saved: the browser sends the rows through the import's usual preview. The file is not stored. Off until the server has an Anthropic API key; readings share the business's monthly number with the PAT register reading.
  * @summary Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
  */
 export const ReadImportListParams = zod.object({
-  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster'])
+  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster', 'allergen-ingredients', 'legionella-outlets'])
 })
 
 export const readImportListBodyFileNameMax = 255;
@@ -4281,6 +4549,26 @@ export const ReadImportListResponse = zod.object({
   "rows": zod.array(zod.array(zod.string())),
   "unclear": zod.number().describe('Rows that were hard to read'),
   "unclearRows": zod.array(zod.number()).describe('File row numbers (the header row is row 1) of the rows that were hard to read; where the import has a Notes column, their Notes start with \"Check:\"')
+})
+
+
+/**
+ * For "Upload your lists", where many files are dropped at once. Claude only says which of the business's imports the file is (PAT appliances, RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment or the staff roster); the rows are read later by that import. Uses the AI allowance but not the monthly reading number. The file is not stored. Off until the server has an Anthropic API key.
+ * @summary Say which import a photo, scan, PDF or Word list belongs in (owners and consultants)
+ */
+export const sortImportListBodyFileNameMax = 255;
+
+
+
+export const SortImportListBody = zod.object({
+  "fileName": zod.string().max(sortImportListBodyFileNameMax),
+  "mimeType": zod.string().describe('image\/jpeg, image\/png, image\/webp, image\/gif, application\/pdf, .docx or text\/plain'),
+  "data": zod.string().describe('The file as base64 (8 MB at most before encoding)'),
+  "siteId": zod.number().nullish().describe('The site the list is for, if the person chose one')
+})
+
+export const SortImportListResponse = zod.object({
+  "kind": zod.union([zod.literal('pat-appliances'),zod.literal('room-track-rooms'),zod.literal('contractors'),zod.literal('fire-call-points'),zod.literal('greentrack-equipment'),zod.literal('staff-roster'),zod.literal(null)]).nullable().describe('The import the file belongs in; null when it is none of them')
 })
 
 
@@ -4341,7 +4629,8 @@ export const UpdateFireSafetyCheckBody = zod.object({
   "staffPresentIds": zod.array(zod.number()).max(updateFireSafetyCheckBodyStaffPresentIdsMax).optional().describe('Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.'),
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
-  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).')
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.')
 })
 
 export const updateFireSafetyCheckResponseDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
@@ -4353,7 +4642,7 @@ export const UpdateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
@@ -4371,6 +4660,7 @@ export const UpdateFireSafetyCheckResponse = zod.object({
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -4914,6 +5204,153 @@ export const UpdateHotTubCheckResponse = zod.object({
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
+
+
+/**
+ * @summary The tree register, each tree with its last inspection and when it is next due
+ */
+export const ListTreeTrackTreesQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional(),
+  "includeRemoved": zod.coerce.boolean().optional().describe('Include trees marked felled or removed')
+})
+
+export const listTreeTrackTreesResponseOneInspectionIntervalMonthsMax = 60;
+
+
+
+export const ListTreeTrackTreesResponseItem = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "ref": zod.string().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(listTreeTrackTreesResponseOneInspectionIntervalMonthsMax),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed'),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+}).and(zod.object({
+  "lastInspected": zod.date().nullish().describe('Last routine inspection (visual, detailed or risk assessment)'),
+  "lastCheckDate": zod.date().nullish(),
+  "lastCheckType": zod.string().nullish(),
+  "openIssue": zod.object({
+  "checkDate": zod.date().optional(),
+  "severity": zod.string().nullish()
+}).nullish().describe('The latest inspection found a problem'),
+  "nextDue": zod.date().nullish(),
+  "status": zod.enum(['ok', 'due_soon', 'overdue', 'never'])
+}))
+export const ListTreeTrackTreesResponse = zod.array(ListTreeTrackTreesResponseItem)
+
+
+/**
+ * @summary Add a tree to the register (Owners and consultants)
+ */
+export const createTreeTrackTreeBodyInspectionIntervalMonthsMax = 60;
+
+
+
+export const CreateTreeTrackTreeBody = zod.object({
+  "ref": zod.string().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).optional().describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(createTreeTrackTreeBodyInspectionIntervalMonthsMax).optional(),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed')
+})
+
+export const createTreeTrackTreeResponseInspectionIntervalMonthsMax = 60;
+
+
+
+export const CreateTreeTrackTreeResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "ref": zod.string().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(createTreeTrackTreeResponseInspectionIntervalMonthsMax),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed'),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Change a tree on the register, or mark it felled or removed (Owners and consultants)
+ */
+export const UpdateTreeTrackTreeParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const updateTreeTrackTreeBodyInspectionIntervalMonthsMax = 60;
+
+
+
+export const UpdateTreeTrackTreeBody = zod.object({
+  "ref": zod.string().optional().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).optional().describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(updateTreeTrackTreeBodyInspectionIntervalMonthsMax).optional(),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed')
+})
+
+export const updateTreeTrackTreeResponseInspectionIntervalMonthsMax = 60;
+
+
+
+export const UpdateTreeTrackTreeResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "ref": zod.string().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(updateTreeTrackTreeResponseInspectionIntervalMonthsMax),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed'),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Delete a tree added by mistake; one with inspections is marked felled instead (Owners and consultants)
+ */
+export const DeleteTreeTrackTreeParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteTreeTrackTreeResponse = zod.void()
 
 
 /**
@@ -6155,6 +6592,247 @@ export const DeletePATPresetTemplateResponse = zod.object({
 
 
 /**
+ * @summary Contractor testing visits at the caller's sites, newest first (not Viewers)
+ */
+export const ListPATContractorVisitsQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const ListPATContractorVisitsResponse = zod.object({
+  "canManage": zod.boolean().describe('Whether the caller can set up and end visits'),
+  "visits": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string(),
+  "contractorEmail": zod.string().nullable(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "linkExpiresAt": zod.date(),
+  "status": zod.enum(['open', 'expired', 'signed_off', 'ended']),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "tested": zod.number(),
+  "passed": zod.number(),
+  "failed": zod.number(),
+  "onSiteNow": zod.number().describe('Contractors signed in through this visit\'s link and still on site'),
+  "signedOffAt": zod.date().nullable(),
+  "signedOffName": zod.string().nullable(),
+  "signedOffCompany": zod.string().nullable(),
+  "certificateRef": zod.string().nullable(),
+  "nextTestDue": zod.date().nullable(),
+  "signOffNotes": zod.string().nullable(),
+  "certificateUrl": zod.string().nullable().describe('The contractor\'s uploaded certificate (signed-in download)'),
+  "certificateFileName": zod.string().nullable(),
+  "patCertificateId": zod.number().nullable().describe('The PATrack certificate recorded at sign-off'),
+  "endedAt": zod.date().nullable()
+}))
+})
+
+
+/**
+ * The link is returned once; only its digest is kept. It works from set-up until two days after the last visit day, for this site only.
+ * @summary Set up a contractor's testing visit and email them the link (Owners and Managers)
+ */
+export const createPATContractorVisitBodySendEmailDefault = true;
+
+export const CreatePATContractorVisitBody = zod.object({
+  "siteId": zod.number(),
+  "contractorId": zod.number().nullish().describe('From the Contractors list; else give contractorName'),
+  "contractorName": zod.string().nullish(),
+  "contractorEmail": zod.string().nullish(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "sendEmail": zod.boolean().default(createPATContractorVisitBodySendEmailDefault)
+})
+
+export const CreatePATContractorVisitResponse = zod.object({
+  "visit": zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string(),
+  "contractorEmail": zod.string().nullable(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "linkExpiresAt": zod.date(),
+  "status": zod.enum(['open', 'expired', 'signed_off', 'ended']),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "tested": zod.number(),
+  "passed": zod.number(),
+  "failed": zod.number(),
+  "onSiteNow": zod.number().describe('Contractors signed in through this visit\'s link and still on site'),
+  "signedOffAt": zod.date().nullable(),
+  "signedOffName": zod.string().nullable(),
+  "signedOffCompany": zod.string().nullable(),
+  "certificateRef": zod.string().nullable(),
+  "nextTestDue": zod.date().nullable(),
+  "signOffNotes": zod.string().nullable(),
+  "certificateUrl": zod.string().nullable().describe('The contractor\'s uploaded certificate (signed-in download)'),
+  "certificateFileName": zod.string().nullable(),
+  "patCertificateId": zod.number().nullable().describe('The PATrack certificate recorded at sign-off'),
+  "endedAt": zod.date().nullable()
+}),
+  "link": zod.string().describe('The contractor\'s link; shown once'),
+  "emailedTo": zod.string().nullable(),
+  "emailError": zod.string().nullable()
+})
+
+
+/**
+ * @summary One visit with every result, each sign-in and the sign-off signature
+ */
+export const GetPATContractorVisitParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetPATContractorVisitResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string(),
+  "contractorEmail": zod.string().nullable(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "linkExpiresAt": zod.date(),
+  "status": zod.enum(['open', 'expired', 'signed_off', 'ended']),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "tested": zod.number(),
+  "passed": zod.number(),
+  "failed": zod.number(),
+  "onSiteNow": zod.number().describe('Contractors signed in through this visit\'s link and still on site'),
+  "signedOffAt": zod.date().nullable(),
+  "signedOffName": zod.string().nullable(),
+  "signedOffCompany": zod.string().nullable(),
+  "certificateRef": zod.string().nullable(),
+  "nextTestDue": zod.date().nullable(),
+  "signOffNotes": zod.string().nullable(),
+  "certificateUrl": zod.string().nullable().describe('The contractor\'s uploaded certificate (signed-in download)'),
+  "certificateFileName": zod.string().nullable(),
+  "patCertificateId": zod.number().nullable().describe('The PATrack certificate recorded at sign-off'),
+  "endedAt": zod.date().nullable()
+}).and(zod.object({
+  "signOffSignature": zod.string().nullable().describe('PNG data URL'),
+  "results": zod.array(zod.object({
+  "id": zod.number().describe('The PATrack test'),
+  "applianceId": zod.number(),
+  "applianceName": zod.string(),
+  "applianceType": zod.string().nullable(),
+  "location": zod.string().nullable(),
+  "assetTag": zod.string().nullable(),
+  "result": zod.enum(['pass', 'fail']),
+  "visualInspection": zod.string().nullable(),
+  "earthContinuityOhms": zod.string().nullable(),
+  "insulationMohms": zod.string().nullable(),
+  "operatingCurrent": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "testedBy": zod.string().nullable(),
+  "testDate": zod.date(),
+  "updatedAt": zod.date()
+})),
+  "signIns": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "company": zod.string(),
+  "signedInAt": zod.date(),
+  "signedOutAt": zod.date().nullable(),
+  "fireProcedureShown": zod.boolean(),
+  "asbestosStatus": zod.enum(['register', 'none_expected', 'missing'])
+}))
+}))
+
+
+/**
+ * @summary Replace an open visit's link (the old one stops working) and email the new one
+ */
+export const RenewPATContractorVisitLinkParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const renewPATContractorVisitLinkBodySendEmailDefault = true;
+
+export const RenewPATContractorVisitLinkBody = zod.object({
+  "sendEmail": zod.boolean().default(renewPATContractorVisitLinkBodySendEmailDefault).describe('Email the new link to the contractor')
+})
+
+export const RenewPATContractorVisitLinkResponse = zod.object({
+  "visit": zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string(),
+  "contractorEmail": zod.string().nullable(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "linkExpiresAt": zod.date(),
+  "status": zod.enum(['open', 'expired', 'signed_off', 'ended']),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "tested": zod.number(),
+  "passed": zod.number(),
+  "failed": zod.number(),
+  "onSiteNow": zod.number().describe('Contractors signed in through this visit\'s link and still on site'),
+  "signedOffAt": zod.date().nullable(),
+  "signedOffName": zod.string().nullable(),
+  "signedOffCompany": zod.string().nullable(),
+  "certificateRef": zod.string().nullable(),
+  "nextTestDue": zod.date().nullable(),
+  "signOffNotes": zod.string().nullable(),
+  "certificateUrl": zod.string().nullable().describe('The contractor\'s uploaded certificate (signed-in download)'),
+  "certificateFileName": zod.string().nullable(),
+  "patCertificateId": zod.number().nullable().describe('The PATrack certificate recorded at sign-off'),
+  "endedAt": zod.date().nullable()
+}),
+  "link": zod.string().describe('The contractor\'s link; shown once'),
+  "emailedTo": zod.string().nullable(),
+  "emailError": zod.string().nullable()
+})
+
+
+/**
+ * @summary Close a visit's link early; results already logged stay on PATrack
+ */
+export const EndPATContractorVisitParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const EndPATContractorVisitResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string(),
+  "contractorEmail": zod.string().nullable(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "linkExpiresAt": zod.date(),
+  "status": zod.enum(['open', 'expired', 'signed_off', 'ended']),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "tested": zod.number(),
+  "passed": zod.number(),
+  "failed": zod.number(),
+  "onSiteNow": zod.number().describe('Contractors signed in through this visit\'s link and still on site'),
+  "signedOffAt": zod.date().nullable(),
+  "signedOffName": zod.string().nullable(),
+  "signedOffCompany": zod.string().nullable(),
+  "certificateRef": zod.string().nullable(),
+  "nextTestDue": zod.date().nullable(),
+  "signOffNotes": zod.string().nullable(),
+  "certificateUrl": zod.string().nullable().describe('The contractor\'s uploaded certificate (signed-in download)'),
+  "certificateFileName": zod.string().nullable(),
+  "patCertificateId": zod.number().nullable().describe('The PATrack certificate recorded at sign-off'),
+  "endedAt": zod.date().nullable()
+})
+
+
+/**
  * The daily checks the client's services make each site responsible for, with the AM/PM checklists and manager sign-offs dated in the range (department-scoped users see their department's and shared sites).
  * @summary Daily checklist and sign-off history for the status page
  */
@@ -6516,6 +7194,51 @@ export const GetFoodSafetySummaryResponse = zod.object({
 
 
 /**
+ * For every site the user can see: diary days recorded, in draft, closed and missed (counted up to yesterday, from the site's first diary record), and the KitchenTrack actions raised in the month and still open.
+ * @summary KitchenTrack month summary for Owners and Managers
+ */
+export const getFoodSafetyMonthSummaryQueryMonthRegExp = new RegExp('^[0-9]{4}-[0-9]{2}$');
+
+
+export const GetFoodSafetyMonthSummaryQueryParams = zod.object({
+  "month": zod.coerce.string().regex(getFoodSafetyMonthSummaryQueryMonthRegExp).optional().describe('The month as YYYY-MM. Defaults to the business\'s current month.')
+})
+
+export const GetFoodSafetyMonthSummaryResponse = zod.object({
+  "month": zod.string(),
+  "from": zod.date(),
+  "through": zod.date().nullable().describe('The last day counted (yesterday, or the month\'s last day). Null when no day has finished yet.'),
+  "today": zod.date(),
+  "sites": zod.array(zod.object({
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "startedOn": zod.date().nullable().describe('The site\'s first diary record; days before it are not counted.'),
+  "daysCounted": zod.number(),
+  "recordedDays": zod.number(),
+  "draftDays": zod.number(),
+  "closedDays": zod.number(),
+  "missedDays": zod.number(),
+  "missedDates": zod.array(zod.date()),
+  "failedReadings": zod.number(),
+  "actionsRaised": zod.number(),
+  "actionsOpen": zod.number()
+})),
+  "totals": zod.object({
+  "daysCounted": zod.number(),
+  "recordedDays": zod.number(),
+  "draftDays": zod.number(),
+  "closedDays": zod.number(),
+  "missedDays": zod.number(),
+  "failedReadings": zod.number(),
+  "actionsRaised": zod.number(),
+  "actionsResolved": zod.number(),
+  "actionsOpen": zod.number(),
+  "actionsOverdue": zod.number()
+})
+})
+
+
+/**
  * @summary List missing and unsubmitted food safety diary dates in a bounded range
  */
 export const GetFoodSafetyMissingDatesQueryParams = zod.object({
@@ -6691,6 +7414,8 @@ export const ListLegionellaChecksResponseItem = zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('The named cold water tank or calorifier (equipment list item) the check was made on.'),
+  "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -6709,7 +7434,8 @@ export const CreateLegionellaCheckBody = zod.unknown().and(zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
-  "equipmentId": zod.number().nullish().describe('A cold water tank or calorifier on the equipment list (its site must match siteId).')
+  "equipmentId": zod.number().nullish().describe('A cold water tank or calorifier on the equipment list (its site must match siteId).'),
+  "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.')
 })).describe('temperature is required for calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, and cold_nonsent_temp checks.')
 
 export const CreateLegionellaCheckResponse = zod.object({
@@ -6723,6 +7449,8 @@ export const CreateLegionellaCheckResponse = zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('The named cold water tank or calorifier (equipment list item) the check was made on.'),
+  "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -6865,7 +7593,9 @@ export const UpdateLegionellaCheckBody = zod.object({
   "siteId": zod.number().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "performedBy": zod.string().nullish()
+  "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('Move the check to another named tank or calorifier at the same site.'),
+  "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.')
 }).describe('For an existing temperature check, temperature is required. New results use pass or fail.')
 
 export const UpdateLegionellaCheckResponse = zod.object({
@@ -6879,6 +7609,8 @@ export const UpdateLegionellaCheckResponse = zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('The named cold water tank or calorifier (equipment list item) the check was made on.'),
+  "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })

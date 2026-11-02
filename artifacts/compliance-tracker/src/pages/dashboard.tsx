@@ -22,6 +22,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useAuth, useCanAdmin, useIsMaintenanceManager } from "@/context/auth-context";
+import { useSiteFilter } from "@/hooks/use-working-site";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -63,7 +64,11 @@ interface ChecklistTotals {
   completedPmPairs: number;
   completedSitePairs: number;
   /** Sites with a checklist still to submit today; `am` / `pm` true = still to do. */
-  outstanding?: Array<{ siteId: number; siteName: string; am: boolean; pm: boolean }>;
+  /** amDue / pmDue: when the site's opening / closing checks are due ("HH:MM"); *Overdue once that has passed. */
+  outstanding?: Array<{
+    siteId: number; siteName: string; am: boolean; pm: boolean;
+    amDue?: string; pmDue?: string; amOverdue?: boolean; pmOverdue?: boolean;
+  }>;
 }
 
 /** Most sites listed under "Still to do today"; the rest are on the full status page. */
@@ -412,12 +417,17 @@ function SetupChecklist({
 // ── DailyTrack snapshot card ──────────────────────────────────────────────────
 
 /** A checklist still to do today: opens that site's checklist ready to fill in. */
-function ChecklistLink({ href, label, children }: { href: string; label: string; children: ReactNode }) {
+function ChecklistLink({ href, label, overdue, children }: { href: string; label: string; overdue?: boolean; children: ReactNode }) {
   return (
     <Link
       href={href}
       aria-label={label}
-      className="flex cursor-pointer items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 hover:border-amber-400 hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+      className={cn(
+        "flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+        overdue
+          ? "border-rose-300 bg-rose-50 text-rose-800 hover:border-rose-400 hover:bg-rose-100"
+          : "border-amber-300 bg-amber-50 text-amber-800 hover:border-amber-400 hover:bg-amber-100",
+      )}
     >
       {children} <ArrowRight className="w-3 h-3" />
     </Link>
@@ -488,13 +498,13 @@ function DailyTrackSnapshotCard({ totals, loading, siteId }: { totals: Checklist
               <li key={site.siteId} className="flex items-center gap-2 flex-wrap">
                 <span className="min-w-0 flex-1 truncate text-sm">{site.siteName}</span>
                 {site.am && (
-                  <ChecklistLink href={`/daily-track-am?siteId=${site.siteId}`} label={`Open ${site.siteName} AM checklist`}>
-                    AM checklist
+                  <ChecklistLink href={`/daily-track-am?siteId=${site.siteId}`} label={`Open ${site.siteName} AM checklist`} overdue={site.amOverdue}>
+                    AM checklist{site.amDue ? (site.amOverdue ? ` · overdue (${site.amDue})` : ` · due ${site.amDue}`) : ""}
                   </ChecklistLink>
                 )}
                 {site.pm && (
-                  <ChecklistLink href={`/daily-track-pm?siteId=${site.siteId}`} label={`Open ${site.siteName} PM checklist`}>
-                    PM checklist
+                  <ChecklistLink href={`/daily-track-pm?siteId=${site.siteId}`} label={`Open ${site.siteName} PM checklist`} overdue={site.pmOverdue}>
+                    PM checklist{site.pmDue ? (site.pmOverdue ? ` · overdue (${site.pmDue})` : ` · due ${site.pmDue}`) : ""}
                   </ChecklistLink>
                 )}
               </li>
@@ -583,7 +593,7 @@ export default function Dashboard() {
   const { data: sites = [] } = useListSites();
   const [teamCount, setTeamCount] = useState(0);
   const [notificationEmail, setNotificationEmail] = useState("");
-  const [siteId, setSiteId] = useState<string>("all");
+  const [siteId, setSiteId, siteReady] = useSiteFilter("all");
   const [tracks, setTracks] = useState<TrackSummary[]>([]);
   const [checklistTotals, setChecklistTotals] = useState<ChecklistTotals | null>(null);
   const [checklistLoading, setChecklistLoading] = useState(false);
@@ -650,10 +660,11 @@ export default function Dashboard() {
   }, [siteId]);
 
   useEffect(() => {
+    if (!siteReady) return;
     const controller = new AbortController();
     load(controller.signal);
     return () => controller.abort();
-  }, [load, reloadKey]);
+  }, [load, reloadKey, siteReady]);
 
   const enabledTracks   = tracks.filter((t) => t.enabled && !t.otherModule);
   const otherTracks     = tracks.filter((t) => t.enabled && t.otherModule);

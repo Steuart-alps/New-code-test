@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useCanEdit } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { cn } from "@/lib/utils";
 import {
   ConfirmDelete, DocumentField, SiteSelect, downloadCsv, downloadRegisterDocument,
@@ -101,6 +102,7 @@ export function CoshhRegisterPanel({ track }: { track: CoshhTrackLinks }) {
   const { sites, siteName } = useRegisterSites();
 
   const { siteFilter } = track;
+  const workingSiteId = useWorkingSiteId();
   const [showWithdrawn, setShowWithdrawn] = useState(false);
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<CoshhSubstance | null>(null);
@@ -125,7 +127,8 @@ export function CoshhRegisterPanel({ track }: { track: CoshhTrackLinks }) {
   function openNew() {
     setEditing(null);
     setForm({
-      siteId: siteFilter !== "all" ? siteFilter : sites.length === 1 ? String(sites[0].id) : "",
+      // The page's site filter, else the user's working site.
+      siteId: siteFilter !== "all" ? siteFilter : workingSiteId ? String(workingSiteId) : sites.length === 1 ? String(sites[0].id) : "",
       productName: "", supplier: "", hazardPictograms: [], whereUsed: "",
       document: { objectPath: null, fileName: null },
       assessmentDate: null, reviewDue: null, controls: null, status: "in_use",
@@ -473,7 +476,7 @@ export function CoshhRegisterPanel({ track }: { track: CoshhTrackLinks }) {
 
       <CoshhSpeakListDialog
         open={listOpen}
-        defaultSiteId={siteFilter !== "all" ? siteFilter : sites.length === 1 ? String(sites[0].id) : ""}
+        defaultSiteId={siteFilter !== "all" ? siteFilter : workingSiteId ? String(workingSiteId) : sites.length === 1 ? String(sites[0].id) : ""}
         existing={items}
         onClose={() => setListOpen(false)}
         onAdd={addList}

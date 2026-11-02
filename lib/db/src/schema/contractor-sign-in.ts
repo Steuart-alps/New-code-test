@@ -61,6 +61,9 @@ export const contractorSignInsTable = pgTable("contractor_sign_ins", {
   signedOutAt: timestamp("signed_out_at", { withTimezone: true }),
   signedOutBy: integer("signed_out_by").references(() => usersTable.id, { onDelete: "set null" }),
   signOutTokenHash: text("sign_out_token_hash").notNull(),
+  // Set when the contractor signed in through a testing visit's link
+  // (contractor_test_visits); their test logging opens after this sign-in.
+  contractorTestVisitId: integer("contractor_test_visit_id"),
 }, (table) => [
   index("idx_contractor_sign_ins_site_time").on(table.clientId, table.siteId, table.signedInAt),
   uniqueIndex("uq_contractor_sign_ins_sign_out_token").on(table.signOutTokenHash),

@@ -40,7 +40,7 @@ delete process.env.REGISTER_READING_MONTHLY_LIMIT;
 
 const { readApplianceList, registerReadingMonthlyLimit } = await import("../src/lib/registerReading");
 const { ReportReadingError, UnreadableReportError } = await import("../src/lib/reportReading");
-const { readList, listReadingHeaders, isListReadingKind } = await import("../src/lib/listReading");
+const { readList, listReadingHeaders, isListReadingKind, sortList } = await import("../src/lib/listReading");
 
 const photo = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
 const input = {
@@ -188,6 +188,21 @@ try {
   assert.equal(requests.length, listBefore, "a spreadsheet is never sent to be read");
   console.log("ok - staff, call point and room lists are read the same way, and unreadable files are not sent");
 
+  // ── Suppliers' allergen information is read on the PAT register's model ──
+  reply = { stopReason: "end_turn", text: JSON.stringify({ rows: [
+    { name: "Pesto", supplier: "Brakes", productCode: "P2", contains: "Milk; Tree nuts", mayContain: "Peanuts", site: null, notes: null, unclear: false },
+    { name: "Mystery sauce", supplier: null, productCode: null, contains: null, mayContain: null, site: null, notes: null, unclear: true },
+  ] }) };
+  const allergens = await readList({ ...listInput, kind: "allergen-ingredients", siteId: null });
+  const allergenRequest = requests.at(-1)!.body;
+  assert.equal(allergenRequest.model, "claude-sonnet-5-5", "allergens are read on Claude Sonnet, not Haiku");
+  assert.match(allergenRequest.system, /Never work out allergens from the product's name/);
+  assert.deepEqual(allergens.headers, ["Ingredient", "Supplier", "Product code", "Contains", "May contain", "Site", "Notes"]);
+  assert.deepEqual(allergens.rows[0], ["Pesto", "Brakes", "P2", "Milk; Tree nuts", "Peanuts", "", ""]);
+  assert.equal(allergens.rows[1][3], "", "allergens the file doesn't give are left blank for the import to flag");
+  assert.deepEqual(allergens.unclearRows, [3]);
+  console.log("ok - suppliers' allergen information is read on Sonnet, and nothing is filled in that the file doesn't say");
+
   // ── A list Claude Haiku declines is tried once more on Claude Sonnet ────
   const staffRow = { payrollId: null, name: "Jane Smith", jobTitle: "Chef", department: "Kitchen", email: null, unclear: false };
   queued = [{ stopReason: "refusal", text: "" }, { stopReason: "end_turn", text: JSON.stringify({ rows: [staffRow] }) }];
@@ -218,6 +233,30 @@ try {
   delete process.env.LIST_READING_MODEL;
   delete process.env.LIST_READING_EFFORT;
   console.log("ok - a list Claude Haiku declines is tried once on Claude Sonnet, and Render settings can change the model and effort");
+
+  // ── Sorting a file into its import ("Upload your lists") ───────────────
+  reply = { stopReason: "end_turn", text: JSON.stringify({ wrong_file: false, kind: "fire-call-points" }) };
+  let claimed = 0;
+  const sorted = await sortList({ bytes: photo, mimeType: "image/jpeg", fileName: "IMG_0042.jpg", kinds: ["contractors", "fire-call-points"] }, async () => { claimed += 1; });
+  assert.equal(sorted.kind, "fire-call-points");
+  assert.equal(claimed, 1, "the AI allowance is claimed once, before sending");
+  const sortRequest = requests.at(-1)!.body;
+  assert.equal(sortRequest.model, "claude-haiku-5-5", "sorting uses the list reading model");
+  assert.deepEqual(sortRequest.output_config.format.schema.properties.kind.enum, ["contractors", "fire-call-points", "none"], "only the business's imports are offered");
+  assert.match(sortRequest.system, /- fire-call-points: a list of fire alarm call points/);
+  assert.match(sortRequest.system, /Scope: you only read a list to sort/);
+  assert.ok(sortRequest.max_tokens <= 4000, "a sorting answer is short");
+  reply = { stopReason: "end_turn", text: JSON.stringify({ wrong_file: false, kind: "pat-appliances" }) };
+  assert.equal((await sortList({ bytes: photo, mimeType: "image/jpeg", fileName: "x.jpg", kinds: ["contractors"] })).kind, null, "a kind the business doesn't have is not used");
+  reply = { stopReason: "end_turn", text: JSON.stringify({ wrong_file: false, kind: "none" }) };
+  assert.equal((await sortList({ bytes: photo, mimeType: "image/jpeg", fileName: "x.jpg", kinds: ["contractors"] })).kind, null);
+  reply = { stopReason: "end_turn", text: JSON.stringify({ wrong_file: true, kind: "contractors" }) };
+  assert.equal((await sortList({ bytes: photo, mimeType: "image/jpeg", fileName: "cat.jpg", kinds: ["contractors"] })).kind, null, "an off-topic file is not sorted");
+  const sortBefore = requests.length;
+  await assert.rejects(sortList({ bytes: photo, mimeType: "application/vnd.ms-excel", fileName: "x.xls", kinds: ["contractors"] }, async () => { claimed += 1; }), UnreadableReportError);
+  assert.equal(requests.length, sortBefore, "a spreadsheet is never sent to be sorted");
+  assert.equal(claimed, 1);
+  console.log("ok - a photo is sorted into one of the business's imports, and anything else comes back unsorted");
 
   console.log("Register reading checks passed.");
 } finally {

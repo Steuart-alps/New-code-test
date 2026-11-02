@@ -2321,6 +2321,7 @@ async function runRuntimeMigrationsOnce() {
     await migrateBillingAlerts();
     await migrateCertificateInbox();
     await migrateContractorSignIn();
+    await migrateContractorTestVisits();
     await migrateContractorVisitNotNeeded();
     await migrateGreenkeepingDailyChecks();
     await migrateRecordSignatures();
@@ -3265,6 +3266,36 @@ async function migrateTreeTrack() {
     END $$
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_tree_inspections_client" ON "tree_inspections" ("client_id")`);
+  // The tree register, and where each inspection's tree or issue is.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "trees" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "ref" text NOT NULL,
+      "species" text,
+      "location" text,
+      "what3words" text,
+      "latitude" double precision,
+      "longitude" double precision,
+      "risk_zone" text NOT NULL DEFAULT 'medium',
+      "inspection_interval_months" integer NOT NULL DEFAULT 12,
+      "notes" text,
+      "removed_at" date,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_trees_client" ON "trees" ("client_id")`);
+  await db.execute(sql`
+    ALTER TABLE "tree_inspections"
+    ADD COLUMN IF NOT EXISTS "tree_id" integer REFERENCES "trees"("id") ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS "what3words" text,
+    ADD COLUMN IF NOT EXISTS "latitude" double precision,
+    ADD COLUMN IF NOT EXISTS "longitude" double precision
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_tree_inspections_tree" ON "tree_inspections" ("tree_id")`);
 }
 
 // ---- BikeTrack ----
@@ -4090,6 +4121,16 @@ async function migrateGreenTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_green_defects_client_status"
     ON "green_defects" ("client_id", "status")
   `);
+
+  // Machine services done in house or by a contractor (October 2026). An
+  // in-house service keeps its checklist (lib/api-zod green-service-checklist)
+  // and whether the machine was safe to use; each problem found on it becomes
+  // a defect linked back to the service. Older records leave these empty.
+  await db.execute(sql`ALTER TABLE "green_service_records" ADD COLUMN IF NOT EXISTS "done_by" text`);
+  await db.execute(sql`ALTER TABLE "green_service_records" ADD COLUMN IF NOT EXISTS "contractor_id" integer REFERENCES "contractors"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "green_service_records" ADD COLUMN IF NOT EXISTS "checklist" jsonb`);
+  await db.execute(sql`ALTER TABLE "green_service_records" ADD COLUMN IF NOT EXISTS "safe_to_use" boolean`);
+  await db.execute(sql`ALTER TABLE "green_defects" ADD COLUMN IF NOT EXISTS "service_record_id" integer REFERENCES "green_service_records"("id") ON DELETE SET NULL`);
 
   // PUWER statutory thorough examinations
   await db.execute(sql`
@@ -5791,6 +5832,9 @@ async function migrateLegionellaOutlets() {
     ADD COLUMN IF NOT EXISTS outlet_id integer
     REFERENCES legionella_sentinel_outlets(id) ON DELETE SET NULL
   `);
+  // Condition answers (sediment, biofilm, lid, screens) for inspections,
+  // cleans and flushes; null for temperature checks and older records.
+  await db.execute(sql`ALTER TABLE legionella_checks ADD COLUMN IF NOT EXISTS findings jsonb`);
   // A database built by drizzle-kit push already has the plain column, so the
   // ADD COLUMN above is skipped there; add the foreign key on its own.
   await db.execute(sql`
@@ -6269,6 +6313,21 @@ async function migrateFireCallPoints() {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_fire_drill_attendance_check" ON "fire_drill_attendance" ("fire_check_id")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_fire_drill_attendance_client_staff" ON "fire_drill_attendance" ("client_id", "staff_roster_id")`);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_fire_drill_attendance_check_staff" ON "fire_drill_attendance" ("fire_check_id", "staff_roster_id")`);
+  // Oct 2026: whether each site has sleeping accommodation and a night porter
+  // (blank until answered), and night fire walks' walk time (22:00, 02:00
+  // or 06:00). Mirrors
+  // lib/db/src/schema/sites.ts and fire-safety-checks.ts.
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "sleeping_accommodation" boolean`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "night_porter" boolean`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "night_porter_since" timestamp`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "walk_time" text`);
+  // Oct 2026: when each site's opening and closing checks are due ("HH:MM";
+  // blank = 06:00 and 18:00). Mirrors lib/db/src/schema/sites.ts.
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "opening_checks_due" text`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "closing_checks_due" text`);
+  // ... and when the reminder about them goes out (blank = 11:00 and 21:00).
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "opening_reminder_at" text`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "closing_reminder_at" text`);
 }
 
 // Equipment list and QR labels (Oct 2026). Water checks and Compliance Checks
@@ -6511,6 +6570,14 @@ async function migrateCertificateInbox() {
   `);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_certificate_upload_links_token" ON "certificate_upload_links" ("token_hash")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_certificate_upload_links_item" ON "certificate_upload_links" ("client_id", "item_id")`);
+  // Replies to contractor emails: the link's code tags the Reply-To, and a
+  // received reply records which link (and so which check) it answers.
+  await db.execute(sql`ALTER TABLE "certificate_upload_links" ADD COLUMN IF NOT EXISTS "reply_ref" text`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_certificate_upload_links_reply_ref" ON "certificate_upload_links" ("reply_ref")`);
+  await db.execute(sql`
+    ALTER TABLE "certificate_inbox_emails" ADD COLUMN IF NOT EXISTS "upload_link_id" integer
+      REFERENCES "certificate_upload_links"("id") ON DELETE SET NULL
+  `);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "certificate_inbox_items" (
       "id" serial PRIMARY KEY,
@@ -6587,6 +6654,53 @@ async function migrateContractorSignIn() {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_contractor_sign_ins_site_time" ON "contractor_sign_ins" ("client_id", "site_id", "signed_in_at")`);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_contractor_sign_ins_sign_out_token" ON "contractor_sign_ins" ("sign_out_token_hash")`);
+}
+
+// A contractor logging tests through a link (routes/contractor-tests.ts).
+// Mirrors lib/db/src/schema/contractor-test-visits.ts and the
+// contractor_test_visit_id columns on pat_tests and contractor_sign_ins.
+async function migrateContractorTestVisits() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "contractor_test_visits" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer NOT NULL REFERENCES "sites"("id") ON DELETE CASCADE,
+      "module" text NOT NULL DEFAULT 'pat',
+      "contractor_id" integer REFERENCES "contractors"("id") ON DELETE SET NULL,
+      "contractor_name" text NOT NULL,
+      "contractor_email" text,
+      "starts_on" date NOT NULL,
+      "ends_on" date NOT NULL,
+      "expires_at" timestamptz NOT NULL,
+      "link_token_hash" text NOT NULL,
+      "status" text NOT NULL DEFAULT 'open',
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamptz NOT NULL DEFAULT now(),
+      "signed_off_at" timestamptz,
+      "signed_off_name" text,
+      "signed_off_company" text,
+      "signed_off_signature" text,
+      "certificate_ref" text,
+      "next_test_due" date,
+      "sign_off_notes" text,
+      "certificate_object_path" text,
+      "certificate_file_name" text,
+      "pat_certificate_id" integer REFERENCES "pat_certificates"("id") ON DELETE SET NULL,
+      "ended_at" timestamptz,
+      "ended_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      CONSTRAINT "ck_contractor_test_visits_module" CHECK ("module" IN ('pat')),
+      CONSTRAINT "ck_contractor_test_visits_status" CHECK ("status" IN ('open', 'signed_off', 'ended'))
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_contractor_test_visits_link_token" ON "contractor_test_visits" ("link_token_hash")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_contractor_test_visits_site" ON "contractor_test_visits" ("client_id", "site_id", "created_at")`);
+  await db.execute(sql`ALTER TABLE "pat_tests" ADD COLUMN IF NOT EXISTS "contractor_test_visit_id" integer`);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_pat_tests_contractor_visit_appliance"
+    ON "pat_tests" ("contractor_test_visit_id", "appliance_id")
+    WHERE "contractor_test_visit_id" IS NOT NULL
+  `);
+  await db.execute(sql`ALTER TABLE "contractor_sign_ins" ADD COLUMN IF NOT EXISTS "contractor_test_visit_id" integer`);
 }
 
 // Drawn signatures on recorded checks (lib/recordSignatures.ts).

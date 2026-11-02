@@ -10,6 +10,7 @@ import { AiAllowanceNote, aiAllowanceState } from "@/components/ai-allowance-not
 import type { AiStatus } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 
 /**
  * "Only have a paper list, photo or PDF?": with the AI features add-on,
@@ -18,7 +19,7 @@ import { Button } from "@/components/ui/button";
  * never come here; the browser reads those itself (lib/spreadsheet.ts).
  */
 
-export type ListReadingKind = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "greentrack-equipment" | "staff-roster";
+export type ListReadingKind = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "greentrack-equipment" | "staff-roster" | "allergen-ingredients" | "legionella-outlets";
 
 interface ListReadingStatus { available: boolean; monthlyLimit: number; usedThisMonth: number; ai: AiStatus; sites: Array<{ id: number; name: string }> }
 export interface ListReadResult { headers: string[]; rows: string[][]; unclear: number; unclearRows: number[] }
@@ -93,6 +94,19 @@ function toBase64(blob: Blob): Promise<string> {
 }
 
 /**
+ * A list file as the AI reader takes it: an iPhone HEIC photo becomes a JPEG
+ * where the browser can open it (Safari), photos are shrunk, and an old Word
+ * file is sent as its text.
+ */
+export async function listFileBody(file: File): Promise<{ fileName: string; mimeType: string; data: string }> {
+  const photo = /\.doc$/i.test(file.name) || file.type === "application/msword"
+    ? new File([oldWordPlainText(new Uint8Array(await file.arrayBuffer()))], file.name.replace(/\.doc$/i, ".txt"), { type: "text/plain" })
+    : await heicToJpeg(file);
+  const shrunk = await shrinkPhoto(photo, listMimeType(photo));
+  return { fileName: file.name, mimeType: shrunk.mimeType, data: await toBase64(shrunk.blob) };
+}
+
+/**
  * Whether this business can have a list read for an import, and the call that
  * reads one. `status` is null while reading is unavailable (no API key, or the
  * import is closed).
@@ -100,7 +114,10 @@ function toBase64(blob: Blob): Promise<string> {
 export function useListReading(kind: ListReadingKind, enabled: boolean, defaultSiteId?: number | null) {
   const { activeClientId } = useAuth();
   const clientApiFetch = useActiveClientApi();
-  const [siteId, setSiteId] = useState(defaultSiteId ? String(defaultSiteId) : "");
+  // The caller's site, else the user's working site, until one is picked.
+  const workingSiteId = useWorkingSiteId();
+  const [chosenSiteId, setSiteId] = useState<string | null>(null);
+  const siteId = chosenSiteId ?? (defaultSiteId ? String(defaultSiteId) : workingSiteId ? String(workingSiteId) : "");
   const query = useQuery({
     queryKey: ["imports", kind, "reading", activeClientId],
     enabled,
@@ -116,15 +133,9 @@ export function useListReading(kind: ListReadingKind, enabled: boolean, defaultS
 
   async function read(file: File): Promise<ListReadResult> {
     try {
-      // An iPhone HEIC photo becomes a JPEG where the browser can open it
-      // (Safari); an old Word file is sent as its text.
-      const photo = /\.doc$/i.test(file.name) || file.type === "application/msword"
-        ? new File([oldWordPlainText(new Uint8Array(await file.arrayBuffer()))], file.name.replace(/\.doc$/i, ".txt"), { type: "text/plain" })
-        : await heicToJpeg(file);
-      const shrunk = await shrinkPhoto(photo, listMimeType(photo));
       const response = await clientApiFetch(readPath(kind), {
         method: "POST",
-        body: JSON.stringify({ fileName: file.name, mimeType: shrunk.mimeType, data: await toBase64(shrunk.blob), siteId: siteId ? Number(siteId) : null }),
+        body: JSON.stringify({ ...await listFileBody(file), siteId: siteId ? Number(siteId) : null }),
       });
       const body = await response.json().catch(() => null) as (Partial<ListReadResult> & { error?: string }) | null;
       if (!response.ok || !body?.headers || !body.rows) throw new Error(body?.error ?? "ComplyTrack could not read this list");
@@ -134,7 +145,7 @@ export function useListReading(kind: ListReadingKind, enabled: boolean, defaultS
     }
   }
 
-  return { status, readsLeft, canRead, read, siteId, setSiteId };
+  return { status, loaded: !query.isPending, readsLeft, canRead, read, siteId, setSiteId };
 }
 
 export type ListReading = ReturnType<typeof useListReading>;

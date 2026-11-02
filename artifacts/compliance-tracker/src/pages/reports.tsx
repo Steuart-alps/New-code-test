@@ -21,6 +21,7 @@ import { Download, RefreshCw, BarChart2, TrendingUp, AlertCircle, FileCheck, Shi
 import { cn } from "@/lib/utils";
 import { InspectionPackCard } from "@/components/inspection-pack-card";
 import { departmentLabel } from "@/lib/departments";
+import { useSiteFilter } from "@/hooks/use-working-site";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -335,7 +336,7 @@ function ComplianceTab({
   const defaults = prevMonth();
   const [from,         setFrom]         = useState(defaults.from);
   const [to,           setTo]           = useState(defaults.to);
-  const [siteId,       setSiteId]       = useState("all");
+  const [siteId,       setSiteId]       = useSiteFilter("all");
   const [departmentId, setDepartmentId] = useState("all");
   const [loading,      setLoading]      = useState(false);
   const [error,        setError]        = useState<string | null>(null);
@@ -603,7 +604,7 @@ function TrendTab({
   sites: Site[]; departments: Department[];
 }) {
   const [trendMonths,  setTrendMonths]  = useState("6");
-  const [siteId,       setSiteId]       = useState("all");
+  const [siteId,       setSiteId]       = useSiteFilter("all");
   const [departmentId, setDepartmentId] = useState("all");
   const [metric,       setMetric]       = useState<TrendMetric>("combined");
   const [loading,      setLoading]      = useState(false);
@@ -857,7 +858,7 @@ function RiskTab({
 }: {
   sites: Site[]; departments: Department[];
 }) {
-  const [siteId,       setSiteId]       = useState("all");
+  const [siteId,       setSiteId]       = useSiteFilter("all");
   const [departmentId, setDepartmentId] = useState("all");
   const [loading,      setLoading]      = useState(false);
   const [error,        setError]        = useState<string | null>(null);

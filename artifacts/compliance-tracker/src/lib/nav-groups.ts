@@ -35,7 +35,8 @@ import {
   CalendarDays,
   QrCode,
   FileSearch,
-  BarChart3
+  BarChart3,
+  FileUp,
 } from "lucide-react";
 
 export interface NavItem { href: string; label: string; icon: any; serviceKey?: string; serviceKeys?: string[]; comingSoon?: boolean }
@@ -209,6 +210,8 @@ export function getNavGroups({ isConsultant, canAdmin, canManageUsers = canAdmin
   }
   if (canAdmin) {
     setup.push({ href: "/staff-roster", label: "Staff Roster", icon: ClipboardList });
+    // Every existing list dropped at once, each sorted into its import.
+    setup.push({ href: "/upload-lists", label: "Upload your lists", icon: FileUp });
   }
   if (canManageUsers) {
     // Managers keep the equipment list and print its QR labels.

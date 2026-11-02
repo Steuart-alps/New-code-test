@@ -33,7 +33,8 @@ import { escapeHtml, parseEmailList } from "./email";
 import { dispatchStoredContractorEmail } from "./fixTrackNotifications";
 import { encryptTokenPayload, newBearerToken } from "./bearerTokens";
 import {
-  CERTIFICATE_UPLOAD_PLACEHOLDER, certificateReplyToFor, certificateUploadBlock, certificateUploadUrl, issueCertificateUploadLink,
+  CERTIFICATE_UPLOAD_PLACEHOLDER, certificateEmailConfigured, certificateReplyToForLink, certificateUploadBlock, certificateUploadUrl,
+  issueCertificateUploadLink,
 } from "./certificateInbox";
 import { logger } from "./logger";
 
@@ -138,20 +139,20 @@ export async function getVisitsAwaitingCertificate(
 }
 
 function contractorFollowUpEmail(
-  visit: VisitAwaitingCertificate, companyName: string, sendTo: string | null, certificateAddress: string | null,
+  visit: VisitAwaitingCertificate, companyName: string, sendTo: string | null, byReply: boolean,
 ) {
   const when = longDate(visit.visitDay);
   const where = visit.siteName ? ` at ${visit.siteName}` : "";
-  // The upload link and (when the business has one) its certificate address;
-  // otherwise the person responsible, as before.
-  const request = certificateUploadBlock({ uploadUrl: certificateUploadUrl(), address: certificateAddress, heading: "Send us the certificate" });
-  const sendToLine = certificateAddress
-    ? "You can also reply to this email with it attached."
+  // The upload link, and replying with it attached when replies reach
+  // ComplyTrack; otherwise the person responsible, as before.
+  const request = certificateUploadBlock({ uploadUrl: certificateUploadUrl(), byReply, heading: "Send us the certificate" });
+  const sendToLine = byReply
+    ? ""
     : sendTo
     ? `Or email it to <a href="mailto:${escapeHtml(sendTo)}">${escapeHtml(sendTo)}</a>.`
     : "Or reply with it attached.";
-  const sendToText = certificateAddress
-    ? "You can also reply to this email with it attached."
+  const sendToText = byReply
+    ? ""
     : sendTo ? `Or email it to ${sendTo}.` : "Or reply with it attached.";
   const html = `
     <h2 style="color:#1e293b;margin:0 0 16px;">Certificate needed</h2>
@@ -162,7 +163,7 @@ function contractorFollowUpEmail(
     </div>
     <p>We haven't received the certificate or report for this visit yet.</p>
     ${request.html}
-    <p>${sendToLine}</p>
+    ${sendToLine ? `<p>${sendToLine}</p>` : ""}
     <p>If it is waiting for your invoice to be paid, please let us know so we can sort that out.</p>
     <p>If the visit didn't go ahead, please let us know so we can rearrange it.</p>
     <p>Best regards,<br><strong>${escapeHtml(companyName)}</strong></p>
@@ -172,7 +173,7 @@ function contractorFollowUpEmail(
     `Dear ${visit.contractorName},`, "",
     `Thank you for your visit${where} on ${when} for: ${visit.title}`, "",
     "We haven't received the certificate or report for this visit yet.", "",
-    request.text, sendToText, "",
+    request.text, ...(sendToText ? [sendToText] : []), "",
     "If it is waiting for your invoice to be paid, please let us know so we can sort that out.", "",
     "If the visit didn't go ahead, please let us know so we can rearrange it.", "",
     "Best regards,", companyName,
@@ -225,8 +226,8 @@ async function followUpBusiness(
 ): Promise<void> {
   const [settings, ctx] = await Promise.all([clientSettings(clientId), loadResponsibilityContext(clientId)]);
   const companyName = settings["companyName"] ?? "ComplyTrack";
-  // Replies to a chase go to the business's certificate address, when it has one.
-  const certificateAddress = await certificateReplyToFor(clientId);
+  // Replies to a chase go to ComplyTrack (tagged with the check), when emailed certificates work.
+  const byReply = certificateEmailConfigured();
   // One follow-up per chase (the idempotency key ends in the visit day and
   // chase number), recorded as it is sent. A check holds one active queue
   // row at a time, so while a reminder for the same check is waiting for
@@ -236,7 +237,7 @@ async function followUpBusiness(
     const chase = chasesOwed(visit.visitDay, today);
     const key = `certificate-followup-${clientId}-${visit.itemId}-${visit.visitDay}-${chase}`;
     const addresses = certificateAddresses(ctx, visit, settings["maintenanceEmail"]);
-    const email = contractorFollowUpEmail(visit, companyName, addresses[0] ?? null, certificateAddress);
+    const email = contractorFollowUpEmail(visit, companyName, addresses[0] ?? null, byReply);
     const uploadToken = newBearerToken();
     const sendable = {
       subject: email.subject,
@@ -270,9 +271,10 @@ async function followUpBusiness(
     });
     if (!claimed) continue;
     try {
+      const replyTo = byReply ? await certificateReplyToForLink(clientId, uploadToken) : null;
       await send({
         to: visit.contractorEmail, subject: sendable.subject, html: sendable.html, text: sendable.text,
-        cc: cc.length ? cc : undefined, clientId, idempotencyKey: key, replyTo: certificateAddress ?? undefined,
+        cc: cc.length ? cc : undefined, clientId, idempotencyKey: key, replyTo: replyTo ?? undefined,
       });
       await db.execute(sql`UPDATE contractor_email_queue SET status = 'sent', sent_at = now(), updated_at = now()
         WHERE id = ${claimed.id} AND status = 'sending'`);

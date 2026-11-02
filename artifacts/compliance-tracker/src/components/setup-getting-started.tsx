@@ -1,20 +1,33 @@
 import { useState } from "react";
 import { Link } from "wouter";
-import { ArrowRight, Building2, CheckCircle2, ClipboardList, FileCheck2, HardHat, Handshake, MapPin, Network, Sparkles, UsersRound, Wrench } from "lucide-react";
+import { ArrowRight, Building2, CheckCircle2, ClipboardList, Download, FileCheck2, FileSpreadsheet, HardHat, Handshake, MapPin, Network, Sparkles, UsersRound, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDay } from "@/lib/onboarding";
+import { INFO_SHEETS, SETUP_SERVICE_FEE, downloadInfoSheet, type InfoSheet, type InfoSheetContext } from "@/lib/setup-info-sheets";
 
 export type SetupAi = { configured: boolean; active: boolean };
 export type SetupAssistRequest = { requestedAt: string; requestedBy: string };
 
 /**
- * Shown on the setup service offer. ALPS agrees the price with each business
- * and invoices it, so there is no fixed price to show yet.
+ * Shown on the setup service offer. The fee joins the first payment: the
+ * checkout's "Would you like ALPS to set you up?" box is ticked for a business
+ * that asks here (api lib/setupService.ts). ALPS invoices one that already pays.
  */
-export const SETUP_SERVICE_PRICE_NOTE = "We'll agree the price with you before we start, and invoice it separately from your subscription.";
+export const SETUP_SERVICE_PRICE_NOTE = `A one-off fee of ${SETUP_SERVICE_FEE}, added to your first payment. If you already pay monthly, ALPS invoices it instead.`;
+
+/** What the setup service covers, as the offer lists it. */
+const SETUP_SERVICE_INCLUDES = [
+  "Every site, department and login",
+  "Equipment, rooms, call points and outlets for each of your tracks",
+  "Contractors, and when each service was last done",
+  "A walk-through with you once it's in",
+];
+
+/** The workbooks every business needs; the per-track ones sit under them. */
+const MAIN_SHEETS = new Set(["getting-started", "contractors", "compliance"]);
 
 const HAVE_READY = [
   { icon: MapPin, title: "Your sites", text: "The name and address of each premises." },
@@ -27,8 +40,10 @@ const HAVE_READY = [
 ];
 
 /** The page before step 1 of setup: what to have ready, what AI can read, and the setup service. */
-export function SetupGettingStarted({ ai, assistRequest, canRequestAssist, onRequestAssist, onStart, started }: {
+export function SetupGettingStarted({ ai, assistRequest, canRequestAssist, onRequestAssist, onStart, started, infoContext }: {
   ai?: SetupAi;
+  /** The business's tracks and sites, so the "Counts per site" tab lists only what applies. */
+  infoContext: InfoSheetContext;
   assistRequest: SetupAssistRequest | null;
   /** ALPS consultants already are the setup service, so they aren't offered it. */
   canRequestAssist: boolean;
@@ -44,6 +59,8 @@ export function SetupGettingStarted({ ai, assistRequest, canRequestAssist, onReq
         <p className="text-sm text-muted-foreground">Setting up one site takes about 20 to 30 minutes. It's quicker with these to hand, but anything you don't have yet can be added later.</p>
       </div>
 
+      {canRequestAssist && <SetupServiceOffer request={assistRequest} onRequest={onRequestAssist} />}
+
       <ul className="space-y-3">
         {HAVE_READY.map(({ icon: Icon, title, text }) => (
           <li key={title} className="flex gap-3">
@@ -56,9 +73,9 @@ export function SetupGettingStarted({ ai, assistRequest, canRequestAssist, onReq
         ))}
       </ul>
 
-      <AiNote ai={ai} />
+      <InfoSheetDownloads context={infoContext} />
 
-      {canRequestAssist && <SetupServiceOffer request={assistRequest} onRequest={onRequestAssist} />}
+      <AiNote ai={ai} />
 
       <div className="flex justify-end pt-1">
         <Button onClick={onStart}>
@@ -66,6 +83,40 @@ export function SetupGettingStarted({ ai, assistRequest, canRequestAssist, onReq
         </Button>
       </div>
     </section>
+  );
+}
+
+function InfoSheetDownloads({ context }: { context: InfoSheetContext }) {
+  const main = INFO_SHEETS.filter((sheet) => MAIN_SHEETS.has(sheet.key));
+  const tracks = INFO_SHEETS.filter((sheet) => !MAIN_SHEETS.has(sheet.key));
+  return (
+    <div className="rounded-lg border p-4 space-y-3">
+      <div className="flex gap-3">
+        <FileSpreadsheet className="w-5 h-5 mt-0.5 shrink-0 text-primary" aria-hidden="true" />
+        <div className="space-y-1">
+          <p className="text-sm font-semibold">What we need from you: simple Excel forms</p>
+          <p className="text-sm text-muted-foreground">A few quick questions for each track (how many fridges and freezers, which taps are sentinel outlets, who your contractors are and what they do), plus any lists you already have. You add the detail once you're in. Upload the filled-in forms in Upload your lists and your tracks are set up from them, or send them to ALPS.</p>
+        </div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {main.map((sheet) => <SheetButton key={sheet.key} sheet={sheet} context={context} />)}
+      </div>
+      <details className="group">
+        <summary className="cursor-pointer text-sm font-medium text-primary hover:underline">Forms for each track ({tracks.length})</summary>
+        <div className="grid gap-2 sm:grid-cols-2 pt-3">
+          {tracks.map((sheet) => <SheetButton key={sheet.key} sheet={sheet} context={context} />)}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function SheetButton({ sheet, context }: { sheet: InfoSheet; context: InfoSheetContext }) {
+  return (
+    <Button type="button" variant="outline" size="sm" className="justify-start h-auto py-2 text-left whitespace-normal"
+      onClick={() => void downloadInfoSheet(sheet, context)} data-testid={`button-download-info-${sheet.key}`}>
+      <Download className="w-4 h-4 mr-2 shrink-0" aria-hidden="true" /> {sheet.label}
+    </Button>
   );
 }
 
@@ -90,7 +141,7 @@ function AiNote({ ai }: { ai?: SetupAi }) {
   );
 }
 
-function SetupServiceOffer({ request, onRequest }: {
+export function SetupServiceOffer({ request, onRequest }: {
   request: SetupAssistRequest | null;
   onRequest: (details: { phone: string; notes: string }) => Promise<void>;
 }) {
@@ -112,20 +163,25 @@ function SetupServiceOffer({ request, onRequest }: {
   }
 
   return (
-    <div className="rounded-lg border p-4 space-y-3">
+    <div className="rounded-lg border-2 border-primary/40 bg-primary/5 p-4 space-y-3" data-testid="setup-service-offer">
       <div className="flex gap-3">
         <Handshake className="w-5 h-5 mt-0.5 shrink-0 text-primary" aria-hidden="true" />
-        <div className="space-y-1">
-          <p className="text-sm font-semibold">Rather we did it for you?</p>
-          <p className="text-sm text-muted-foreground">ALPS can enter your initial data for you: sites, departments, team, equipment, contractors and certificate dates. Send us what you have and we'll set it up, then go through it with you.</p>
-          <p className="text-xs text-muted-foreground">{SETUP_SERVICE_PRICE_NOTE}</p>
+        <div className="space-y-2">
+          <p className="text-base font-semibold">Let ALPS set it all up for you</p>
+          <p className="text-sm text-muted-foreground">Send us what you have, in any form: spreadsheets, certificates, photos of lists. Our health and safety team puts it all into ComplyTrack and goes through it with you, so you start with every check, date and contractor in place.</p>
+          <ul className="text-sm space-y-1">
+            {SETUP_SERVICE_INCLUDES.map((line) => (
+              <li key={line} className="flex gap-2"><CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-primary" aria-hidden="true" />{line}</li>
+            ))}
+          </ul>
+          <p className="text-sm font-medium">{SETUP_SERVICE_PRICE_NOTE}</p>
         </div>
       </div>
 
       {request ? (
         <p className="text-sm flex items-start gap-2 rounded-md bg-emerald-50 text-emerald-800 p-3 dark:bg-emerald-950/40 dark:text-emerald-200" role="status">
           <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />
-          <span>Request sent on {formatDay(request.requestedAt.slice(0, 10))}{request.requestedBy ? ` by ${request.requestedBy}` : ""}. ALPS will be in touch to agree the price and how to send your lists. You can carry on setting up in the meantime.</span>
+          <span>Request sent on {formatDay(request.requestedAt.slice(0, 10))}{request.requestedBy ? ` by ${request.requestedBy}` : ""}. ALPS will be in touch to arrange how to send your lists. You can carry on setting up in the meantime.</span>
         </p>
       ) : open ? (
         <div className="space-y-3">
@@ -144,7 +200,7 @@ function SetupServiceOffer({ request, onRequest }: {
           </div>
         </div>
       ) : (
-        <Button variant="outline" onClick={() => setOpen(true)}>
+        <Button onClick={() => setOpen(true)}>
           <Building2 className="w-4 h-4 mr-1" /> Ask ALPS to set it up for you
         </Button>
       )}

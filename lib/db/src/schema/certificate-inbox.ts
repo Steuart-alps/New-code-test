@@ -1,4 +1,4 @@
-import { check, index, integer, jsonb, pgTable, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { check, index, integer, jsonb, pgTable, serial, text, timestamp, uniqueIndex, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { clientsTable } from "./clients";
 import { complianceItemsTable } from "./compliance-items";
@@ -34,6 +34,8 @@ export const certificateInboxEmailsTable = pgTable("certificate_inbox_emails", {
   id: serial("id").primaryKey(),
   providerEmailId: text("provider_email_id").notNull(),
   clientId: integer("client_id").references(() => clientsTable.id, { onDelete: "cascade" }),
+  /** A reply to one of the business's contractor emails: that email's upload link (its tagged Reply-To). */
+  uploadLinkId: integer("upload_link_id").references((): AnyPgColumn => certificateUploadLinksTable.id, { onDelete: "set null" }),
   fromAddress: text("from_address").notNull(),
   subject: text("subject"),
   status: text("status").notNull().default("pending"),
@@ -54,11 +56,14 @@ export const certificateUploadLinksTable = pgTable("certificate_upload_links", {
   itemId: integer("item_id").notNull().references(() => complianceItemsTable.id, { onDelete: "cascade" }),
   contractorId: integer("contractor_id").references(() => contractorsTable.id, { onDelete: "set null" }),
   tokenHash: text("token_hash").notNull(),
+  /** Tags the email's Reply-To (local+reply_ref@domain), so a reply is matched to this check. */
+  replyRef: text("reply_ref"),
   uploads: integer("uploads").notNull().default(0),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   uniqueIndex("uq_certificate_upload_links_token").on(table.tokenHash),
+  uniqueIndex("uq_certificate_upload_links_reply_ref").on(table.replyRef),
   index("idx_certificate_upload_links_item").on(table.clientId, table.itemId),
 ]);
 

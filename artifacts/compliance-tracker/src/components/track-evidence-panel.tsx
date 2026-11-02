@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, ClipboardCheck, Loader2, Plus, XCircle } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -85,6 +86,8 @@ export function TrackEvidencePanel({ moduleKey, actions, sites, canMutate }: {
   const [requirements, setRequirements] = useState<EvidenceRequirement[]>([]);
   const [profileActionId, setProfileActionId] = useState("");
   const [draft, setDraft] = useState(initialDraft);
+  // New evidence starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
   const [showCreate, setShowCreate] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -181,7 +184,7 @@ export function TrackEvidencePanel({ moduleKey, actions, sites, canMutate }: {
           <CardTitle className="flex items-center gap-2 text-[#162D42]"><ClipboardCheck className="h-5 w-5 text-primary" /> Inspection evidence</CardTitle>
           <CardDescription className="mt-1">Record the observation, supporting reference and authenticated recorder for this track. Evidence cannot be edited or deleted.</CardDescription>
         </div>
-        {canMutate && <Button type="button" size="sm" className="rounded-sm self-start" onClick={() => setShowCreate(value => !value)}><Plus className="mr-1.5 h-4 w-4" />Record evidence</Button>}
+        {canMutate && <Button type="button" size="sm" className="rounded-sm self-start" onClick={() => { if (!showCreate && draft === initialDraft) setDraft({ ...initialDraft, siteId: workingSiteId ? String(workingSiteId) : "" }); setShowCreate(value => !value); }}><Plus className="mr-1.5 h-4 w-4" />Record evidence</Button>}
       </CardHeader>
       <CardContent className="space-y-4">
         {requirements.length > 0 && <div className="rounded-sm border bg-slate-50 p-4">

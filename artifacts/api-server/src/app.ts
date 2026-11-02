@@ -13,12 +13,14 @@ import { loadUser, enforceClientAccess, enforceTwoFactorEnrollment } from "./mid
 import { enforceTrialLock } from "./middleware/trialLock";
 import { enforceDailyEntryCutoff } from "./middleware/dailyEntryCutoff";
 import { requireRecordSignature } from "./middleware/recordSignatureGate";
+import { requireCorrectiveActions } from "./middleware/correctiveActionGate";
 import { WebhookHandlers } from "./lib/webhookHandlers";
 import {
   certificateInboxDomain, inboundWebhookSecret, processInboundEmail, recordInboundEmail, verifyInboundWebhook,
 } from "./lib/certificateInbox";
 import { Sentry, isErrorReportingEnabled } from "./lib/sentry";
 import { recordAlpsDiscountCheckoutEvent } from "./lib/alpsDiscount";
+import { recordSetupServiceCheckoutEvent } from "./lib/setupService";
 import { csrfProtection } from "./middleware/csrf";
 import { computeReadiness, getBillingReadiness } from "./lib/stripeStartup";
 import { withReadinessDetails } from "./lib/readinessDetails";
@@ -46,7 +48,7 @@ app.use(
       req(req) {
         const requestPath = req.url?.split("?")[0] ?? "";
         const redactedPath = requestPath.replace(
-          /(\/(?:sign-off|contractor-portal|fix-track\/action|fix-track\/quotes\/public|privacy-intake|privacy-request|site-sign-in)\/)[^/]+/g,
+          /(\/(?:sign-off|contractor-portal|fix-track\/action|fix-track\/quotes\/public|privacy-intake|privacy-request|site-sign-in|contractor-tests)\/)[^/]+/g,
           "$1[redacted]",
         );
         return {
@@ -217,6 +219,7 @@ app.post(
         data?: { object?: Record<string, any> };
       };
       await recordAlpsDiscountCheckoutEvent(event);
+      await recordSetupServiceCheckoutEvent(event);
       res.status(200).json({ received: true });
     } catch (err: any) {
       logger.error({ err }, "Stripe webhook error");
@@ -282,6 +285,10 @@ app.use("/api/certificates/read-files", express.json({ limit: "28mb" }));
 app.use("/api/certificate-upload", express.json({ limit: "14mb" }));
 // A contractor's drawn signature arrives as a PNG data URL when they sign in at a site.
 app.use("/api/site-sign-in", express.json({ limit: "1mb" }));
+// On a contractor's testing link: their certificate (10 MB at most before
+// encoding), else a drawn signature at most.
+app.use("/api/contractor-tests/:token/certificate", express.json({ limit: "14mb" }));
+app.use("/api/contractor-tests", express.json({ limit: "1mb" }));
 app.use("/api/imports", express.json({ limit: "2mb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -290,6 +297,8 @@ app.use(csrfProtection);
 app.use(loadUser);
 app.use(enforceTwoFactorEnrollment);
 app.use(enforceClientAccess);
+// A fail is answered with its corrective action first, then the check is signed.
+app.use("/api", requireCorrectiveActions);
 // Before the late-edit reason, so a reason is asked (and audited) only once.
 app.use("/api", requireRecordSignature);
 app.use("/api", enforceDailyEntryCutoff);

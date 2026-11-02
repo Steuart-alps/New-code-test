@@ -8,6 +8,7 @@
 import type { CreateFireSafetyCheckRequestNightStaff } from './createFireSafetyCheckRequestNightStaff';
 import type { CreateFireSafetyCheckRequestResult } from './createFireSafetyCheckRequestResult';
 import type { CreateFireSafetyCheckRequestSoundLevelMethod } from './createFireSafetyCheckRequestSoundLevelMethod';
+import type { CreateFireSafetyCheckRequestWalkTime } from './createFireSafetyCheckRequestWalkTime';
 import type { FireCheckType } from './fireCheckType';
 
 export interface CreateFireSafetyCheckRequest {
@@ -46,4 +47,6 @@ export interface CreateFireSafetyCheckRequest {
   soundLevelMethod?: CreateFireSafetyCheckRequestSoundLevelMethod;
   /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
   soundLevelBedhead?: boolean | null;
+  /** Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on. */
+  walkTime?: CreateFireSafetyCheckRequestWalkTime;
 }

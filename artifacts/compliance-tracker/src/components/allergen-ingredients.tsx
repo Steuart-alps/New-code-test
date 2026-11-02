@@ -10,8 +10,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useAuth, useCanEdit } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { ConfirmDelete, ensureOk, fmtDate, todayIso, useRegisterSites } from "@/components/register-shared";
 import { AllergenBadges, AllergenChangeLogDialog, AllergenTicks } from "@/components/allergen-parts";
+import { ImportCsvButton } from "@/components/import-csv-dialog";
 import {
   CHARTS_PATH, DISHES_PATH, INGREDIENTS_PATH, sameSet, type AllergenIngredient,
 } from "@/lib/allergens";
@@ -48,6 +50,7 @@ export function AllergenIngredientsTab({ ingredients, isLoading, error }: {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { sites, siteName } = useRegisterSites();
+  const workingSiteId = useWorkingSiteId();
 
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<AllergenIngredient | null>(null);
@@ -64,7 +67,8 @@ export function AllergenIngredientsTab({ ingredients, isLoading, error }: {
 
   function openNew() {
     setEditing(null);
-    setForm(emptyForm(user?.name ?? ""));
+    // A new ingredient starts on the user's working site.
+    setForm({ ...emptyForm(user?.name ?? ""), siteId: workingSiteId ? String(workingSiteId) : "all" });
   }
 
   function openEdit(item: AllergenIngredient) {
@@ -176,9 +180,14 @@ export function AllergenIngredientsTab({ ingredients, isLoading, error }: {
           <Input placeholder="Search ingredients…" value={q} onChange={(e) => setQ(e.target.value)} className="pl-8 h-8 text-xs rounded-sm w-full sm:w-56" />
         </div>
         {canEdit && (
-          <Button size="sm" className="rounded-sm h-8 text-xs gap-1.5" onClick={openNew}>
-            <Plus className="w-3.5 h-3.5" /> Add ingredient
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/* Managers: a supplier's allergen sheet (spreadsheet, or a photo or PDF with the AI add-on). */}
+            <ImportCsvButton type="allergen-ingredients" label="Import from supplier" className="rounded-sm h-8 text-xs"
+              onImported={() => void refresh()} />
+            <Button size="sm" className="rounded-sm h-8 text-xs gap-1.5" onClick={openNew}>
+              <Plus className="w-3.5 h-3.5" /> Add ingredient
+            </Button>
+          </div>
         )}
       </div>
 

@@ -51,6 +51,7 @@ import { runMonthlyComplianceSummaryJob } from "./lib/monthlyComplianceSummary";
 import { runPersonalReminderJob } from "./lib/personalReminders";
 import { ensureRosterCheckTasks } from "./lib/rosterChecks";
 import { runUrgentAlertJob } from "./lib/urgentAlerts";
+import { runNightFireWalkChaseJob } from "./lib/nightFireWalks";
 import { runTrackReminderJob } from "./lib/trackReminders";
 import { runScheduledServicePriceAudit, SERVICE_PRICE_AUDIT_CRON } from "./lib/servicePriceAudit";
 import { runStripeTaxCheck, STRIPE_TAX_CHECK_CRON } from "./lib/stripeTaxCheck";
@@ -314,6 +315,16 @@ function startScheduler() {
   ));
   logger.info("Urgent alert scheduler started (every 10 minutes)");
 
+  // Night porter fire walks (22:00, 02:00, 06:00) missed last night raise an
+  // Urgent FireTrack action per site, which the urgent alerts above send to
+  // the site's Managers and the Owners. Hourly; each business from its own
+  // local 07:00, once per site and night.
+  schedule("15 * * * *", "night-fire-walk-chase", logged(
+    "Night fire walk chase complete", () => runNightFireWalkChaseJob(),
+    (result) => result.actionsRaised === 0 && result.errors === 0,
+  ));
+  logger.info("Night fire walk chase scheduler started (hourly at :15)");
+
   schedule("0 8 * * *", "contractor-reminders", logged("Scheduled reminder job complete", runReminderJob), { daily: true });
   logger.info("Contractor reminder scheduler started (daily at 08:00)");
 
@@ -453,7 +464,9 @@ function startScheduler() {
 
   // In-app reminders (bell + mobile push, never email) to each track's owner
   // for unsubmitted AM/PM checklists and kitchen diaries and overdue checks.
-  // Hourly; each business is evaluated at its own local 09:00/11:00/21:00.
+  // Hourly; each business is evaluated at its own local 09:00 and 21:00, and
+  // each site's opening and closing checklists at their reminder times
+  // (default 11:00 and 21:00).
   schedule("5 * * * *", "track-reminders", logged(
     "Track reminder job complete", () => runTrackReminderJob(),
     (result) => result.notificationsCreated === 0 && result.errors === 0,

@@ -113,6 +113,7 @@ try {
       "fix_track_action_tokens.completion_object_path",
       "track_actions.media_urls",
       "certificate_inbox_items.object_path",
+      "contractor_test_visits.certificate_object_path",
     ],
     "global registry covers every persisted attachment source",
   );

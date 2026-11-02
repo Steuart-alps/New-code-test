@@ -44,6 +44,11 @@ const INVENTORY = {
   "contractor-sign-in.ts POST /sites/:siteId/reset-link": notAMove("per-site link; site is addressed in the path and access-checked"),
   "contractor-sign-in.ts POST /sites/:siteId/email-link": notAMove("emails the link of a site addressed in the path and access-checked"),
   "contractor-sign-in.ts POST /visits/:id/sign-out": notAMove("signs a visit out at a site the caller can see; the visit keeps its site"),
+  "contractor-tests.ts POST /:token/sign-in": notAMove("contractor signs in at the visit's own site; no site comes from the caller"),
+  "contractor-tests.ts PUT /:token/items/:applianceId/result": notAMove("tests an appliance at the visit's own site; the appliance keeps its site"),
+  "contractor-tests.ts POST /:token/sign-off": notAMove("records the certificate at the visit's own site; no site comes from the caller"),
+  "contractor-tests.ts POST /:id/new-link": notAMove("new link for a visit at a site the caller can see; the visit keeps its site"),
+  "contractor-tests.ts POST /:id/end": notAMove("ends a visit at a site the caller can see; the visit keeps its site"),
   "csv-imports.ts POST /imports/list-reading/:kind/read": notAMove("siteId only tells the AI reader which site a list is for; nothing is stored"),
   "daily-checklists.ts POST /daily-checklists/:siteId/:date/:type": notAMove("site is addressed in the path and access-checked"),
   "daily-checklists.ts POST /daily-checklists/:siteId/:date/pm/sign-off": notAMove("site is addressed in the path and access-checked"),
@@ -60,6 +65,7 @@ const INVENTORY = {
   "inspection-reports.ts POST /inspection-reports/:id/confirm": covered("scoped manager cannot confirm report actions for another department's site", "inspection-reports.mjs"),
   "fire-safety.ts PUT /call-points/:id": notAMove("renames or archives; the call point keeps its site"),
   "fire-safety.ts PUT /call-points/order": notAMove("reorders one site's call points, access-checked; none changes site"),
+  "fire-safety.ts PUT /escape-routes": adminOnly("a site's escape route list (Template)"),
   "fire-safety.ts PUT /config": notAMove("per-site settings selected by query"),
   "fix-track-public.ts POST /:token/booked": notAMove("contractor's visit date on the issue's stored site; the site is only read to address the bell notice"),
   "fix-track-public.ts POST /:token": notAMove("contractor marks the issue done on its stored site; the site is only read to address the bell notice"),
@@ -134,6 +140,7 @@ const INVENTORY = {
   "track-evidence.ts POST /:id/review": notAMove("evidence review on the action's stored site"),
   "train-track.ts PATCH /records/:id": covered("scoped staff cannot PATCH TrainTrack site"),
   "tree-track.ts PUT /:id": siteMove("Tree inspection"),
+  "tree-track.ts PUT /trees/:id": adminOnly("tree register"),
 };
 
 const ADMIN_GUARD = /\brequire(?:ClientAdmin|Consultant)\b|\brequireRole\(\s*["']client_admin["']/;

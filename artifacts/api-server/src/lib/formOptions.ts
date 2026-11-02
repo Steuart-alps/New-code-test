@@ -33,6 +33,8 @@ export const DEFAULT_FIXTRACK_TRADES = [
   // Specialist services (October 2026), linked to the tracks' contractor visits.
   "legionella_water_hygiene", "pest_control", "pat_testing", "loler_puwer_inspection",
   "lev_testing", "asbestos", "tree_surgeon_arborist", "pool_spa_maintenance", "waste_collection",
+  // Grounds machinery dealers and engineers, for GreenTrack's machine servicing.
+  "grounds_machinery",
   "it_comms",
   "safety_hazard", "cleaning", "general",
 ] as const;

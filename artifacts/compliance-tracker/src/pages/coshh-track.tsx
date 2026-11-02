@@ -21,6 +21,7 @@ import {
   ConfirmDelete, DocumentField, SiteFilter, SiteSelect, addMonthsIso, downloadCsv, downloadRegisterDocument,
   ensureOk, fmtDate, todayIso, useRegisterList, useRegisterSites, type DocumentValue,
 } from "@/components/register-shared";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 import { sortByLabel } from "@/lib/sort-options";
 import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
@@ -223,7 +224,8 @@ export default function CoshhTrackPage() {
     const requested = new URLSearchParams(search).get("tab");
     return requested && TABS.includes(requested) ? requested : "due";
   });
-  const [siteFilter, setSiteFilter] = useState("all");
+  const [siteFilter, setSiteFilter] = useSiteFilter("all");
+  const workingSiteId = useWorkingSiteId();
   const [checkFilter, setCheckFilter] = useState<"all" | CheckType>("all");
   const [showArchived, setShowArchived] = useState(false);
   const [editingAssessment, setEditingAssessment] = useState<Assessment | null>(null);
@@ -280,7 +282,7 @@ export default function CoshhTrackPage() {
     const today = todayIso();
     setEditingAssessment(null);
     setAssessmentForm({
-      siteId: substance?.siteId != null ? String(substance.siteId) : siteFilter !== "all" ? siteFilter : sites.length === 1 ? String(sites[0].id) : "",
+      siteId: substance?.siteId != null ? String(substance.siteId) : siteFilter !== "all" ? siteFilter : workingSiteId ? String(workingSiteId) : sites.length === 1 ? String(sites[0].id) : "",
       substanceId: substance ? String(substance.id) : NONE,
       task: "", whoAtRisk: "", exposureRoutes: [], howOften: "", hazardStatements: "", signalWord: NONE,
       healthEffects: "", exposureLimits: "", controls: substance?.controls ?? "", ppe: [], ppeDetails: "", riskLevel: "medium",
@@ -355,7 +357,7 @@ export default function CoshhTrackPage() {
     const today = todayIso();
     setEditingCheck(null);
     setCheckForm({
-      siteId: assessment?.siteId != null ? String(assessment.siteId) : siteFilter !== "all" ? siteFilter : sites.length === 1 ? String(sites[0].id) : "",
+      siteId: assessment?.siteId != null ? String(assessment.siteId) : siteFilter !== "all" ? siteFilter : workingSiteId ? String(workingSiteId) : sites.length === 1 ? String(sites[0].id) : "",
       assessmentId: assessment ? String(assessment.id) : NONE,
       checkType, checkDate: today, subject: "", carriedOutBy: checkType === "staff_briefing" ? user?.name ?? "" : "",
       result: "pass", actionRequired: "", nextDueDate: addMonthsIso(today, CHECK_INFO[checkType].months), nextDueTouched: false,
@@ -544,7 +546,7 @@ export default function CoshhTrackPage() {
         </div>
 
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList>
+          <TabsList className="max-w-full overflow-x-auto justify-start">
             <TabsTrigger value="due">What's due</TabsTrigger>
             <TabsTrigger value="substances">Substances</TabsTrigger>
             <TabsTrigger value="assessments">Assessments ({visibleAssessments.length})</TabsTrigger>

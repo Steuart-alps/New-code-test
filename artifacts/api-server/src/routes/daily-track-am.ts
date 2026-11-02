@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { dailyChecklistsTable, sitesTable } from "@workspace/db/schema";
@@ -53,7 +54,7 @@ const createSchema = z.object({
   submittedAt: z.string().datetime().nullable().optional(),
 });
 
-const updateSchema = createSchema.partial().omit({ checklistType: true, checkDate: true });
+const updateSchema = partialUpdate(createSchema).omit({ checklistType: true, checkDate: true });
 
 function allowedSites(clientId: number, deptId: number) {
   return db.select({ id: sitesTable.id }).from(sitesTable).where(

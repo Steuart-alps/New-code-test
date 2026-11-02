@@ -32,7 +32,7 @@
       "@xmldom/xmldom@0.9": "0.9.12",
       "browserslist": "4.28.7",
       "body-parser": "2.4.0",
-      "decode-uri-component": "0.5.0",
+      "decode-uri-component": "0.5.1",
       "@esbuild-kit/core-utils>esbuild": "0.25.12",
       "@tailwindcss/typography>postcss-selector-parser": "7.1.6",
       "tsx>esbuild": "0.28.1",
@@ -49,11 +49,15 @@
       "nanoid@3": "3.3.18",
       "nanoid@5": "5.1.16",
       "postcss": "8.5.23",
-      "qs": "6.16.0",
+      "qs": "6.16.1",
       "undici@6": "6.29.1",
       "uuid": "11.1.1",
       "yaml": "2.8.3",
-      "ws": "8.21.0"
+      "ws": "8.21.0",
+      "minimatch@<11.0.1": "11.0.3",
+      "chromium-edge-launcher@0.2": "0.3.0",
+      "glob@13": "14.0.3",
+      "@expo/cli>zod": "4.6.7"
     },
     "patchedDependencies": {
       "image-size-safe@2.0.3": "patches/image-size-safe@2.0.3.patch"

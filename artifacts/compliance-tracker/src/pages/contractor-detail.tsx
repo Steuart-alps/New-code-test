@@ -6,7 +6,7 @@ import {
   useListComplianceItems,
   useSendReminderForItem
 } from "@workspace/api-client-react";
-import { toast } from "sonner";
+import { toast } from "@/hooks/use-toast";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { ContractorFormDialog } from "@/components/contractor-form-dialog";
 import { ItemFormDialog } from "@/components/item-form-dialog";
@@ -162,12 +162,12 @@ export default function ContractorDetailPage() {
       qc.invalidateQueries({ queryKey: ["contractors"] });
       navigate("/contractors");
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) => toast({ title: error.message, variant: "destructive" }),
   });
   const sendReminder = useSendReminderForItem({
     mutation: {
-      onSuccess: (data: any) => toast.success(data?.message ?? "Reminder sent"),
-      onError: (err: any) => toast.error(err?.message ?? "Failed to send reminder"),
+      onSuccess: (data: any) => toast({ title: data?.message ?? "Reminder sent" }),
+      onError: (err: any) => toast({ title: err?.message ?? "Failed to send reminder", variant: "destructive" }),
     },
   });
   const resendReminder = useMutation({
@@ -178,10 +178,10 @@ export default function ContractorDetailPage() {
       return data;
     },
     onSuccess: data => {
-      toast.success(data.message);
+      toast({ title: data.message });
       qc.invalidateQueries({ queryKey: ["contractor-email-queue"] });
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) => toast({ title: error.message, variant: "destructive" }),
   });
 
   const [isEditContractorOpen, setIsEditContractorOpen] = useState(false);
@@ -240,9 +240,9 @@ export default function ContractorDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contractor-certs", id] });
       setCertDialogOpen(false);
-      toast.success(editingCert ? "Certificate updated" : "Certificate added");
+      toast({ title: editingCert ? "Certificate updated" : "Certificate added" });
     },
-    onError: (err: any) => toast.error(err.message ?? "Save failed"),
+    onError: (err: any) => toast({ title: err.message ?? "Save failed", variant: "destructive" }),
   });
 
   const deleteCert = useMutation({
@@ -253,9 +253,9 @@ export default function ContractorDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contractor-certs", id] });
       setDeleteCertId(null);
-      toast.success("Certificate removed");
+      toast({ title: "Certificate removed" });
     },
-    onError: (err: any) => toast.error(err.message ?? "Delete failed"),
+    onError: (err: any) => toast({ title: err.message ?? "Delete failed", variant: "destructive" }),
   });
 
   if (loadingContractor) return (

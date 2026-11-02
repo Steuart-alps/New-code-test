@@ -1,8 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { format } from "date-fns";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
+import { useChecklistSite } from "@/hooks/use-checklist-site";
+import { carryAnswers } from "@/lib/checklist-carry";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,12 +13,6 @@ import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, Sun, Moon, ArrowLeft } from "lucide-react";
 import { Link } from "wouter";
 import { RecordSignedBy } from "@/components/record-signature";
-
-interface Site {
-  id: number;
-  name: string;
-  clientId: number;
-}
 
 interface Answer {
   question: string;
@@ -38,11 +34,14 @@ function todayDate() {
 }
 
 export default function DailyChecklistPage({ type }: { type: "am" | "pm" }) {
-  const { user, activeClientId } = useAuth();
+  const { user } = useAuth();
   const isManager = user?.role === "consultant" || user?.role === "client_admin";
 
-  const [sites, setSites] = useState<Site[]>([]);
-  const [siteId, setSiteId] = useState<string>("");
+  const { sites, siteId: chosenSiteId, setSiteId: chooseSite, ready: siteReady } = useChecklistSite();
+  const siteId = chosenSiteId ? String(chosenSiteId) : "";
+  const setSiteId = (value: string) => chooseSite(value ? Number(value) : null);
+  // Ticks not yet submitted, carried over if the site is changed.
+  const unsaved = useRef<Answer[] | null>(null);
   const [date] = useState(todayDate());
   const [loading, setLoading] = useState(true);
   const [submission, setSubmission] = useState<Submission | null>(null);
@@ -53,23 +52,10 @@ export default function DailyChecklistPage({ type }: { type: "am" | "pm" }) {
   const [signOffDone, setSignOffDone] = useState(false);
   const [error, setError] = useState("");
 
-  // Load sites
-  useEffect(() => {
-    async function loadSites() {
-      const res = await apiFetch(`/sites${activeClientId ? `?clientId=${activeClientId}` : ""}`);
-      if (res.ok) {
-        const data: Site[] = await res.json();
-        setSites(data);
-        if (data.length === 1) setSiteId(String(data[0].id));
-      }
-    }
-    loadSites();
-  }, [activeClientId]);
-
   // Load existing submission when site is chosen
   useEffect(() => {
     if (!siteId) {
-      setLoading(false);
+      setLoading(!siteReady);
       return;
     }
     setLoading(true);
@@ -88,8 +74,8 @@ export default function DailyChecklistPage({ type }: { type: "am" | "pm" }) {
             setSubmitted(true);
             setSignOffDone(!!data.submission.signedOffAt);
           } else {
-            // Use default questions
-            setAnswers(data.defaultQuestions);
+            // Use default questions, keeping any ticks made before the site changed
+            setAnswers(unsaved.current ? carryAnswers(data.defaultQuestions as Answer[], unsaved.current, a => a.question) : data.defaultQuestions);
           }
         }
       } finally {
@@ -97,14 +83,18 @@ export default function DailyChecklistPage({ type }: { type: "am" | "pm" }) {
       }
     }
     loadSubmission();
-  }, [siteId, date, type]);
+  }, [siteId, siteReady, date, type]);
+
+  function edit(change: (prev: Answer[]) => Answer[]) {
+    setAnswers(prev => (unsaved.current = change(prev)));
+  }
 
   function toggleChecked(idx: number) {
-    setAnswers(prev => prev.map((a, i) => i === idx ? { ...a, checked: !a.checked } : a));
+    edit(prev => prev.map((a, i) => i === idx ? { ...a, checked: !a.checked } : a));
   }
 
   function setNotes(idx: number, notes: string) {
-    setAnswers(prev => prev.map((a, i) => i === idx ? { ...a, notes } : a));
+    edit(prev => prev.map((a, i) => i === idx ? { ...a, notes } : a));
   }
 
   async function handleSubmit() {
@@ -120,6 +110,7 @@ export default function DailyChecklistPage({ type }: { type: "am" | "pm" }) {
         const data = await res.json();
         setSubmission(data);
         setSubmitted(true);
+        unsaved.current = null;
       } else {
         const d = await res.json();
         setError(d.error ?? "Failed to submit");
@@ -194,7 +185,9 @@ export default function DailyChecklistPage({ type }: { type: "am" | "pm" }) {
           </div>
         )}
 
-        {!siteId ? (
+        {!siteReady ? (
+          <div className="text-center py-16 text-muted-foreground text-sm">Loading…</div>
+        ) : !siteId ? (
           <div className="text-center py-16 text-muted-foreground text-sm">
             {sites.length === 0 ? "No sites found. Add a site first." : "Select a site to begin."}
           </div>

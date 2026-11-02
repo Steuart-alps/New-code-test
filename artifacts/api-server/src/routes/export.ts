@@ -45,6 +45,7 @@ import {
   hotTubsTable,
   hotTubChecksTable,
   treeInspectionsTable,
+  treesTable,
   bikesTable,
   bikeHireRecordsTable,
   bikeChecksTable,
@@ -337,6 +338,7 @@ green-track/
   spraying-records.csv           — spraying, spreading and top dressing records
   spraying-record-products.csv   — products and quantities on each record
 tree-track/
+  trees.csv                      — tree register
   inspections.csv                — tree inspection records
 bike-track/
   bikes.csv                      — bike register
@@ -463,6 +465,8 @@ async function bundleAttachments(cid: number, archive: ZipArchive, maxBytes: num
     { files: "files/fix-track/completion-documents", optional: true, load: () => db.execute(sql`SELECT 'fix-track/completion-documents' AS module, id::text AS record_id, title AS label, NULL::text AS file_name, NULL::bigint AS file_size, completion_document_path AS object_path FROM fix_track_issues WHERE client_id = ${cid} AND completion_document_path IS NOT NULL AND completion_document_path != ''`) },
     { files: "files/fix-track/action-completions", optional: true, load: () => db.execute(sql`SELECT 'fix-track/action-completions' AS module, id::text AS record_id, id::text AS label, NULL::text AS file_name, NULL::bigint AS file_size, completion_object_path AS object_path FROM fix_track_action_tokens WHERE client_id = ${cid} AND completion_object_path IS NOT NULL AND completion_object_path != ''`) },
     { files: "files/track-actions/media", optional: true, load: () => db.execute(sql`SELECT 'track-actions/' || ta.module AS module, ta.id::text || '-' || media.ordinality::text AS record_id, ta.title AS label, NULL::text AS file_name, NULL::bigint AS file_size, media.object_path FROM track_actions ta CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(ta.media_urls, '[]'::jsonb)) WITH ORDINALITY AS media(object_path, ordinality) WHERE ta.client_id = ${cid} AND media.object_path LIKE '/objects/%'`) },
+    // Certificates contractors uploaded through their testing link (PATrack).
+    { files: "files/pat-track/contractor-certificates", optional: true, load: () => db.execute(sql`SELECT 'pat-track/contractor-certificates' AS module, id::text AS record_id, COALESCE(certificate_ref, contractor_name) AS label, certificate_file_name AS file_name, NULL::bigint AS file_size, certificate_object_path AS object_path FROM contractor_test_visits WHERE client_id = ${cid} AND certificate_object_path LIKE '/objects/%'`) },
     // Certificates waiting in "Certificates to confirm"; filed ones are exported with their check.
     { files: "files/compliance/certificates-to-confirm", optional: true, load: () => db.execute(sql`SELECT 'compliance/certificates-to-confirm' AS module, id::text AS record_id, COALESCE(file_name, 'certificate-' || id::text) AS label, file_name, byte_size::bigint AS file_size, object_path FROM certificate_inbox_items WHERE client_id = ${cid} AND status <> 'filed' AND object_path LIKE '/objects/%'`) },
   ];
@@ -768,6 +772,7 @@ router.get(
         await out.csv("green-track/spraying-record-products.csv", async () => (await db.execute(sql`SELECT ap.*, p.name AS product_name, p.unit, p.mapp_number FROM green_application_products ap JOIN green_products p ON p.id = ap.product_id AND p.client_id = ap.client_id WHERE ap.client_id = ${cid} ORDER BY ap.application_id DESC, ap.id`)).rows);
 
         // ── TreeTrack ─────────────────────────────────────────────────────────
+        await out.csv("tree-track/trees.csv", () => db.select().from(treesTable).where(eq(treesTable.clientId, cid)));
         await out.csv("tree-track/inspections.csv", () => db.select().from(treeInspectionsTable).where(eq(treeInspectionsTable.clientId, cid)));
 
         // ── BikeTrack ─────────────────────────────────────────────────────────

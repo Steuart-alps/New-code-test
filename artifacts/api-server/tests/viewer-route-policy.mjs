@@ -71,6 +71,13 @@ const EXCEPTIONS = {
   // findOwnVisit resolves the site link and then the visit by its sign-out key's digest.
   "contractor-sign-in.ts POST /:token/visit [siteSignInPublicRouter]": linkToken("contractor checks own visit", /\bfindOwnVisit\(req, res\)/),
   "contractor-sign-in.ts POST /:token/sign-out [siteSignInPublicRouter]": linkToken("contractor signs out", /\bfindOwnVisit\(req, res\)/),
+  "contractor-tests.ts POST /:token/sign-in [contractorTestsPublicRouter]": linkToken("contractor signs in for a testing visit", /\blinkedVisit\(req, res, "test"\)/),
+  "contractor-tests.ts POST /:token/session [contractorTestsPublicRouter]": linkToken("contractor checks own sign-in", /\bownSignIn\(req, res, visit\)/),
+  "contractor-tests.ts POST /:token/sign-out [contractorTestsPublicRouter]": linkToken("contractor signs out", /\bownSignIn\(req, res, visit\)/),
+  "contractor-tests.ts PUT /:token/items/:applianceId/result [contractorTestsPublicRouter]": linkToken("signed-in contractor logs a result", /\bsignedInTester\(req, res, visit\)/),
+  "contractor-tests.ts POST /:token/items [contractorTestsPublicRouter]": linkToken("signed-in contractor adds an appliance", /\bsignedInTester\(req, res, visit\)/),
+  "contractor-tests.ts POST /:token/certificate [contractorTestsPublicRouter]": linkToken("contractor uploads their certificate", /\blinkedVisit\(req, res, "certificate"\)/),
+  "contractor-tests.ts POST /:token/sign-off [contractorTestsPublicRouter]": linkToken("signed-in contractor signs off", /\bsignedInTester\(req, res, visit\)/),
   "staff-roster.ts POST /staff/:id/set-pin": kioskToken("PIN enrollment", /\benrollmentRateLimit\b/, /\breq\.body\?\.enrollment_token\b/, /\bdigestBearerToken\(parsedToken\.data\)/),
   "staff-roster.ts POST /staff/verify-pin": kioskToken("kiosk PIN check", /\bkioskClient\(req\.header\("x-kiosk-token"\)\)/),
   "staff-roster.ts POST /staff/kiosk-action": kioskToken("one kiosk action", /token_hash=\$\{digestBearerToken\(parsed\.data\.capability\)\}/),
