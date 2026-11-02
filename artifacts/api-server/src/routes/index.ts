@@ -61,6 +61,7 @@ import calendarRouter from "./calendar";
 import privacyGovernanceRouter from "./privacy-governance";
 import privacyIntakePublicRouter from "./privacy-intake-public";
 import contractorSignInRouter, { siteSignInPublicRouter } from "./contractor-sign-in";
+import { contractorTestsPublicRouter } from "./contractor-tests";
 import recordSignaturesRouter from "./record-signatures";
 import dashboardSummaryRouter from "./dashboard-summary";
 import dashboardTodayRouter from "./dashboard-today";
@@ -119,6 +120,8 @@ router.use("/sign-off", publicLinkRateLimits, signOffRouter);
 router.use("/privacy-intake", publicLinkRateLimits, privacyIntakePublicRouter);
 // Contractor sign-in link for a site (token-protected; QR poster at reception).
 router.use("/site-sign-in", publicLinkRateLimits, siteSignInPublicRouter);
+// A contractor's link to log their tests for one visit (token-protected).
+router.use("/contractor-tests", publicLinkRateLimits, contractorTestsPublicRouter);
 router.use(adminRouter);
 router.use(emailDomainRouter);
 router.use(sitesRouter);

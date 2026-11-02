@@ -65,6 +65,7 @@ const SignOffPage = lazy(() => import("@/pages/sign-off"));
 const PrivacyRequestPage = lazy(() => import("@/pages/privacy-request"));
 const ContractorPortalPage = lazy(() => import("@/pages/contractor-portal"));
 const SiteSignInPage = lazy(() => import("@/pages/site-sign-in"));
+const ContractorTestsPage = lazy(() => import("@/pages/contractor-tests"));
 const ContractorSignInPage = lazy(() => import("@/pages/contractor-sign-in"));
 const ContractorApprovalsPage = lazy(() => import("@/pages/contractor-approvals"));
 const ContractorQuotePage = lazy(() => import("@/pages/contractor-quote"));
@@ -172,6 +173,7 @@ function ProtectedRoutes() {
   if (location.startsWith("/contractor-portal/")) return <Route path="/contractor-portal/:token" component={ContractorPortalPage} />;
   if (location.startsWith("/contractor-quote/")) return <ContractorQuotePage />;
   if (location.startsWith("/site-sign-in/")) return <Route path="/site-sign-in/:token" component={SiteSignInPage} />;
+  if (location.startsWith("/contractor-tests/")) return <Route path="/contractor-tests/:token" component={ContractorTestsPage} />;
   if (location === "/kiosk") return <KioskPage />;
   if (location === "/staff/set-pin") return <StaffSetPinPage />;
 

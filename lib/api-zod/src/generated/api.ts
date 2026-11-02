@@ -6592,6 +6592,247 @@ export const DeletePATPresetTemplateResponse = zod.object({
 
 
 /**
+ * @summary Contractor testing visits at the caller's sites, newest first (not Viewers)
+ */
+export const ListPATContractorVisitsQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const ListPATContractorVisitsResponse = zod.object({
+  "canManage": zod.boolean().describe('Whether the caller can set up and end visits'),
+  "visits": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string(),
+  "contractorEmail": zod.string().nullable(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "linkExpiresAt": zod.date(),
+  "status": zod.enum(['open', 'expired', 'signed_off', 'ended']),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "tested": zod.number(),
+  "passed": zod.number(),
+  "failed": zod.number(),
+  "onSiteNow": zod.number().describe('Contractors signed in through this visit\'s link and still on site'),
+  "signedOffAt": zod.date().nullable(),
+  "signedOffName": zod.string().nullable(),
+  "signedOffCompany": zod.string().nullable(),
+  "certificateRef": zod.string().nullable(),
+  "nextTestDue": zod.date().nullable(),
+  "signOffNotes": zod.string().nullable(),
+  "certificateUrl": zod.string().nullable().describe('The contractor\'s uploaded certificate (signed-in download)'),
+  "certificateFileName": zod.string().nullable(),
+  "patCertificateId": zod.number().nullable().describe('The PATrack certificate recorded at sign-off'),
+  "endedAt": zod.date().nullable()
+}))
+})
+
+
+/**
+ * The link is returned once; only its digest is kept. It works from set-up until two days after the last visit day, for this site only.
+ * @summary Set up a contractor's testing visit and email them the link (Owners and Managers)
+ */
+export const createPATContractorVisitBodySendEmailDefault = true;
+
+export const CreatePATContractorVisitBody = zod.object({
+  "siteId": zod.number(),
+  "contractorId": zod.number().nullish().describe('From the Contractors list; else give contractorName'),
+  "contractorName": zod.string().nullish(),
+  "contractorEmail": zod.string().nullish(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "sendEmail": zod.boolean().default(createPATContractorVisitBodySendEmailDefault)
+})
+
+export const CreatePATContractorVisitResponse = zod.object({
+  "visit": zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string(),
+  "contractorEmail": zod.string().nullable(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "linkExpiresAt": zod.date(),
+  "status": zod.enum(['open', 'expired', 'signed_off', 'ended']),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "tested": zod.number(),
+  "passed": zod.number(),
+  "failed": zod.number(),
+  "onSiteNow": zod.number().describe('Contractors signed in through this visit\'s link and still on site'),
+  "signedOffAt": zod.date().nullable(),
+  "signedOffName": zod.string().nullable(),
+  "signedOffCompany": zod.string().nullable(),
+  "certificateRef": zod.string().nullable(),
+  "nextTestDue": zod.date().nullable(),
+  "signOffNotes": zod.string().nullable(),
+  "certificateUrl": zod.string().nullable().describe('The contractor\'s uploaded certificate (signed-in download)'),
+  "certificateFileName": zod.string().nullable(),
+  "patCertificateId": zod.number().nullable().describe('The PATrack certificate recorded at sign-off'),
+  "endedAt": zod.date().nullable()
+}),
+  "link": zod.string().describe('The contractor\'s link; shown once'),
+  "emailedTo": zod.string().nullable(),
+  "emailError": zod.string().nullable()
+})
+
+
+/**
+ * @summary One visit with every result, each sign-in and the sign-off signature
+ */
+export const GetPATContractorVisitParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetPATContractorVisitResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string(),
+  "contractorEmail": zod.string().nullable(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "linkExpiresAt": zod.date(),
+  "status": zod.enum(['open', 'expired', 'signed_off', 'ended']),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "tested": zod.number(),
+  "passed": zod.number(),
+  "failed": zod.number(),
+  "onSiteNow": zod.number().describe('Contractors signed in through this visit\'s link and still on site'),
+  "signedOffAt": zod.date().nullable(),
+  "signedOffName": zod.string().nullable(),
+  "signedOffCompany": zod.string().nullable(),
+  "certificateRef": zod.string().nullable(),
+  "nextTestDue": zod.date().nullable(),
+  "signOffNotes": zod.string().nullable(),
+  "certificateUrl": zod.string().nullable().describe('The contractor\'s uploaded certificate (signed-in download)'),
+  "certificateFileName": zod.string().nullable(),
+  "patCertificateId": zod.number().nullable().describe('The PATrack certificate recorded at sign-off'),
+  "endedAt": zod.date().nullable()
+}).and(zod.object({
+  "signOffSignature": zod.string().nullable().describe('PNG data URL'),
+  "results": zod.array(zod.object({
+  "id": zod.number().describe('The PATrack test'),
+  "applianceId": zod.number(),
+  "applianceName": zod.string(),
+  "applianceType": zod.string().nullable(),
+  "location": zod.string().nullable(),
+  "assetTag": zod.string().nullable(),
+  "result": zod.enum(['pass', 'fail']),
+  "visualInspection": zod.string().nullable(),
+  "earthContinuityOhms": zod.string().nullable(),
+  "insulationMohms": zod.string().nullable(),
+  "operatingCurrent": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "testedBy": zod.string().nullable(),
+  "testDate": zod.date(),
+  "updatedAt": zod.date()
+})),
+  "signIns": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "company": zod.string(),
+  "signedInAt": zod.date(),
+  "signedOutAt": zod.date().nullable(),
+  "fireProcedureShown": zod.boolean(),
+  "asbestosStatus": zod.enum(['register', 'none_expected', 'missing'])
+}))
+}))
+
+
+/**
+ * @summary Replace an open visit's link (the old one stops working) and email the new one
+ */
+export const RenewPATContractorVisitLinkParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const renewPATContractorVisitLinkBodySendEmailDefault = true;
+
+export const RenewPATContractorVisitLinkBody = zod.object({
+  "sendEmail": zod.boolean().default(renewPATContractorVisitLinkBodySendEmailDefault).describe('Email the new link to the contractor')
+})
+
+export const RenewPATContractorVisitLinkResponse = zod.object({
+  "visit": zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string(),
+  "contractorEmail": zod.string().nullable(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "linkExpiresAt": zod.date(),
+  "status": zod.enum(['open', 'expired', 'signed_off', 'ended']),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "tested": zod.number(),
+  "passed": zod.number(),
+  "failed": zod.number(),
+  "onSiteNow": zod.number().describe('Contractors signed in through this visit\'s link and still on site'),
+  "signedOffAt": zod.date().nullable(),
+  "signedOffName": zod.string().nullable(),
+  "signedOffCompany": zod.string().nullable(),
+  "certificateRef": zod.string().nullable(),
+  "nextTestDue": zod.date().nullable(),
+  "signOffNotes": zod.string().nullable(),
+  "certificateUrl": zod.string().nullable().describe('The contractor\'s uploaded certificate (signed-in download)'),
+  "certificateFileName": zod.string().nullable(),
+  "patCertificateId": zod.number().nullable().describe('The PATrack certificate recorded at sign-off'),
+  "endedAt": zod.date().nullable()
+}),
+  "link": zod.string().describe('The contractor\'s link; shown once'),
+  "emailedTo": zod.string().nullable(),
+  "emailError": zod.string().nullable()
+})
+
+
+/**
+ * @summary Close a visit's link early; results already logged stay on PATrack
+ */
+export const EndPATContractorVisitParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const EndPATContractorVisitResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string(),
+  "contractorEmail": zod.string().nullable(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "linkExpiresAt": zod.date(),
+  "status": zod.enum(['open', 'expired', 'signed_off', 'ended']),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "tested": zod.number(),
+  "passed": zod.number(),
+  "failed": zod.number(),
+  "onSiteNow": zod.number().describe('Contractors signed in through this visit\'s link and still on site'),
+  "signedOffAt": zod.date().nullable(),
+  "signedOffName": zod.string().nullable(),
+  "signedOffCompany": zod.string().nullable(),
+  "certificateRef": zod.string().nullable(),
+  "nextTestDue": zod.date().nullable(),
+  "signOffNotes": zod.string().nullable(),
+  "certificateUrl": zod.string().nullable().describe('The contractor\'s uploaded certificate (signed-in download)'),
+  "certificateFileName": zod.string().nullable(),
+  "patCertificateId": zod.number().nullable().describe('The PATrack certificate recorded at sign-off'),
+  "endedAt": zod.date().nullable()
+})
+
+
+/**
  * The daily checks the client's services make each site responsible for, with the AM/PM checklists and manager sign-offs dated in the range (department-scoped users see their department's and shared sites).
  * @summary Daily checklist and sign-off history for the status page
  */

@@ -42,13 +42,13 @@ import { canUseSite, parseId, requireClient } from "./registers";
 export const ON_SITE_HOURS = 16;
 const LINK_TOKEN = /^[A-Za-z0-9_-]{32,64}$/;
 const SIGN_OUT_TOKEN = /^[a-f0-9]{64}$/;
-const SIGNATURE = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/;
+export const SIGNATURE = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/;
 
 const newLinkToken = () => randomBytes(24).toString("base64url");
 /** The name the business uses in Settings, else its account name. */
 // Written out in full: an interpolated column renders unqualified here and would
 // resolve to app_settings inside the subquery.
-const businessNameSql = sql<string>`coalesce(nullif(trim((SELECT a.value FROM app_settings a WHERE a.client_id = "clients"."id" AND a.key = 'companyName')), ''), "clients"."name")`;
+export const businessNameSql = sql<string>`coalesce(nullif(trim((SELECT a.value FROM app_settings a WHERE a.client_id = "clients"."id" AND a.key = 'companyName')), ''), "clients"."name")`;
 const signInUrl = (token: string) => `${getPublicAppUrl()}/site-sign-in/${token}`;
 
 // ── What the contractor reads ────────────────────────────────────────────────
@@ -61,7 +61,7 @@ interface AsbestosBriefing {
   surveyor: string | null;
   entries: Array<{ location: string; material: string; condition: string; priority: string; action: string; lastInspected: string | null }>;
 }
-interface Briefing {
+export interface Briefing {
   fireProcedure: string | null;
   asbestos: AsbestosBriefing;
   /** Changes whenever what the contractor reads changes. */
@@ -100,21 +100,27 @@ async function asbestosBriefing(clientId: number, siteId: number): Promise<Asbes
   return { status: "register", surveyType: record.surveyType, surveyDate: record.surveyDate, surveyor: record.surveyor, entries };
 }
 
-async function loadBriefing(clientId: number, siteId: number, fireProcedure: string | null): Promise<Briefing> {
+export async function loadBriefing(clientId: number, siteId: number, fireProcedure: string | null): Promise<Briefing> {
   const fire = fireProcedure?.trim() || null;
   const asbestos = await asbestosBriefing(clientId, siteId);
   const version = createHash("sha256").update(JSON.stringify({ fire, asbestos })).digest("hex").slice(0, 16);
   return { fireProcedure: fire, asbestos, version };
 }
 
-/** Owners and maintenance managers hear (bell only, once a day per site) when a sign-in showed missing information. */
-async function nudgeMissingInformation(clientId: number, siteId: number, siteName: string, missing: string[]) {
-  const recipients = await db.select({ id: usersTable.id }).from(usersTable)
+/** Owners and maintenance managers: who hears about contractors at a site. */
+export async function contractorNoticeRecipients(clientId: number): Promise<number[]> {
+  const rows = await db.select({ id: usersTable.id }).from(usersTable)
     .where(and(
       eq(usersTable.clientId, clientId),
       eq(usersTable.active, true),
       or(eq(usersTable.role, "client_admin"), eq(usersTable.isMaintenanceManager, true)),
     ));
+  return rows.map((row) => row.id);
+}
+
+/** Owners and maintenance managers hear (bell only, once a day per site) when a sign-in showed missing information. */
+async function nudgeMissingInformation(clientId: number, siteId: number, siteName: string, missing: string[]) {
+  const recipients = (await contractorNoticeRecipients(clientId)).map((id) => ({ id }));
   const day = new Date().toISOString().slice(0, 10);
   await createUserNotifications(recipients.map((user) => ({
     clientId,
@@ -164,7 +170,7 @@ siteSignInPublicRouter.get("/:token", async (req, res) => {
 });
 
 const optionalText = (max: number) => z.string().trim().max(max).optional().transform((value) => value || null);
-const SignInBody = z.object({
+export const SignInBody = z.object({
   name: z.string().trim().min(1, "Enter your name").max(120),
   company: z.string().trim().min(1, "Enter your company").max(160),
   phone: optionalText(40),
@@ -182,18 +188,32 @@ const SignInBody = z.object({
 siteSignInPublicRouter.post("/:token/sign-in", siteSignInSubmitRateLimit, siteSignInLinkSubmitRateLimit, async (req, res) => {
   const link = await resolveLink(req);
   if (!link) return res.status(404).json({ error: LINK_GONE });
-  const parsed = SignInBody.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check the form and try again" });
+  const outcome = await recordSignIn(req, link, req.body);
+  res.status(outcome.status).json(outcome.body);
+});
+
+/**
+ * Check and record a contractor's sign-in at a site: from the site's own link,
+ * or from a testing visit's link (contractorTestVisitId).
+ */
+export async function recordSignIn(
+  req: Request,
+  link: { clientId: number; siteId: number; siteName: string; fireProcedure: string | null },
+  input: unknown,
+  opts: { contractorTestVisitId?: number; contractorId?: number | null } = {},
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const parsed = SignInBody.safeParse(input);
+  if (!parsed.success) return { status: 400, body: { error: parsed.error.issues[0]?.message ?? "Check the form and try again" } };
   const body = parsed.data;
   if (body.website?.trim()) {
     // Look the same as a real sign-in so the filler learns nothing.
-    return res.status(201).json({ signOutToken: newBearerToken(), signedInAt: new Date(), siteName: link.siteName, name: body.name });
+    return { status: 201, body: { signOutToken: newBearerToken(), signedInAt: new Date(), siteName: link.siteName, name: body.name } };
   }
   const briefing = await loadBriefing(link.clientId, link.siteId, link.fireProcedure);
   if (body.briefingVersion !== briefing.version) {
-    return res.status(409).json({ error: "The site's safety information has just been updated. Please read it again before signing in." });
+    return { status: 409, body: { error: "The site's safety information has just been updated. Please read it again before signing in." } };
   }
-  const contractor = body.email ? (await db.select({ id: contractorsTable.id }).from(contractorsTable)
+  const contractor = opts.contractorId ? { id: opts.contractorId } : body.email ? (await db.select({ id: contractorsTable.id }).from(contractorsTable)
     .where(and(eq(contractorsTable.clientId, link.clientId), sql`lower(${contractorsTable.email}) = lower(${body.email})`))
     .limit(1))[0] : undefined;
   const signOutToken = newBearerToken();
@@ -212,6 +232,7 @@ siteSignInPublicRouter.post("/:token/sign-in", siteSignInSubmitRateLimit, siteSi
     asbestosSnapshot: briefing.asbestos,
     signature: body.signature,
     signOutTokenHash: digestBearerToken(signOutToken),
+    contractorTestVisitId: opts.contractorTestVisitId ?? null,
   }).returning({ signedInAt: contractorSignInsTable.signedInAt });
 
   const missing = [
@@ -222,8 +243,8 @@ siteSignInPublicRouter.post("/:token/sign-in", siteSignInSubmitRateLimit, siteSi
     void nudgeMissingInformation(link.clientId, link.siteId, link.siteName, missing)
       .catch((err) => req.log?.warn({ err }, "Contractor sign-in missing-information notice failed"));
   }
-  res.status(201).json({ signOutToken, signedInAt: visit.signedInAt, siteName: link.siteName, name: body.name });
-});
+  return { status: 201, body: { signOutToken, signedInAt: visit.signedInAt, siteName: link.siteName, name: body.name } };
+}
 
 const SignOutBody = z.object({ signOutToken: z.string().regex(SIGN_OUT_TOKEN) });
 

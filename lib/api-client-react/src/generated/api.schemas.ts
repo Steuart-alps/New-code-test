@@ -1992,6 +1992,131 @@ export type ContractorSignInVisitDetail = ContractorSignInVisit & ({
   signature: string;
 });
 
+export type PATContractorVisitStatus = typeof PATContractorVisitStatus[keyof typeof PATContractorVisitStatus];
+
+
+export const PATContractorVisitStatus = {
+  open: 'open',
+  expired: 'expired',
+  signed_off: 'signed_off',
+  ended: 'ended',
+} as const;
+
+export interface PATContractorVisit {
+  id: number;
+  siteId: number;
+  siteName: string;
+  contractorId: number | null;
+  contractorName: string;
+  contractorEmail: string | null;
+  startsOn: string;
+  endsOn: string;
+  linkExpiresAt: string;
+  status: PATContractorVisitStatus;
+  createdAt: string;
+  createdByName: string | null;
+  tested: number;
+  passed: number;
+  failed: number;
+  /** Contractors signed in through this visit's link and still on site */
+  onSiteNow: number;
+  signedOffAt: string | null;
+  signedOffName: string | null;
+  signedOffCompany: string | null;
+  certificateRef: string | null;
+  nextTestDue: string | null;
+  signOffNotes: string | null;
+  /** The contractor's uploaded certificate (signed-in download) */
+  certificateUrl: string | null;
+  certificateFileName: string | null;
+  /** The PATrack certificate recorded at sign-off */
+  patCertificateId: number | null;
+  endedAt: string | null;
+}
+
+export interface PATContractorVisits {
+  /** Whether the caller can set up and end visits */
+  canManage: boolean;
+  visits: PATContractorVisit[];
+}
+
+export interface PATContractorVisitLink {
+  visit: PATContractorVisit;
+  /** The contractor's link; shown once */
+  link: string;
+  emailedTo: string | null;
+  emailError: string | null;
+}
+
+export interface CreatePATContractorVisitRequest {
+  siteId: number;
+  /** From the Contractors list; else give contractorName */
+  contractorId?: number | null;
+  contractorName?: string | null;
+  contractorEmail?: string | null;
+  startsOn: string;
+  endsOn: string;
+  sendEmail?: boolean;
+}
+
+export interface RenewPATContractorVisitLinkRequest {
+  /** Email the new link to the contractor */
+  sendEmail?: boolean;
+}
+
+export type PATContractorVisitResultResult = typeof PATContractorVisitResultResult[keyof typeof PATContractorVisitResultResult];
+
+
+export const PATContractorVisitResultResult = {
+  pass: 'pass',
+  fail: 'fail',
+} as const;
+
+export interface PATContractorVisitResult {
+  /** The PATrack test */
+  id: number;
+  applianceId: number;
+  applianceName: string;
+  applianceType: string | null;
+  location: string | null;
+  assetTag: string | null;
+  result: PATContractorVisitResultResult;
+  visualInspection: string | null;
+  earthContinuityOhms: string | null;
+  insulationMohms: string | null;
+  operatingCurrent: string | null;
+  notes: string | null;
+  testedBy: string | null;
+  testDate: string;
+  updatedAt: string;
+}
+
+export type PATContractorVisitSignInAsbestosStatus = typeof PATContractorVisitSignInAsbestosStatus[keyof typeof PATContractorVisitSignInAsbestosStatus];
+
+
+export const PATContractorVisitSignInAsbestosStatus = {
+  register: 'register',
+  none_expected: 'none_expected',
+  missing: 'missing',
+} as const;
+
+export interface PATContractorVisitSignIn {
+  id: number;
+  name: string;
+  company: string;
+  signedInAt: string;
+  signedOutAt: string | null;
+  fireProcedureShown: boolean;
+  asbestosStatus: PATContractorVisitSignInAsbestosStatus;
+}
+
+export type PATContractorVisitDetail = PATContractorVisit & ({
+  /** PNG data URL */
+  signOffSignature: string | null;
+  results: PATContractorVisitResult[];
+  signIns: PATContractorVisitSignIn[];
+});
+
 export type CertificateInboxItemSource = typeof CertificateInboxItemSource[keyof typeof CertificateInboxItemSource];
 
 
@@ -5839,6 +5964,10 @@ export type GetPATPresetTemplates200 = {[key: string]: PATPresetItem[]};
 
 export type SavePATPresetTemplateBody = {
   items: PATPresetItem[];
+};
+
+export type ListPATContractorVisitsParams = {
+siteId?: number;
 };
 
 export type GetDailyTrackHistoryParams = {

@@ -34,6 +34,7 @@ const TOKEN_LINK_PREFIXES = [
   "/certificate-upload/",
   "/sign-off/",
   "/site-sign-in/",
+  "/contractor-tests/",
 ];
 
 export function viewerMayUse(method: string, path: string): boolean {

@@ -4736,6 +4736,128 @@ paths:
               schema:
                 $ref: "#/components/schemas/OkResponse"
 
+  /pat-track/contractor-visits:
+    get:
+      operationId: listPATContractorVisits
+      tags: [pat-track]
+      summary: Contractor testing visits at the caller's sites, newest first (not Viewers)
+      parameters:
+        - name: siteId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Visits
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PATContractorVisits"
+    post:
+      operationId: createPATContractorVisit
+      tags: [pat-track]
+      summary: Set up a contractor's testing visit and email them the link (Owners and Managers)
+      description: >-
+        The link is returned once; only its digest is kept. It works from set-up
+        until two days after the last visit day, for this site only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePATContractorVisitRequest"
+      responses:
+        "201":
+          description: The visit and its link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PATContractorVisitLink"
+        "400":
+          description: Missing contractor, email or dates
+        "403":
+          description: Only Owners and Managers can set up contractor visits
+        "404":
+          description: Not one of the caller's sites
+
+  /pat-track/contractor-visits/{id}:
+    get:
+      operationId: getPATContractorVisit
+      tags: [pat-track]
+      summary: One visit with every result, each sign-in and the sign-off signature
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The visit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PATContractorVisitDetail"
+        "404":
+          description: Not a visit at one of the caller's sites
+
+  /pat-track/contractor-visits/{id}/new-link:
+    post:
+      operationId: renewPATContractorVisitLink
+      tags: [pat-track]
+      summary: Replace an open visit's link (the old one stops working) and email the new one
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenewPATContractorVisitLinkRequest"
+      responses:
+        "200":
+          description: The visit and its new link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PATContractorVisitLink"
+        "403":
+          description: Only Owners and Managers can set up contractor visits
+        "404":
+          description: Not a visit at one of the caller's sites
+        "409":
+          description: The visit is signed off or ended
+
+  /pat-track/contractor-visits/{id}/end:
+    post:
+      operationId: endPATContractorVisit
+      tags: [pat-track]
+      summary: Close a visit's link early; results already logged stay on PATrack
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The ended visit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PATContractorVisit"
+        "403":
+          description: Only Owners and Managers can end contractor visits
+        "404":
+          description: Not a visit at one of the caller's sites
+        "409":
+          description: The visit is already signed off
+
   /daily-track-status/history:
     get:
       operationId: getDailyTrackHistory
@@ -9057,6 +9179,122 @@ components:
               description: The asbestos information the contractor was shown
             signature: { type: string, description: "PNG data URL" }
           required: [fireProcedureText, asbestosSnapshot, signature]
+
+    PATContractorVisit:
+      type: object
+      properties:
+        id: { type: integer }
+        siteId: { type: integer }
+        siteName: { type: string }
+        contractorId: { type: integer, nullable: true }
+        contractorName: { type: string }
+        contractorEmail: { type: string, nullable: true }
+        startsOn: { type: string, format: date }
+        endsOn: { type: string, format: date }
+        linkExpiresAt: { type: string, format: date-time }
+        status: { type: string, enum: [open, expired, signed_off, ended] }
+        createdAt: { type: string, format: date-time }
+        createdByName: { type: string, nullable: true }
+        tested: { type: integer }
+        passed: { type: integer }
+        failed: { type: integer }
+        onSiteNow: { type: integer, description: "Contractors signed in through this visit's link and still on site" }
+        signedOffAt: { type: string, format: date-time, nullable: true }
+        signedOffName: { type: string, nullable: true }
+        signedOffCompany: { type: string, nullable: true }
+        certificateRef: { type: string, nullable: true }
+        nextTestDue: { type: string, format: date, nullable: true }
+        signOffNotes: { type: string, nullable: true }
+        certificateUrl: { type: string, nullable: true, description: "The contractor's uploaded certificate (signed-in download)" }
+        certificateFileName: { type: string, nullable: true }
+        patCertificateId: { type: integer, nullable: true, description: "The PATrack certificate recorded at sign-off" }
+        endedAt: { type: string, format: date-time, nullable: true }
+      required: [id, siteId, siteName, contractorId, contractorName, contractorEmail, startsOn, endsOn, linkExpiresAt, status, createdAt, createdByName, tested, passed, failed, onSiteNow, signedOffAt, signedOffName, signedOffCompany, certificateRef, nextTestDue, signOffNotes, certificateUrl, certificateFileName, patCertificateId, endedAt]
+
+    PATContractorVisits:
+      type: object
+      properties:
+        canManage: { type: boolean, description: "Whether the caller can set up and end visits" }
+        visits:
+          type: array
+          items:
+            $ref: "#/components/schemas/PATContractorVisit"
+      required: [canManage, visits]
+
+    PATContractorVisitLink:
+      type: object
+      properties:
+        visit:
+          $ref: "#/components/schemas/PATContractorVisit"
+        link: { type: string, description: "The contractor's link; shown once" }
+        emailedTo: { type: string, nullable: true }
+        emailError: { type: string, nullable: true }
+      required: [visit, link, emailedTo, emailError]
+
+    CreatePATContractorVisitRequest:
+      type: object
+      properties:
+        siteId: { type: integer }
+        contractorId: { type: integer, nullable: true, description: "From the Contractors list; else give contractorName" }
+        contractorName: { type: string, nullable: true }
+        contractorEmail: { type: string, nullable: true }
+        startsOn: { type: string, format: date }
+        endsOn: { type: string, format: date }
+        sendEmail: { type: boolean, default: true }
+      required: [siteId, startsOn, endsOn]
+
+    RenewPATContractorVisitLinkRequest:
+      type: object
+      properties:
+        sendEmail: { type: boolean, default: true, description: "Email the new link to the contractor" }
+
+    PATContractorVisitResult:
+      type: object
+      properties:
+        id: { type: integer, description: "The PATrack test" }
+        applianceId: { type: integer }
+        applianceName: { type: string }
+        applianceType: { type: string, nullable: true }
+        location: { type: string, nullable: true }
+        assetTag: { type: string, nullable: true }
+        result: { type: string, enum: [pass, fail] }
+        visualInspection: { type: string, nullable: true }
+        earthContinuityOhms: { type: string, nullable: true }
+        insulationMohms: { type: string, nullable: true }
+        operatingCurrent: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        testedBy: { type: string, nullable: true }
+        testDate: { type: string, format: date }
+        updatedAt: { type: string, format: date-time }
+      required: [id, applianceId, applianceName, applianceType, location, assetTag, result, visualInspection, earthContinuityOhms, insulationMohms, operatingCurrent, notes, testedBy, testDate, updatedAt]
+
+    PATContractorVisitSignIn:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        company: { type: string }
+        signedInAt: { type: string, format: date-time }
+        signedOutAt: { type: string, format: date-time, nullable: true }
+        fireProcedureShown: { type: boolean }
+        asbestosStatus: { type: string, enum: [register, none_expected, missing] }
+      required: [id, name, company, signedInAt, signedOutAt, fireProcedureShown, asbestosStatus]
+
+    PATContractorVisitDetail:
+      allOf:
+        - $ref: "#/components/schemas/PATContractorVisit"
+        - type: object
+          properties:
+            signOffSignature: { type: string, nullable: true, description: "PNG data URL" }
+            results:
+              type: array
+              items:
+                $ref: "#/components/schemas/PATContractorVisitResult"
+            signIns:
+              type: array
+              items:
+                $ref: "#/components/schemas/PATContractorVisitSignIn"
+          required: [signOffSignature, results, signIns]
 
     CertificateInbox:
       type: object
