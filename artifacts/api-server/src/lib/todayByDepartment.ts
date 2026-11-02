@@ -34,6 +34,7 @@ import {
 import { getAccountTimezone, localDateIn, addCalendarDays, zonedDateTimeToUtc } from "./accountClock";
 import { occursOn } from "./taskSchedule";
 import { submittedDailyChecklists } from "./dailyChecklistCompletion";
+import { isPastDue, loadSiteChecklistDueTimes, localTimeIn } from "./checklistDueTimes";
 import { certificateOutstandingItemIds } from "./certificateOutcomes";
 
 export const TODAY_BY_DEPARTMENT_ROLES_SETTING = "todayByDepartmentRoles";
@@ -314,6 +315,12 @@ export async function getTodayByDepartment(scope: TodayScope, now: Date = new Da
   const today = localDateIn(timeZone, now);
   const dayStart = zonedDateTimeToUtc(today, "00:00", timeZone);
   const dayEnd = zonedDateTimeToUtc(addCalendarDays(today, 1), "00:00", timeZone);
+  // Opening and closing checks not done by the site's due time are overdue.
+  const localTime = localTimeIn(timeZone, now);
+  const notSubmittedDetail = (started: boolean | undefined, due: string) => {
+    const when = isPastDue(localTime, due) ? `overdue (due by ${due})` : `due by ${due}`;
+    return started ? `Started, not submitted yet, ${when}` : `Not submitted yet, ${when}`;
+  };
 
   const [siteRows, departmentRows] = await Promise.all([
     db.execute(sql`
@@ -336,6 +343,7 @@ export async function getTodayByDepartment(scope: TodayScope, now: Date = new Da
       ? site.departmentId === null
       : departments.some((department) => departmentAtSite(site, department)));
   }
+  const dueTimes = await loadSiteChecklistDueTimes(clientId, sites.map((site) => site.id));
   const siteIds = sites.map((site) => site.id);
   if (siteIds.length === 0) return { date: today, groups: [] };
 
@@ -421,9 +429,13 @@ export async function getTodayByDepartment(scope: TodayScope, now: Date = new Da
             ? { siteId: site.id, departmentId, outcome: "failed", label, detail: "Submitted with a failed item", path }
             : { siteId: site.id, departmentId, outcome: "done" });
         } else {
+          const period = requirement.endsWith("_opening") ? "opening" : requirement.endsWith("_closing") ? "closing" : null;
+          const due = period ? dueTimes.get(site.id)?.[period] : undefined;
           push({
             siteId: site.id, departmentId, outcome: "todo", label,
-            detail: current?.started ? "Started, not submitted yet" : "Not submitted yet", path,
+            detail: due ? notSubmittedDetail(current?.started, due)
+              : current?.started ? "Started, not submitted yet" : "Not submitted yet",
+            path,
           });
         }
       }
@@ -453,7 +465,12 @@ export async function getTodayByDepartment(scope: TodayScope, now: Date = new Da
               ? { siteId: site.id, departmentId, outcome: "failed", label, detail: "Submitted with a failed item", path }
               : { siteId: site.id, departmentId, outcome: "done" });
           } else {
-            push({ siteId: site.id, departmentId, outcome: "todo", label, detail: state?.started ? "Started, not submitted yet" : "Not submitted yet", path });
+            const due = dueTimes.get(site.id)?.[type === "greenkeeping_opening" ? "opening" : "closing"];
+            push({
+              siteId: site.id, departmentId, outcome: "todo", label,
+              detail: due ? notSubmittedDetail(state?.started, due) : state?.started ? "Started, not submitted yet" : "Not submitted yet",
+              path,
+            });
           }
         }
         // Machines kept at this site; one with no site counts at a one-site business.

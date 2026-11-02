@@ -13,12 +13,14 @@
  *          actions past their due date. Also FireTrack checks and COSHHTrack
  *          reviews and checks due today or tomorrow, so the owner hears the
  *          day before something is due, and overdue COSHHTrack items.
- *   11:00  today's AM (opening) checklist not submitted, per site.
- *   21:00  today's PM (closing) checklist and today's KitchenTrack diary not
- *          submitted, per site.
- * GreenTrack's greenkeeping shed opening (11:00) and closing (21:00)
- * checklists are chased on their own at the sites that do them, to the site's
- * greenkeeping team's Managers, else GreenTrack's owner
+ *   21:00  today's KitchenTrack diary not submitted, per site.
+ * Opening (AM) and closing (PM) checklists not yet submitted are chased per
+ * site at the site's reminder time (Owners and Managers set it; default 11:00
+ * and 21:00, lib/checklistDueTimes.ts), on the first hourly run after it and
+ * up to the end of the day.
+ * GreenTrack's greenkeeping shed opening and closing checklists follow the
+ * same reminder times and are chased on their own at the sites that do them, to
+ * the site's greenkeeping team's Managers, else GreenTrack's owner
  * (lib/greenkeepingChecks.ts).
  * Daily checklists and the kitchen diary are only chased at sites that have
  * used them in the last 30 days, or once an owner has been set for the track,
@@ -31,6 +33,7 @@ import { addCalendarDays, getAccountTimezone, localDateIn } from "./accountClock
 import { getCheckAlerts, type CheckAlert } from "./checkReminders";
 import { getCoshhDueItems, type CoshhDueItem } from "./coshhTrack";
 import { getDailyChecklistCompletionBySite, submittedDailyChecklists } from "./dailyChecklistCompletion";
+import { isPastDue, localTimeIn, siteChecklistTimesFromRow, type SiteChecklistDueTimes } from "./checklistDueTimes";
 import { logger } from "./logger";
 import { sendPushToUsers } from "./pushNotifications";
 import { getEntitledServices, isEntitled, type Entitlements } from "./services";
@@ -42,7 +45,8 @@ import {
 } from "./greenkeepingChecks";
 import { createUserNotifications, purgeOldUserNotifications, type NewUserNotification } from "./userNotifications";
 
-export const TRACK_REMINDER_HOURS = { overdue: 9, am: 11, pm: 21 } as const;
+/** Opening and closing checklists follow each site's reminder times instead (lib/checklistDueTimes.ts). */
+export const TRACK_REMINDER_HOURS = { overdue: 9, kitchenDiary: 21 } as const;
 /** Hours after the start hour during which a missed phase still runs. */
 export const TRACK_REMINDER_WINDOW_HOURS = 3;
 /** A site "uses" a daily track when it recorded one in this many days. */
@@ -66,7 +70,7 @@ export interface TrackReminderJobResult {
   errors: number;
 }
 
-interface Site { id: number; name: string }
+interface Site { id: number; name: string; due: SiteChecklistDueTimes }
 
 const rowsOf = <T>(result: unknown): T[] => ((result as { rows?: T[] }).rows ?? []);
 
@@ -141,7 +145,7 @@ async function dailyChecklistReminders(
     batch.add({
       module, siteId: site.id, kind: module,
       title: `${label} checklist not done — ${site.name}`,
-      body: `Today's ${description} checklist for ${site.name} hasn't been submitted yet.`,
+      body: `Today's ${description} checklist for ${site.name} (due by ${site.due[period === "am" ? "opening" : "closing"]}) hasn't been submitted yet.`,
       linkPath: getTrackModule(module)!.path,
     });
   }
@@ -177,7 +181,7 @@ async function greenkeepingShedReminders(
     batch.add({
       module: "green", siteId: site.id, kind: `green_${type}`,
       title: `${GREENKEEPING_CHECKLIST_NAMES[type]} not done — ${site.name}`,
-      body: `Today's greenkeeping shed ${period === "am" ? "opening" : "closing"} checklist for ${site.name}${team ? ` (${team.departmentName})` : ""} hasn't been submitted yet.`,
+      body: `Today's greenkeeping shed ${period === "am" ? "opening" : "closing"} checklist for ${site.name}${team ? ` (${team.departmentName})` : ""} (due by ${site.due[period === "am" ? "opening" : "closing"]}) hasn't been submitted yet.`,
       linkPath: greenDailyChecksPath(site.id),
       userIds: team ? teamManagers(ctx, team.departmentId, site.id) : undefined,
     });
@@ -368,35 +372,42 @@ async function overdueReminders(
 export async function collectTrackReminders(clientId: number, now: Date): Promise<NewUserNotification[]> {
   const timeZone = await getAccountTimezone(clientId);
   const hour = localHourIn(timeZone, now);
+  const localTime = localTimeIn(timeZone, now);
+  const siteResult = await db.execute(sql`
+    SELECT id, name, opening_checks_due, closing_checks_due, opening_reminder_at, closing_reminder_at
+    FROM sites WHERE client_id = ${clientId} ORDER BY name, id
+  `);
+  const sites: Site[] = rowsOf<{ id: number; name: string } & Parameters<typeof siteChecklistTimesFromRow>[0]>(siteResult)
+    .map((row) => ({ id: Number(row.id), name: row.name, due: siteChecklistTimesFromRow(row) }));
+  // Opening and closing checklists are chased at the sites whose reminder time has passed.
+  const openingDue = sites.filter((site) => isPastDue(localTime, site.due.reminder.opening));
+  const closingDue = sites.filter((site) => isPastDue(localTime, site.due.reminder.closing));
   const phases = {
     overdue: inWindow(hour, TRACK_REMINDER_HOURS.overdue),
-    am: inWindow(hour, TRACK_REMINDER_HOURS.am),
-    pm: inWindow(hour, TRACK_REMINDER_HOURS.pm),
+    kitchenDiary: inWindow(hour, TRACK_REMINDER_HOURS.kitchenDiary),
   };
-  if (!phases.overdue && !phases.am && !phases.pm) return [];
+  if (!phases.overdue && !phases.kitchenDiary && openingDue.length === 0 && closingDue.length === 0) return [];
   // A business locked out by an ended trial can't open the reminders anyway.
   if (await isClientBillingLocked(clientId).catch(() => false)) return [];
 
   const today = localDateIn(timeZone, now);
-  const [services, ctx, siteResult, clientResult] = await Promise.all([
+  const [services, ctx, clientResult] = await Promise.all([
     getEntitledServices(clientId),
     loadOwnerContext(clientId),
-    db.execute(sql`SELECT id, name FROM sites WHERE client_id = ${clientId} ORDER BY name, id`),
     db.execute(sql`SELECT name FROM clients WHERE id = ${clientId}`),
   ]);
-  const sites = rowsOf<{ id: number; name: string }>(siteResult).map((row) => ({ id: Number(row.id), name: row.name }));
   const businessName = rowsOf<{ name: string }>(clientResult)[0]?.name ?? "your business";
   const batch = new ReminderBatch(ctx, today);
 
   if (phases.overdue) await overdueReminders(batch, clientId, services, businessName, today, now);
-  if (phases.am && entitledTo(services, "daily_am")) {
-    await dailyChecklistReminders(batch, ctx, clientId, sites, today, "am");
+  if (entitledTo(services, "daily_am")) await dailyChecklistReminders(batch, ctx, clientId, openingDue, today, "am");
+  if (entitledTo(services, "daily_pm")) await dailyChecklistReminders(batch, ctx, clientId, closingDue, today, "pm");
+  if (entitledTo(services, "green")) {
+    await greenkeepingShedReminders(batch, ctx, clientId, openingDue, today, "am");
+    await greenkeepingShedReminders(batch, ctx, clientId, closingDue, today, "pm");
   }
-  if (phases.am && entitledTo(services, "green")) await greenkeepingShedReminders(batch, ctx, clientId, sites, today, "am");
-  if (phases.pm) {
-    if (entitledTo(services, "daily_pm")) await dailyChecklistReminders(batch, ctx, clientId, sites, today, "pm");
-    if (entitledTo(services, "kitchen")) await kitchenDiaryReminders(batch, ctx, clientId, sites, businessName, today);
-    if (entitledTo(services, "green")) await greenkeepingShedReminders(batch, ctx, clientId, sites, today, "pm");
+  if (phases.kitchenDiary && entitledTo(services, "kitchen")) {
+    await kitchenDiaryReminders(batch, ctx, clientId, sites, businessName, today);
   }
   return batch.items;
 }
