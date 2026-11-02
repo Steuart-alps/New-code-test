@@ -44,7 +44,7 @@ Wednesday 28 October.
 | 25 | Link TrainTrack to outside training providers | After launch | None for hosting; some providers may charge for a link | Which providers your clients use |
 | 26 | Combine SafeTrack into DocTrack | After launch | None; affects pricing | Your call on pricing |
 | 27 | One Owner login for several separate businesses | After launch | None | Your go-ahead |
-| 28 | Finish or hide the staff roster "Open kiosk" | After launch | None | Your choice: finish or hide |
+| 28 | Staff roster "Open kiosk": show the shift starts it records | After launch | None | Nothing; you decided to keep the button |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -972,12 +972,12 @@ staff roster?").
 
 The staff roster has an "Open kiosk" button that lets staff record the start
 of their shift on a shared screen, but nothing in the app shows those
-records yet, so it looks unfinished. Two choices:
+records yet. On 2 November you decided to keep the button (not hide it).
 
-1. **Finish it** as a tablet sign-in sheet: staff tap their name to sign in
-   and out, managers see who is on site, and it feeds the fire roll call
-   (alongside contractor sign-in, item 23).
-2. **Hide it** until there is time to finish it.
+The work after launch is to show the shift start times the kiosk records, so
+managers can see who started when. Later it could also become a full tablet
+sign-in sheet (sign in and out, who is on site, feeding the fire roll call
+alongside contractor sign-in, item 23).
 
 **Cost:** none. No extra hosting.
 
