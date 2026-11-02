@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
@@ -82,7 +83,7 @@ router.put("/clients/:id", requireAuth, requireClientAdmin, async (req, res) => 
     return;
   }
 
-  const body = UpsertClientBody.partial().parse(req.body);
+  const body = partialUpdate(UpsertClientBody).parse(req.body);
   const rows = await db
     .update(clientsTable)
     .set({ ...body, updatedAt: new Date() })

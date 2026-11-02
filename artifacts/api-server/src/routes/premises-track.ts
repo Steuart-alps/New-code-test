@@ -136,7 +136,7 @@ router.get("/", requireAuth, async (req, res) => {
 
   const parsed = listInspectionsQuery.safeParse(req.query);
   if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Invalid query parameters" });
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid query parameters" });
   }
   const { from, to, siteId, type, status } = parsed.data;
   const departmentId = getActiveDepartmentId(req);

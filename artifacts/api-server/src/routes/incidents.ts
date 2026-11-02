@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import {
@@ -72,7 +73,7 @@ const createSchema = z.object({
 // limit) were introduced. The route below permits that value only when it is
 // exactly the value already stored; every changed value is still checked
 // against the current, tenant-scoped option list.
-const updateSchema = createSchema.partial().extend({
+const updateSchema = partialUpdate(createSchema).extend({
   incidentType: z.string().min(1).optional(),
 });
 // Creation only: the mobile outbox's device entry ID (see clientEntryReplay).

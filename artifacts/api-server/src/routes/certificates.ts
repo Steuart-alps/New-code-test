@@ -1,4 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { db } from "@workspace/db";
 import { reminderCycleOf, supersedeStaleReminderCycles } from "../lib/reminderCycles";
 import {
@@ -42,7 +43,7 @@ const CreateCertificateBody = z.object({
   notes: z.string().nullish(),
 });
 
-const UpdateCertificateBody = CreateCertificateBody.partial();
+const UpdateCertificateBody = partialUpdate(CreateCertificateBody);
 
 const DefectBody = z.object({
   code: z.enum(DEFECT_CODES),
@@ -63,9 +64,9 @@ const CreateItemCertificateBody = CreateCertificateBody.extend({
   readByAi: z.boolean().optional(),
 });
 type ItemDefectValue = DefectBodyValue & { needsWork?: boolean };
-const UpdateItemCertificateBody = CreateCertificateBody.extend({
+const UpdateItemCertificateBody = partialUpdate(CreateCertificateBody.extend({
   outcome: z.enum(CERTIFICATE_OUTCOMES),
-}).partial();
+}));
 
 const router: IRouter = Router();
 

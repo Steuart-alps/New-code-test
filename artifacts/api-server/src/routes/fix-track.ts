@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { db } from "@workspace/db";
@@ -465,7 +466,7 @@ const issueCreate = z.object({
 });
 
 const drawnSignature = z.string().max(250_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/);
-const issueUpdate = issueCreate.partial().extend({ resolverSignature: drawnSignature.optional() });
+const issueUpdate = partialUpdate(issueCreate).extend({ resolverSignature: drawnSignature.optional() });
 
 // ── List ──────────────────────────────────────────────────────────────────────
 

@@ -1,6 +1,9 @@
 import {
   appendClientId,
   callerChoseClientId,
+  correctiveActionRequiredInfo,
+  correctiveActionsHeaderValue,
+  CORRECTIVE_ACTIONS_HEADER,
   isReplayableBody,
   OVERRIDE_REASON_HEADER,
   overrideReasonMessage,
@@ -9,6 +12,7 @@ import {
   signatureRequiredInfo,
   type OverrideReasonHandler,
   type RecordSignatureHandler,
+  type CorrectiveActionHandler,
 } from "@workspace/api-client-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -125,8 +129,17 @@ export function setApiFetchRecordSignatureHandler(handler: RecordSignatureHandle
   recordSignatureHandler = handler;
 }
 
+let correctiveActionHandler: CorrectiveActionHandler | null = null;
+
+/** Mirrors the generated client's setCorrectiveActionHandler for hand-written fetches. */
+export function setApiFetchCorrectiveActionHandler(handler: CorrectiveActionHandler | null): void {
+  correctiveActionHandler = handler;
+}
+
 /**
  * `fetch` for hand-written mutations of track records. When the API answers
+ * 428 CORRECTIVE_ACTION_REQUIRED (a check with a fail must say what was done
+ * about it), asks for the corrective actions; when it answers
  * 428 SIGNATURE_REQUIRED (a recorded check must be signed), asks for a drawn
  * signature; when it answers 423 OVERRIDE_REASON_REQUIRED (an owner changing a
  * record older than its correction window), asks for a reason. Each is asked
@@ -141,7 +154,25 @@ export async function fetchWithOverrideReason(url: string, init: RequestInit = {
   let headers = new Headers(init.headers);
   let askedSignature = false;
   let askedReason = false;
+  let askedCorrective = false;
   for (;;) {
+    const corrective = res.status === 428 && !askedCorrective && correctiveActionHandler
+      ? correctiveActionRequiredInfo(await res.clone().json().catch(() => null))
+      : null;
+    if (corrective && correctiveActionHandler) {
+      askedCorrective = true;
+      let answers: Record<string, string> | null = null;
+      try {
+        answers = await correctiveActionHandler({ method, url, ...corrective });
+      } catch {
+        answers = null;
+      }
+      if (!answers) return res;
+      headers = new Headers(headers);
+      headers.set(CORRECTIVE_ACTIONS_HEADER, correctiveActionsHeaderValue(answers));
+      res = await fetch(url, { ...init, headers });
+      continue;
+    }
     if (res.status === 428 && !askedSignature && recordSignatureHandler) {
       askedSignature = true;
       const info = signatureRequiredInfo(await res.clone().json().catch(() => null));

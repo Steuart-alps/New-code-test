@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { departmentsTable, sitesTable, usersTable } from "@workspace/db/schema";
@@ -95,7 +96,7 @@ router.put("/departments/:id", requireAuth, requireClientAdmin, async (req, res)
     return;
   }
 
-  const body = UpsertDepartmentBody.partial().parse(req.body);
+  const body = partialUpdate(UpsertDepartmentBody).parse(req.body);
   const updates: { name?: string; description?: string | null; siteId?: number | null } = {};
   if (body.name !== undefined) updates.name = body.name;
   if (body.description !== undefined) updates.description = body.description;

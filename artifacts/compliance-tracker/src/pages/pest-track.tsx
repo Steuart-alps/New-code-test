@@ -702,7 +702,7 @@ export default function PestTrackPage() {
               <p className="text-xs text-muted-foreground">Pest control visits and activity log</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {canAdmin && (
               <Button data-testid="button-download-pest-register" variant="outline" size="sm"
                 className="rounded-sm gap-1.5 h-8 text-xs" onClick={handleDownloadRegister}

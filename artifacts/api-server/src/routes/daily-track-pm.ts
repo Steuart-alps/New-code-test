@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { dailyChecklistsTable, dailyManagerSignoffsTable, sitesTable } from "@workspace/db/schema";
@@ -53,7 +54,7 @@ const createSchema = z.object({
   submittedAt: z.string().datetime().nullable().optional(),
 });
 
-const updateSchema = createSchema.partial().omit({ checklistType: true, checkDate: true });
+const updateSchema = partialUpdate(createSchema).omit({ checklistType: true, checkDate: true });
 
 const signoffCreateSchema = z.object({
   siteId: z.number().int().nullable().optional(),
@@ -165,7 +166,7 @@ router.put("/signoffs/:id", requireAuth, denyViewers, async (req, res) => {
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (existing.submittedAt) return res.status(409).json({ error: "Sign-off already submitted" });
   if (!(await siteInDepartment(req.body?.siteId, clientId, getActiveDepartmentId(req)))) return res.status(403).json({ error: "Site not accessible" });
-  const parsed = signoffCreateSchema.partial().safeParse(req.body);
+  const parsed = partialUpdate(signoffCreateSchema).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   if (!(await verifySite(parsed.data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
   const data = parsed.data as any;

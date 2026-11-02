@@ -13,6 +13,7 @@ import { loadUser, enforceClientAccess, enforceTwoFactorEnrollment } from "./mid
 import { enforceTrialLock } from "./middleware/trialLock";
 import { enforceDailyEntryCutoff } from "./middleware/dailyEntryCutoff";
 import { requireRecordSignature } from "./middleware/recordSignatureGate";
+import { requireCorrectiveActions } from "./middleware/correctiveActionGate";
 import { WebhookHandlers } from "./lib/webhookHandlers";
 import {
   certificateInboxDomain, inboundWebhookSecret, processInboundEmail, recordInboundEmail, verifyInboundWebhook,
@@ -290,6 +291,8 @@ app.use(csrfProtection);
 app.use(loadUser);
 app.use(enforceTwoFactorEnrollment);
 app.use(enforceClientAccess);
+// A fail is answered with its corrective action first, then the check is signed.
+app.use("/api", requireCorrectiveActions);
 // Before the late-edit reason, so a reason is asked (and audited) only once.
 app.use("/api", requireRecordSignature);
 app.use("/api", enforceDailyEntryCutoff);
