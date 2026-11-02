@@ -4121,6 +4121,16 @@ async function migrateGreenTrack() {
     ON "green_defects" ("client_id", "status")
   `);
 
+  // Machine services done in house or by a contractor (October 2026). An
+  // in-house service keeps its checklist (lib/api-zod green-service-checklist)
+  // and whether the machine was safe to use; each problem found on it becomes
+  // a defect linked back to the service. Older records leave these empty.
+  await db.execute(sql`ALTER TABLE "green_service_records" ADD COLUMN IF NOT EXISTS "done_by" text`);
+  await db.execute(sql`ALTER TABLE "green_service_records" ADD COLUMN IF NOT EXISTS "contractor_id" integer REFERENCES "contractors"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "green_service_records" ADD COLUMN IF NOT EXISTS "checklist" jsonb`);
+  await db.execute(sql`ALTER TABLE "green_service_records" ADD COLUMN IF NOT EXISTS "safe_to_use" boolean`);
+  await db.execute(sql`ALTER TABLE "green_defects" ADD COLUMN IF NOT EXISTS "service_record_id" integer REFERENCES "green_service_records"("id") ON DELETE SET NULL`);
+
   // PUWER statutory thorough examinations
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "green_puwer_inspections" (
@@ -6310,6 +6320,13 @@ async function migrateFireCallPoints() {
   await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "night_porter" boolean`);
   await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "night_porter_since" timestamp`);
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "walk_time" text`);
+  // Oct 2026: when each site's opening and closing checks are due ("HH:MM";
+  // blank = 06:00 and 18:00). Mirrors lib/db/src/schema/sites.ts.
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "opening_checks_due" text`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "closing_checks_due" text`);
+  // ... and when the reminder about them goes out (blank = 11:00 and 21:00).
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "opening_reminder_at" text`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "closing_reminder_at" text`);
 }
 
 // Equipment list and QR labels (Oct 2026). Water checks and Compliance Checks
@@ -6552,6 +6569,14 @@ async function migrateCertificateInbox() {
   `);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_certificate_upload_links_token" ON "certificate_upload_links" ("token_hash")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_certificate_upload_links_item" ON "certificate_upload_links" ("client_id", "item_id")`);
+  // Replies to contractor emails: the link's code tags the Reply-To, and a
+  // received reply records which link (and so which check) it answers.
+  await db.execute(sql`ALTER TABLE "certificate_upload_links" ADD COLUMN IF NOT EXISTS "reply_ref" text`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_certificate_upload_links_reply_ref" ON "certificate_upload_links" ("reply_ref")`);
+  await db.execute(sql`
+    ALTER TABLE "certificate_inbox_emails" ADD COLUMN IF NOT EXISTS "upload_link_id" integer
+      REFERENCES "certificate_upload_links"("id") ON DELETE SET NULL
+  `);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "certificate_inbox_items" (
       "id" serial PRIMARY KEY,

@@ -1,6 +1,7 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClock } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -52,12 +53,13 @@ interface Contractor { id: number; name: string; company?: string | null; trades
 
 /** Select values besides a contractor id. */
 const UNDECIDED = "none";
-const NOT_NEEDED = "not_needed";
 const ALL_SITES = "all";
 const REGISTER_GROUP = "Compliance checks";
 
 interface Row {
   id: string;
+  /** The track visit's key, for links from a track ("Set it up"). */
+  visitKey?: string;
   label: string;
   siteId: number | null;
   siteName: string | null;
@@ -90,6 +92,13 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [siteFilter, setSiteFilter] = useSiteFilter(ALL_SITES);
+  // A track's "Set it up" link opens /contractors?visit=<key>[&site=<id>]
+  // and lands on that line.
+  const [target] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return { visit: params.get("visit"), site: params.get("site") };
+  });
+  const [highlight, setHighlight] = useState<string | null>(null);
 
   const { data, isLoading, isError } = useQuery<{ types: VisitType[]; visits: Visit[]; checks?: RegisterCheck[] }>({
     queryKey: ["contractor-visits", activeClientId],
@@ -120,6 +129,22 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
     return [...byId].map(([id, name]) => ({ id, name }));
   }, [data]);
 
+  useEffect(() => {
+    // Arriving from a track link: show that line's site.
+    if (target.site) setSiteFilter(target.site);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target]);
+
+  useEffect(() => {
+    if (!data || !target.visit) return;
+    const candidates = [...document.querySelectorAll<HTMLElement>("[data-visit-key]")]
+      .filter(element => element.dataset.visitKey === target.visit);
+    const element = candidates.find(candidate => candidate.dataset.siteId === target.site) ?? candidates[0];
+    if (!element) return;
+    setHighlight(element.dataset.rowId ?? null);
+    element.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [data, target]);
+
   const checks = data?.checks ?? [];
   if (isLoading || !data || (data.types.length === 0 && checks.length === 0)) {
     return isError ? <p role="alert" className="text-destructive text-sm mb-8">Could not load contractor visits.</p> : null;
@@ -139,6 +164,7 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
     const takesDate = type.dueFrom === "check" || !visit.trackDueDate;
     add(type.trackLabel, {
       id: `${visit.visitKey}@${visit.siteId}`,
+      visitKey: visit.visitKey,
       label: type.label,
       siteId: visit.siteId,
       siteName: visit.siteName,
@@ -211,55 +237,84 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
   const renderRow = (row: Row) => {
     const overdue = !!row.due && row.due < today && !row.completed;
     const label = `${row.label}${showSite && row.siteName ? ` at ${row.siteName}` : ""}`;
-    const value = row.contractorId != null ? String(row.contractorId) : row.notNeeded ? NOT_NEEDED : UNDECIDED;
+    const value = row.contractorId != null ? String(row.contractorId) : UNDECIDED;
     let chosen: ReactNode;
     if (row.notNeeded) chosen = "No contractor needed";
     else if (row.contractorName) chosen = row.contractorName;
     else chosen = <span className="text-amber-700 dark:text-amber-400">Not chosen yet</span>;
     return (
-      <li key={row.id} className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 p-3">
+      <li
+        key={row.id}
+        data-row-id={row.id}
+        data-visit-key={row.visitKey}
+        data-site-id={row.siteId ?? undefined}
+        className={`flex flex-col md:flex-row md:items-center gap-2 md:gap-4 p-3${highlight === row.id ? " bg-primary/10 ring-2 ring-primary/40" : ""}`}
+      >
         <div className="flex-1 min-w-0">
           <p className="font-medium text-sm">{row.label}</p>
           <p className="text-xs text-muted-foreground">
             {showSite && row.siteName && <>{row.siteName} · </>}
-            {row.due
-              ? <span className={overdue ? "text-rose-700 font-semibold" : undefined}>{overdue ? "Overdue since" : "Next due"} {formatDay(row.due)}</span>
-              : row.noDateText}
-            {row.reminderSentAt && <> · Reminder sent</>}
+            {row.notNeeded
+              ? "No contractor needed"
+              : row.due
+                ? <span className={overdue ? "text-rose-700 font-semibold" : undefined}>{overdue ? "Overdue since" : "Next due"} {formatDay(row.due)}</span>
+                : row.noDateText}
+            {!row.notNeeded && row.reminderSentAt && <> · Reminder sent</>}
           </p>
         </div>
-        {row.dateInput && !row.notNeeded && canAdmin && (
-          <Input
-            type="date"
-            aria-label={`Due date: ${label}`}
-            className="w-full md:w-40"
-            defaultValue={row.dateInput.value ?? ""}
-            onBlur={event => {
-              const next = event.target.value || null;
-              if (next !== row.dateInput!.value) row.dateInput!.onSave(next);
-            }}
-          />
-        )}
-        {canAdmin ? (
-          <Select
-            value={value}
-            onValueChange={next => row.choose(next === NOT_NEEDED
-              ? { contractorId: null, notNeeded: true }
-              : { contractorId: next === UNDECIDED ? null : Number(next), notNeeded: false })}
-            disabled={save.isPending}
-          >
-            <SelectTrigger
-              className={`w-full md:w-64${value === UNDECIDED ? " border-amber-500/70" : ""}`}
-              aria-label={`Contractor: ${label}`}
+        {row.notNeeded ? (
+          canAdmin && (
+            <Button
+              type="button" variant="outline" size="sm"
+              aria-label={`Add back: ${label}`}
+              disabled={save.isPending}
+              onClick={() => row.choose({ contractorId: null, notNeeded: false })}
             >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={UNDECIDED}>Not chosen yet</SelectItem>
-              <SelectItem value={NOT_NEEDED}>No contractor needed (N/A)</SelectItem>
-              {contractorChoices(row.trades)}
-            </SelectContent>
-          </Select>
+              Add back
+            </Button>
+          )
+        ) : canAdmin ? (
+          <>
+            {row.dateInput && (
+              <Input
+                type="date"
+                aria-label={`Due date: ${label}`}
+                className="w-full md:w-40"
+                defaultValue={row.dateInput.value ?? ""}
+                onBlur={event => {
+                  const next = event.target.value || null;
+                  if (next !== row.dateInput!.value) row.dateInput!.onSave(next);
+                }}
+              />
+            )}
+            <div className="flex gap-2 w-full md:w-auto">
+              <Select
+                value={value}
+                onValueChange={next => row.choose({ contractorId: next === UNDECIDED ? null : Number(next), notNeeded: false })}
+                disabled={save.isPending}
+              >
+                <SelectTrigger
+                  className={`flex-1 md:w-64${value === UNDECIDED ? " border-amber-500/70" : ""}`}
+                  aria-label={`Contractor: ${label}`}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={UNDECIDED}>Not chosen yet</SelectItem>
+                  {contractorChoices(row.trades)}
+                </SelectContent>
+              </Select>
+              <Button
+                type="button" variant="outline" size="sm" className="h-10 shrink-0"
+                title="No contractor needed: hide this line (you can add it back)"
+                aria-label={`No contractor needed: ${label}`}
+                disabled={save.isPending}
+                onClick={() => row.choose({ contractorId: null, notNeeded: true })}
+              >
+                N/A
+              </Button>
+            </div>
+          </>
         ) : (
           <p className="text-sm md:w-64">{chosen}</p>
         )}
@@ -276,12 +331,13 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
           </h2>
           <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
             Every inspection your tracks and compliance checks keep, with when each is next due. Choose who does each one, or
-            mark it "No contractor needed" if you do it yourselves or it does not apply. The contractor gets one reminder email
+            press N/A if no contractor is needed (you do it yourselves, or it does not apply): the line is hidden until you add it
+            back. The contractor gets one reminder email
             before it is due (your lead time), which waits in Contractor Approvals for a manager to send.
           </p>
           {undecided > 0 && (
             <p className="text-sm font-medium text-amber-700 dark:text-amber-400 mt-2">
-              {undecided} still to decide: choose a contractor or "No contractor needed"
+              {undecided} still to decide: choose a contractor or press N/A
             </p>
           )}
         </div>
@@ -312,9 +368,9 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
                 <p className="text-sm text-muted-foreground">Nothing here needs a contractor.</p>
               )}
               {notNeeded.length > 0 && (
-                <details className="mt-2">
+                <details className="mt-2" open={notNeeded.some(row => row.id === highlight) || undefined}>
                   <summary className="text-xs text-muted-foreground cursor-pointer select-none">
-                    No contractor needed ({notNeeded.length})
+                    Hidden, no contractor needed ({notNeeded.length}): show to add back
                   </summary>
                   <ul className="mt-2 divide-y divide-border/60 rounded-sm border border-border/60 opacity-80">{notNeeded.map(renderRow)}</ul>
                 </details>

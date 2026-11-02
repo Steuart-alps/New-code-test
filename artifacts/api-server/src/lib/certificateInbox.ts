@@ -37,7 +37,7 @@ import { AiUnavailableError, claimAiUse, settleAiUse } from "./aiAllowance";
 import { digestBearerToken, newBearerToken } from "./bearerTokens";
 import { certificateCheckChoicesFor } from "./certificateCheckChoices";
 import { readCertificate, type CertificateReadingResult } from "./certificateReading";
-import { escapeHtml, getPublicAppUrl, getResend } from "./email";
+import { escapeHtml, getPublicAppUrl, getResend, parseEmailList, sendEmail } from "./email";
 import { logger } from "./logger";
 import { ObjectContentError, ObjectStorageService } from "./objectStorage";
 import { docxToText, ReportReadingError, UnreadableReportError, reportReadingConfigured } from "./reportReading";
@@ -101,10 +101,14 @@ export function addressNameFor(businessName: string): string {
 }
 
 /** The name plus a short random code, so one business's address cannot be guessed from another's. */
-function newLocalPart(businessName: string): string {
+function randomCode(length: number): string {
   let code = "";
-  for (let i = 0; i < 5; i++) code += SUFFIX_LETTERS[randomInt(SUFFIX_LETTERS.length)];
-  return `${addressNameFor(businessName)}-${code}`;
+  for (let i = 0; i < length; i++) code += SUFFIX_LETTERS[randomInt(SUFFIX_LETTERS.length)];
+  return code;
+}
+
+function newLocalPart(businessName: string): string {
+  return `${addressNameFor(businessName)}-${randomCode(5)}`;
 }
 
 async function storedLocalPart(clientId: number): Promise<string | null> {
@@ -161,6 +165,29 @@ export async function certificateReplyToFor(clientId: number): Promise<string | 
   }
 }
 
+/**
+ * Reply-To for a contractor email carrying an upload link (reminder, visit
+ * confirmation, certificate chase): the business's certificate address tagged
+ * with the link's reply code (local+code@domain), so a reply is matched to its
+ * check. A reply with a certificate waits to be confirmed; anything else is
+ * forwarded to the business (processInboundEmail).
+ */
+export async function certificateReplyToForLink(clientId: number, uploadToken: string): Promise<string | null> {
+  const address = await certificateReplyToFor(clientId);
+  if (!address) return null;
+  try {
+    const [link] = rowsOf<{ reply_ref: string | null }>(await db.execute(sql`
+      SELECT reply_ref FROM certificate_upload_links WHERE client_id = ${clientId} AND token_hash = ${digestBearerToken(uploadToken)}
+    `));
+    if (!link?.reply_ref) return address;
+    const at = address.lastIndexOf("@");
+    return `${address.slice(0, at)}+${link.reply_ref}${address.slice(at)}`;
+  } catch (err) {
+    logger.warn({ err, clientId }, "Reply code unavailable; replies go to the untagged certificate address");
+    return address;
+  }
+}
+
 // ----- The "Upload certificate" link -----
 
 export function certificateUploadUrl(token: string = CERTIFICATE_UPLOAD_PLACEHOLDER): string {
@@ -169,13 +196,17 @@ export function certificateUploadUrl(token: string = CERTIFICATE_UPLOAD_PLACEHOL
 
 type Executor = { execute(query: unknown): Promise<unknown> };
 
-/** Create an upload link for one check. Returns the raw token, which only the email carries. */
+/**
+ * Create an upload link for one check. Returns the raw token, which only the
+ * email carries. Its reply code tags the email's Reply-To, so a reply is
+ * matched to the same check (certificateReplyToForLink).
+ */
 export async function issueCertificateUploadLink(
   executor: Executor, link: { clientId: number; itemId: number; contractorId: number | null }, token: string = newBearerToken(),
 ): Promise<string> {
   await executor.execute(sql`
-    INSERT INTO certificate_upload_links (client_id, item_id, contractor_id, token_hash, expires_at)
-    VALUES (${link.clientId}, ${link.itemId}, ${link.contractorId}, ${digestBearerToken(token)},
+    INSERT INTO certificate_upload_links (client_id, item_id, contractor_id, token_hash, reply_ref, expires_at)
+    VALUES (${link.clientId}, ${link.itemId}, ${link.contractorId}, ${digestBearerToken(token)}, ${randomCode(10)},
       now() + ${`${CERTIFICATE_UPLOAD_LINK_DAYS} days`}::interval)
   `);
   return token;
@@ -224,19 +255,21 @@ export async function findCertificateUploadLink(token: unknown): Promise<Certifi
   };
 }
 
-/** The part of a contractor email that asks for the certificate: the upload button, and the address when there is one. */
-export function certificateUploadBlock(opts: { uploadUrl: string; address: string | null; heading?: string }): { html: string; text: string } {
+/**
+ * The part of a contractor email that asks for the certificate: the upload
+ * button, and replying with it attached when replies reach ComplyTrack
+ * (certificateReplyToForLink).
+ */
+export function certificateUploadBlock(opts: { uploadUrl: string; byReply: boolean; heading?: string }): { html: string; text: string } {
   const heading = opts.heading ?? "After the visit: send us the certificate";
-  const emailLine = opts.address
-    ? ` or email it to <a href="mailto:${escapeHtml(opts.address)}">${escapeHtml(opts.address)}</a>`
-    : "";
+  const replyLine = opts.byReply ? ", or reply to this email with it attached" : "";
   const html = `
       <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:20px;margin:20px 0;text-align:center;">
         <p style="margin:0 0 12px;color:#1e293b;font-weight:600;">${escapeHtml(heading)}</p>
-        <p style="margin:0 0 16px;color:#475569;font-size:14px;">Upload the certificate or report here${emailLine}. A PDF or a photo is fine.</p>
+        <p style="margin:0 0 16px;color:#475569;font-size:14px;">Upload the certificate or report here${replyLine}. A PDF or a photo is fine.</p>
         <a href="${opts.uploadUrl}" style="display:inline-block;background:#15803d;color:white;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600;">Upload certificate</a>
       </div>`;
-  const text = `${heading}\nUpload the certificate or report here: ${opts.uploadUrl}${opts.address ? `\nOr email it to ${opts.address}` : ""}`;
+  const text = `${heading}\nUpload the certificate or report here: ${opts.uploadUrl}${opts.byReply ? "\nOr reply to this email with it attached." : ""}`;
   return { html, text };
 }
 
@@ -283,6 +316,18 @@ export interface InboxDeps {
   storeFile(clientId: number, bytes: Buffer, contentType: string): Promise<string>;
   readFile(clientId: number, objectPath: string): Promise<Buffer>;
   read: typeof readCertificate;
+  /** Pass a contractor's reply that has no certificate on to the business. */
+  forward(message: ForwardedReply): Promise<void>;
+}
+
+export interface ForwardedReply {
+  clientId: number;
+  to: string[];
+  replyTo: string;
+  subject: string;
+  html: string;
+  text: string;
+  idempotencyKey?: string;
 }
 
 export interface InboundAttachment {
@@ -343,6 +388,8 @@ export const defaultInboxDeps: InboxDeps = {
   storeFile: (clientId, bytes, contentType) => storage.storeTenantFile(clientId, bytes, contentType, EXTENSIONS[contentType] ?? ".bin"),
   readFile: (clientId, objectPath) => storage.readTenantFile(objectPath, clientId, MAX_INBOX_FILE_BYTES),
   read: readCertificate,
+  forward: ({ clientId, to, replyTo, subject, html, text, idempotencyKey }) =>
+    sendEmail({ clientId, to, replyTo, subject, html, text, idempotencyKey }),
 };
 
 interface InboxItemRow {
@@ -436,16 +483,23 @@ export function parseAddress(raw: string): { email: string; name: string | null 
   return { email, name };
 }
 
-/** The certificate addresses (local parts) an email was sent to. "+anything" is ignored. */
-export function inboxLocalParts(addresses: string[], domain: string): string[] {
-  const parts = new Set<string>();
+/** The certificate addresses (local parts) an email was sent to, each with its "+code" tag, if any. */
+export function inboxRecipients(addresses: string[], domain: string): Array<{ localPart: string; tag: string | null }> {
+  const found = new Map<string, { localPart: string; tag: string | null }>();
   for (const raw of addresses) {
     const { email } = parseAddress(raw);
     const at = email.lastIndexOf("@");
     if (at < 1 || email.slice(at + 1) !== domain) continue;
-    parts.add(email.slice(0, at).split("+")[0]!);
+    const [localPart, ...rest] = email.slice(0, at).split("+");
+    const tag = rest.join("+") || null;
+    found.set(`${localPart}+${tag ?? ""}`, { localPart: localPart!, tag });
   }
-  return [...parts];
+  return [...found.values()];
+}
+
+/** The certificate addresses (local parts) an email was sent to. "+anything" is ignored. */
+export function inboxLocalParts(addresses: string[], domain: string): string[] {
+  return [...new Set(inboxRecipients(addresses, domain).map((recipient) => recipient.localPart))];
 }
 
 export interface InboundEmailEvent {
@@ -458,19 +512,31 @@ export async function recordInboundEmail(event: InboundEmailEvent): Promise<numb
   const domain = certificateInboxDomain();
   const data = event.data;
   if (!domain || event.type !== "email.received" || !data?.email_id) return null;
-  const localParts = inboxLocalParts([...(data.to ?? []), ...(data.cc ?? [])], domain);
+  const recipients = inboxRecipients([...(data.to ?? []), ...(data.cc ?? [])], domain);
+  const localParts = [...new Set(recipients.map((recipient) => recipient.localPart))];
   let clientId: number | null = null;
+  let uploadLinkId: number | null = null;
   if (localParts.length) {
-    const [owner] = rowsOf<{ client_id: number }>(await db.execute(sql`
-      SELECT client_id FROM certificate_inbox_addresses
+    const [owner] = rowsOf<{ client_id: number; local_part: string }>(await db.execute(sql`
+      SELECT client_id, local_part FROM certificate_inbox_addresses
       WHERE local_part IN (${sql.join(localParts.map((part) => sql`${part}`), sql`, `)})
       ORDER BY client_id LIMIT 1
     `));
     clientId = owner?.client_id ?? null;
+    // A reply to one of the business's contractor emails: its tag is that email's link.
+    const tags = recipients.filter((recipient) => recipient.localPart === owner?.local_part && recipient.tag).map((recipient) => recipient.tag!);
+    if (clientId && tags.length) {
+      const [link] = rowsOf<{ id: number }>(await db.execute(sql`
+        SELECT id FROM certificate_upload_links
+        WHERE client_id = ${clientId} AND reply_ref IN (${sql.join(tags.map((tag) => sql`${tag}`), sql`, `)})
+        ORDER BY id DESC LIMIT 1
+      `));
+      uploadLinkId = link?.id ?? null;
+    }
   }
   const [row] = rowsOf<{ id: number }>(await db.execute(sql`
-    INSERT INTO certificate_inbox_emails (provider_email_id, client_id, from_address, subject, status, processed_at)
-    VALUES (${data.email_id}, ${clientId}, ${(data.from ?? "").slice(0, 500)}, ${data.subject?.slice(0, 500) ?? null},
+    INSERT INTO certificate_inbox_emails (provider_email_id, client_id, upload_link_id, from_address, subject, status, processed_at)
+    VALUES (${data.email_id}, ${clientId}, ${uploadLinkId}, ${(data.from ?? "").slice(0, 500)}, ${data.subject?.slice(0, 500) ?? null},
       ${clientId ? "pending" : "ignored"}, ${clientId ? null : new Date()})
     ON CONFLICT (provider_email_id) DO NOTHING
     RETURNING id
@@ -542,10 +608,98 @@ function messageText(text: string | null): string | null {
   return trimmed ? trimmed.slice(0, MESSAGE_TEXT_CHARS) : null;
 }
 
+/** Where a reply quotes the email it answers ("On ... wrote:", Outlook's header block, a signature line). */
+const QUOTE_STARTS = [
+  /^On .{0,300}wrote:$/i, /^-{2,}\s*Original Message\s*-{2,}$/i, /^_{10,}$/, /^From:\s/i, /^Sent from my /i,
+];
+
+/**
+ * What the sender wrote, without the email they replied to (which carries the
+ * upload and booking links). Exported for tests.
+ */
+export function replyText(text: string | null): string | null {
+  if (!text) return null;
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const own: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!.trim();
+    const withNext = `${line} ${lines[i + 1]?.trim() ?? ""}`.trim();
+    if (line.startsWith(">") || QUOTE_STARTS.some((start) => start.test(line) || start.test(withNext))) break;
+    own.push(lines[i]!);
+  }
+  return messageText(own.join("\n"));
+}
+
+interface ReplyLink {
+  itemId: number;
+  contractorId: number | null;
+  itemTitle: string;
+  siteName: string | null;
+}
+
+async function replyLink(clientId: number, uploadLinkId: number | null): Promise<ReplyLink | null> {
+  if (!uploadLinkId) return null;
+  const [row] = rowsOf<{ item_id: number; contractor_id: number | null; title: string; site_name: string | null }>(await db.execute(sql`
+    SELECT l.item_id, l.contractor_id, ci.title, s.name AS site_name
+    FROM certificate_upload_links l
+    JOIN compliance_items ci ON ci.id = l.item_id AND ci.client_id = l.client_id
+    LEFT JOIN sites s ON s.id = ci.site_id AND s.client_id = l.client_id
+    WHERE l.id = ${uploadLinkId} AND l.client_id = ${clientId}
+  `));
+  return row ? {
+    itemId: Number(row.item_id), contractorId: row.contractor_id == null ? null : Number(row.contractor_id),
+    itemTitle: row.title, siteName: row.site_name,
+  } : null;
+}
+
+/**
+ * Who gets a contractor's reply that has no certificate: the person the check
+ * is given to, and the business's maintenance address; else its Owners.
+ */
+async function replyRecipients(clientId: number, itemId: number | null): Promise<string[]> {
+  const people: string[] = [];
+  if (itemId) {
+    const [assignee] = rowsOf<{ email: string }>(await db.execute(sql`
+      SELECT u.email FROM compliance_items ci JOIN users u ON u.id = ci.assignee_user_id AND u.active
+      WHERE ci.id = ${itemId} AND ci.client_id = ${clientId}
+    `));
+    if (assignee) people.push(assignee.email);
+  }
+  const [maintenance] = rowsOf<{ value: string | null }>(await db.execute(sql`
+    SELECT value FROM app_settings WHERE client_id = ${clientId} AND key = 'maintenanceEmail'
+  `));
+  people.push(...parseEmailList(maintenance?.value));
+  if (!people.length) {
+    const owners = rowsOf<{ email: string }>(await db.execute(sql`
+      SELECT email FROM users WHERE client_id = ${clientId} AND role = 'client_admin' AND active ORDER BY id
+    `));
+    people.push(...owners.map((owner) => owner.email));
+  }
+  return [...new Set(people.map((email) => email.trim().toLowerCase()).filter(Boolean))];
+}
+
+function forwardedReply(opts: {
+  clientId: number; to: string[]; sender: { email: string; name: string | null }; contractorName: string | null;
+  link: ReplyLink | null; subject: string | null; text: string | null; notes: string[];
+}): ForwardedReply {
+  const who = opts.contractorName ?? opts.sender.name ?? opts.sender.email;
+  const about = opts.link ? `${opts.link.itemTitle}${opts.link.siteName ? ` at ${opts.link.siteName}` : ""}` : null;
+  const subject = `${who} replied${about ? ` about ${about}` : opts.subject ? `: ${opts.subject}` : ""}`.slice(0, 200);
+  const intro = `${who} (${opts.sender.email}) replied to your ComplyTrack email${about ? ` about ${about}` : ""}:`;
+  const html = `
+    <p>${escapeHtml(intro)}</p>
+    ${opts.text ? `<div style="border-left:4px solid #cbd5e1;padding:8px 16px;margin:16px 0;white-space:pre-wrap;">${escapeHtml(opts.text)}</div>` : ""}
+    ${opts.notes.map((note) => `<p style="color:#b45309;">${escapeHtml(note)}</p>`).join("")}
+    <p>Reply to this email to answer them directly.</p>`;
+  const text = [intro, "", opts.text ?? "", ...opts.notes, "", "Reply to this email to answer them directly."].join("\n");
+  return { clientId: opts.clientId, to: opts.to, replyTo: opts.sender.email, subject, html, text };
+}
+
 interface EmailRow {
   id: number;
   provider_email_id: string;
   client_id: number;
+  upload_link_id: number | null;
   from_address: string;
   subject: string | null;
   attempts: number;
@@ -553,24 +707,34 @@ interface EmailRow {
 
 /**
  * Fetch a recorded email's attachments and keep each certificate as an inbox
- * item, then read the trusted ones with AI. Safe to run twice: each file is
- * one item (by its attachment id), and a run that fails is retried by
+ * item, then read the trusted ones with AI. A reply to one of the business's
+ * contractor emails is trusted and matched to that email's check; a trusted
+ * email with no certificate is forwarded to the business. Safe to run twice:
+ * each file is one item (by its attachment id), a forward carries the email's
+ * idempotency key, and a run that fails is retried by
  * runCertificateInboxRecovery, MAX_EMAIL_ATTEMPTS times at most.
  */
 export async function processInboundEmail(emailRowId: number, deps: InboxDeps = defaultInboxDeps): Promise<void> {
   const [email] = rowsOf<EmailRow>(await db.execute(sql`
     UPDATE certificate_inbox_emails SET attempts = attempts + 1
     WHERE id = ${emailRowId} AND status = 'pending' AND client_id IS NOT NULL
-    RETURNING id, provider_email_id, client_id, from_address, subject, attempts
+    RETURNING id, provider_email_id, client_id, upload_link_id, from_address, subject, attempts
   `));
   if (!email) return;
   const toRead: Array<{ id: number; bytes: Buffer }> = [];
   try {
     const details = await deps.fetchEmail(email.provider_email_id);
     const sender = parseAddress(details.from || email.from_address);
-    const trust = await senderTrust(email.client_id, sender.email, details.headers);
+    const link = await replyLink(email.client_id, email.upload_link_id);
+    const known = await senderTrust(email.client_id, sender.email, details.headers);
+    // A reply to the business's own email (its tagged Reply-To) is trusted,
+    // even from another address at the contractor, unless it looks forged.
+    const trust: SenderTrust = link && !known.trusted && !senderLooksForged(details.headers)
+      ? { trusted: true, contractorId: link.contractorId, heldReason: null }
+      : { ...known, contractorId: known.contractorId ?? (known.trusted ? link?.contractorId ?? null : null) };
+    const itemId = link?.itemId ?? null;
     const subject = (details.subject ?? email.subject)?.slice(0, 500) ?? null;
-    const text = messageText(details.text);
+    const text = replyText(details.text);
     const notes: string[] = [];
     let kept = 0;
 
@@ -611,10 +775,10 @@ export async function processInboundEmail(emailRowId: number, deps: InboxDeps = 
       const objectPath = await deps.storeFile(email.client_id, file.bytes, file.contentType);
       const [item] = rowsOf<{ id: number }>(await db.execute(sql`
         INSERT INTO certificate_inbox_items
-          (client_id, source, status, email_id, external_ref, sender_email, sender_name, contractor_id, subject, message_text,
+          (client_id, source, status, email_id, external_ref, sender_email, sender_name, contractor_id, item_id, subject, message_text,
            file_name, content_type, object_path, byte_size, reading_error)
         VALUES (${email.client_id}, 'email', ${trust.trusted ? "reading" : "held"}, ${email.id},
-          ${externalRef}, ${sender.email}, ${sender.name}, ${trust.contractorId},
+          ${externalRef}, ${sender.email}, ${sender.name}, ${trust.contractorId}, ${itemId},
           ${subject}, ${text}, ${attachment.filename.slice(0, 255)}, ${file.contentType}, ${objectPath}, ${file.bytes.length},
           ${trust.heldReason})
         ON CONFLICT (client_id, external_ref) DO NOTHING
@@ -624,15 +788,37 @@ export async function processInboundEmail(emailRowId: number, deps: InboxDeps = 
       if (item && trust.trusted) toRead.push({ id: item.id, bytes: file.bytes });
     }
 
-    // A trusted reply with nothing usable attached is kept as a message, so it is not lost.
+    // A trusted email with no certificate ("can we do Tuesday?") goes on to
+    // the business; if that is not possible it waits in the list as a
+    // message, so it is never lost.
     if (trust.trusted && kept === 0 && (text || notes.length)) {
-      await db.execute(sql`
-        INSERT INTO certificate_inbox_items
-          (client_id, source, status, email_id, external_ref, sender_email, sender_name, contractor_id, subject, message_text, reading_error)
-        VALUES (${email.client_id}, 'email', 'message', ${email.id}, ${`email:${email.provider_email_id}:message`},
-          ${sender.email}, ${sender.name}, ${trust.contractorId}, ${subject}, ${text}, ${notes.join(" ") || null})
-        ON CONFLICT (client_id, external_ref) DO NOTHING
-      `);
+      let forwarded = false;
+      const to = await replyRecipients(email.client_id, itemId);
+      if (to.length) {
+        const [contractor] = trust.contractorId ? rowsOf<{ name: string }>(await db.execute(sql`
+          SELECT name FROM contractors WHERE id = ${trust.contractorId} AND client_id = ${email.client_id}
+        `)) : [];
+        try {
+          await deps.forward({
+            ...forwardedReply({
+              clientId: email.client_id, to, sender, contractorName: contractor?.name ?? null, link, subject, text, notes,
+            }),
+            idempotencyKey: `certificate-reply-${email.provider_email_id}`,
+          });
+          forwarded = true;
+        } catch (err) {
+          logger.warn({ err, emailRowId }, "A contractor's reply could not be forwarded; it waits in Certificates to confirm");
+        }
+      }
+      if (!forwarded) {
+        await db.execute(sql`
+          INSERT INTO certificate_inbox_items
+            (client_id, source, status, email_id, external_ref, sender_email, sender_name, contractor_id, item_id, subject, message_text, reading_error)
+          VALUES (${email.client_id}, 'email', 'message', ${email.id}, ${`email:${email.provider_email_id}:message`},
+            ${sender.email}, ${sender.name}, ${trust.contractorId}, ${itemId}, ${subject}, ${text}, ${notes.join(" ") || null})
+          ON CONFLICT (client_id, external_ref) DO NOTHING
+        `);
+      }
       kept++;
     }
     await db.execute(sql`

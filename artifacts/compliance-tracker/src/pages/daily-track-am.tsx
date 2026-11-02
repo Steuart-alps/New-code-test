@@ -11,6 +11,7 @@ import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useChecklistSite } from "@/hooks/use-checklist-site";
 import { ChecklistSiteSelect } from "@/components/checklist-site-select";
+import { ChecklistDueTime } from "@/components/checklist-due-time";
 import { carryAnswers, createChecklistDraftStore, hasAnswers, type ChecklistDraftSlot } from "@/lib/checklist-carry";
 import { useFireWalkChecklistItems, withFireWalkItems } from "@/components/fire-night-walks";
 import { Button } from "@/components/ui/button";
@@ -457,10 +458,22 @@ export default function DailyTrackAmPage() {
         </div>
       </div>
 
+      {!loading && siteReady && (
+        <ChecklistDueTime
+          site={sites.find(s => s.id === selectedSiteId)}
+          period="opening"
+          date={date}
+          done={Boolean(mobileSubmission) || visibleTypes.some(type => getChecklist(type)?.submittedAt)}
+          className="mb-4"
+        />
+      )}
+
       {loading || !siteReady ? (
         <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        // One checklist per row: the kitchen and premises checks are separate
+        // checks, often by different teams, so they are not shown side by side.
+        <div className="grid grid-cols-1 gap-4 max-w-4xl">
           {mobileSubmission && <MobileChecklistSubmissionCard submission={mobileSubmission} />}
           {visibleTypes.map(type => (
             <ChecklistCard

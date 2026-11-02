@@ -812,6 +812,10 @@ export const ListSitesResponseItem = zod.object({
   "phone": zod.string().nullish(),
   "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
   "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
+  "openingChecksDue": zod.string().nullish().describe('When the site\'s opening checks are due (\"HH:MM\" on the business\'s clock). Null means 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('When the site\'s closing checks are due (\"HH:MM\" on the business\'s clock). Null means 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out (\"HH:MM\"). Null means 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out (\"HH:MM\"). Null means 21:00.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -841,6 +845,10 @@ export const CreateSiteResponse = zod.object({
   "phone": zod.string().nullish(),
   "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
   "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
+  "openingChecksDue": zod.string().nullish().describe('When the site\'s opening checks are due (\"HH:MM\" on the business\'s clock). Null means 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('When the site\'s closing checks are due (\"HH:MM\" on the business\'s clock). Null means 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out (\"HH:MM\"). Null means 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out (\"HH:MM\"). Null means 21:00.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -863,6 +871,10 @@ export const GetSiteResponse = zod.object({
   "phone": zod.string().nullish(),
   "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
   "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
+  "openingChecksDue": zod.string().nullish().describe('When the site\'s opening checks are due (\"HH:MM\" on the business\'s clock). Null means 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('When the site\'s closing checks are due (\"HH:MM\" on the business\'s clock). Null means 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out (\"HH:MM\"). Null means 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out (\"HH:MM\"). Null means 21:00.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -895,6 +907,10 @@ export const UpdateSiteResponse = zod.object({
   "phone": zod.string().nullish(),
   "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
   "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
+  "openingChecksDue": zod.string().nullish().describe('When the site\'s opening checks are due (\"HH:MM\" on the business\'s clock). Null means 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('When the site\'s closing checks are due (\"HH:MM\" on the business\'s clock). Null means 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out (\"HH:MM\"). Null means 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out (\"HH:MM\"). Null means 21:00.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -908,6 +924,40 @@ export const DeleteSiteParams = zod.object({
 })
 
 export const DeleteSiteResponse = zod.void()
+
+
+/**
+ * Owners, consultants and Managers who can see the site. Times are "HH:MM" on the business's clock; null or blank uses the default (due 06:00 opening, 18:00 closing; reminders 11:00 and 21:00). A field left out keeps its time.
+ * @summary Set when the site's opening and closing checks are due, and when their reminders go out
+ */
+export const SetSiteChecklistDueTimesParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SetSiteChecklistDueTimesBody = zod.object({
+  "openingChecksDue": zod.string().nullish().describe('\"HH:MM\"; null or blank for the default 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('\"HH:MM\"; null or blank for the default 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out, \"HH:MM\"; null or blank for the default 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out, \"HH:MM\"; null or blank for the default 21:00.')
+})
+
+export const SetSiteChecklistDueTimesResponse = zod.object({
+  "departmentId": zod.number().nullish(),
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "name": zod.string(),
+  "responsiblePerson": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
+  "openingChecksDue": zod.string().nullish().describe('When the site\'s opening checks are due (\"HH:MM\" on the business\'s clock). Null means 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('When the site\'s closing checks are due (\"HH:MM\" on the business\'s clock). Null means 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out (\"HH:MM\"). Null means 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out (\"HH:MM\"). Null means 21:00.'),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
 
 
 /**

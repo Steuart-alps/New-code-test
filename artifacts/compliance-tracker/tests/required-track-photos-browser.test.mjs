@@ -382,6 +382,8 @@ async function routeApi(route, url) {
   // GreenTrack's "Contractor checks" box (components/track-contractor-checks.tsx):
   // no contractor visits or compliance checks in this business.
   if (pathname === "/api/contractor-visits" && method === "GET") return jsonResponse(route, { types: [], visits: [] });
+  // The service form lists contractors for a contractor's service; none here.
+  if (pathname === "/api/contractors" && method === "GET") return jsonResponse(route, []);
   if (pathname === "/api/compliance-items" && method === "GET") return jsonResponse(route, []);
 
   if (pathname === "/api/managed-by" && method === "GET") {
@@ -644,7 +646,11 @@ try {
   await openGreenTab("Services", "Log service");
   const serviceDialog = page.getByRole("dialog");
   await selectMachine(serviceDialog);
+  // An in-house service: who did it, the checklist and safe to use.
+  await serviceDialog.getByRole("radio", { name: "In house (our own team)" }).click();
   await enterCustomPerformer(serviceDialog, "Created service evidence record");
+  await serviceDialog.getByRole("button", { name: "Mark the rest done" }).click();
+  await serviceDialog.getByRole("radio", { name: "Yes, safe to use" }).click();
   await completeRequiredCreate({
     entityType: "green_service",
     path: "/api/green-track/service-records",
@@ -783,7 +789,10 @@ try {
   const optionalDialog = page.getByRole("dialog");
   await optionalDialog.waitFor({ state: "visible" });
   await selectMachine(optionalDialog);
+  await optionalDialog.getByRole("radio", { name: "In house (our own team)" }).click();
   await enterCustomPerformer(optionalDialog, "Created optional service record");
+  await optionalDialog.getByRole("button", { name: "Mark the rest done" }).click();
+  await optionalDialog.getByRole("radio", { name: "Yes, safe to use" }).click();
   assert.equal(await optionalDialog.getByRole("group", { name: "Required photo evidence" }).count(), 0,
     "a type with no required-photo row remains optional");
   assert.equal(await optionalDialog.getByRole("button", { name: "Log service", exact: true }).isDisabled(), false);

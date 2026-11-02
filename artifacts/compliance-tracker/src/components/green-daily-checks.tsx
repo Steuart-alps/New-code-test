@@ -3,6 +3,7 @@ import { format } from "date-fns";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useChecklistSite } from "@/hooks/use-checklist-site";
 import { ChecklistSiteSelect } from "@/components/checklist-site-select";
+import { ChecklistDueTime } from "@/components/checklist-due-time";
 import { createChecklistDraftStore } from "@/lib/checklist-carry";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
@@ -324,6 +325,15 @@ export function GreenDailyChecksTab({ initialSiteId, onCheckMachine }: {
       </div>
 
       {selectedSiteId != null && <TeamPicker siteId={selectedSiteId} />}
+
+      {!loading && siteReady && (
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+          <ChecklistDueTime site={sites.find((s) => s.id === selectedSiteId)} period="opening" date={date}
+            done={Boolean(getChecklist("greenkeeping_opening")?.submittedAt)} />
+          <ChecklistDueTime site={sites.find((s) => s.id === selectedSiteId)} period="closing" date={date}
+            done={Boolean(getChecklist("greenkeeping_closing")?.submittedAt)} />
+        </div>
+      )}
 
       {loading || !siteReady ? (
         <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
