@@ -460,7 +460,18 @@ automatic read. This uses the same AI set-up as items 2, 5 and 11.
 Fill in an ingredient's allergens and price from the supplier (for example
 Brakes, Bidfood or Booker) instead of typing them. A person checks the details
 before they are saved, and allergens are never taken on trust. (Asked for
-again on 30 October as "link to suppliers", next to the allergen records.)
+again on 30 October and 2 November as "link to suppliers", next to the
+allergen records.)
+
+**Already built (change #271, 30 October):** a kitchen can import a
+supplier's allergen information from a spreadsheet, or from a photo or PDF of
+a spec sheet read by AI, and a person confirms it before it is saved.
+
+**Still to do after launch, the "link to suppliers":** connect a kitchen's
+account with a supplier so allergens and prices come in and stay up to date
+without uploading a file each time. When a supplier changes a product's
+allergens, ComplyTrack would flag every dish that uses it for a manager to
+check, rather than changing the allergen chart on its own.
 
 How we get the details matters. Some supplier websites forbid automatic
 copying ("scraping") in their terms, and their pages change without warning,
