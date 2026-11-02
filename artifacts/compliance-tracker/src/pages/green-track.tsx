@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { takeLinkParams } from "@/lib/deep-link";
 import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { PassAllButton } from "@/components/pass-all-button";
 import { AppLayout } from "@/components/layout";
 import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { Button } from "@/components/ui/button";
@@ -1074,6 +1075,15 @@ function PreUseDialog({
                   onChange={v => setForm(f => ({ ...f, [ci.key]: v }))}
                 />
               ))}
+            </div>
+            {/* An untouched cell also means n/a here, so Pass all is offered only
+                before anything is answered: it can't overwrite a chosen n/a. */}
+            <div className="mt-2">
+              <PassAllButton
+                remaining={CHECK_ITEMS.every(ci => (form as any)[ci.key] === null) ? CHECK_ITEMS.length : 0}
+                total={CHECK_ITEMS.length}
+                onPassAll={() => setForm(f => ({ ...f, ...Object.fromEntries(CHECK_ITEMS.map(ci => [ci.key, true])) }))}
+              />
             </div>
           </div>
 

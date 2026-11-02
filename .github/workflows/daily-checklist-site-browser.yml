@@ -12,6 +12,11 @@ on:
       - "artifacts/compliance-tracker/src/lib/checklist-carry.ts"
       - "artifacts/compliance-tracker/src/components/checklist-site-select.tsx"
       - "artifacts/compliance-tracker/src/components/checklist-item-row.tsx"
+      - "artifacts/compliance-tracker/src/components/pass-all-button.tsx"
+      - "artifacts/compliance-tracker/src/lib/checklist-results.ts"
+      - "artifacts/compliance-tracker/tests/browser/daily-checklist.*"
+      - "artifacts/compliance-tracker/tests/browser/daily-checklist-auth.stub.ts"
+      - "artifacts/compliance-tracker/tests/daily-checklist-card-browser.test.mjs"
       - "artifacts/compliance-tracker/tests/browser/daily-checklist-site*"
       - "artifacts/compliance-tracker/tests/daily-checklist-site-browser.test.mjs"
       - "artifacts/compliance-tracker/package.json"
@@ -30,6 +35,11 @@ on:
       - "artifacts/compliance-tracker/src/lib/checklist-carry.ts"
       - "artifacts/compliance-tracker/src/components/checklist-site-select.tsx"
       - "artifacts/compliance-tracker/src/components/checklist-item-row.tsx"
+      - "artifacts/compliance-tracker/src/components/pass-all-button.tsx"
+      - "artifacts/compliance-tracker/src/lib/checklist-results.ts"
+      - "artifacts/compliance-tracker/tests/browser/daily-checklist.*"
+      - "artifacts/compliance-tracker/tests/browser/daily-checklist-auth.stub.ts"
+      - "artifacts/compliance-tracker/tests/daily-checklist-card-browser.test.mjs"
       - "artifacts/compliance-tracker/tests/browser/daily-checklist-site*"
       - "artifacts/compliance-tracker/tests/daily-checklist-site-browser.test.mjs"
       - "artifacts/compliance-tracker/package.json"
@@ -65,3 +75,6 @@ jobs:
 
       - name: Run daily checklist site picker checks
         run: pnpm --filter @workspace/compliance-tracker run test:daily-checklist-site-browser
+
+      - name: Run daily checklist card checks (answers, Pass all, saving)
+        run: pnpm --filter @workspace/compliance-tracker run test:daily-checklist-card-browser
