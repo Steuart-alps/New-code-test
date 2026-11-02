@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { OverrideReasonDialog } from "@/components/override-reason-dialog";
 import { RecordSignatureDialog } from "@/components/record-signature-dialog";
+import { CorrectiveActionDialog } from "@/components/corrective-action-dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/context/auth-context";
 
@@ -321,6 +322,7 @@ function App() {
             </Suspense>
           </WouterRouter>
           <OverrideReasonDialog />
+          <CorrectiveActionDialog />
           <RecordSignatureDialog />
           <Toaster />
         </AuthProvider>

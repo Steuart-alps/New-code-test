@@ -430,7 +430,7 @@ async function editInspection(page, clientId) {
     assert.ok(!options.some(label => label.startsWith(typeLabel(value))), `${clientId}: "${value}" is not offered when editing`);
   }
   await chooseType(page, retiredLabel);
-  await dialog.getByPlaceholder("What was observed during the inspection").fill("Two closers need adjusting");
+  await dialog.getByLabel("Findings", { exact: true }).fill("Two closers need adjusting");
   let write = await expectWrite(() => dialog.getByRole("button", { name: "Save changes" }).click(), "PUT", path);
   assert.equal(write.status, 200, `${clientId}: an unrelated edit is accepted (${write.error})`);
   assert.equal(write.body.inspectionType, record.inspectionType, `${clientId}: the disabled type is saved unchanged`);

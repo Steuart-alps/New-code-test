@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
@@ -174,7 +175,7 @@ router.put("/equipment/:id", requireAuth, denyViewers, requireManager, async (re
   const departmentId = getActiveDepartmentId(req);
   const target = await findLabelTarget(clientId, departmentId, "equipment", String(id));
   if (!target) return res.status(404).json({ error: "Not found" });
-  const parsed = itemBody.partial().safeParse(req.body);
+  const parsed = partialUpdate(itemBody).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
   if (data.siteId !== undefined) {

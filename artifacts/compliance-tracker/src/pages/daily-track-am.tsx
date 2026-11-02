@@ -54,7 +54,8 @@ const KITCHEN_OPENING_ITEMS: ChecklistItem[] = [
   // 3. Temperature Checks
   { section: "Temperature Checks", label: "Walk-in fridge temperature checked (target 0–5°C)", checked: false },
   { label: "Under-counter fridge temperature checked (target 0–5°C)", checked: false },
-  { label: "Freezer temperature checked (target -18°C or below)", checked: false },
+  { label: "Standalone fridges temperature checked (target 0–5°C)", checked: false },
+  { label: "Freezers temperature checked (target -18°C or below)", checked: false },
   { label: "Display fridge temperature checked (target 0–5°C, if applicable)", checked: false },
   { label: "Any temperature outside safe limits reported", checked: false },
   // 4. Equipment Checks

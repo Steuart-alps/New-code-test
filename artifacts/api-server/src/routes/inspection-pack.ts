@@ -29,7 +29,7 @@ router.get("/reports/inspection-pack", requireAuth, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
   const parsed = querySchema.safeParse(req.query);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Invalid params" });
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid params" });
   const { from, to, siteId } = parsed.data;
   if (from > to) return res.status(400).json({ error: "The start date must not be after the end date" });
   if (to >= addCalendarMonths(from, 12)) {

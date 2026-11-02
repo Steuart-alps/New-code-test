@@ -200,3 +200,27 @@ export function requestKitchenDiaryScopeChange(
   if (currentScope === nextScope) return "ignore";
   return dirty || saving ? "confirm" : "switch";
 }
+
+// ── Lines ready to fill ───────────────────────────────────────────────────────
+// Cooking, cooling, reheating, hot holding and sous vide each open with a few
+// empty lines, so staff type straight in rather than pressing "Add line"
+// first. Empty lines nobody filled in are not saved.
+
+/** How many lines each cooking-type section shows ready to fill. */
+export const KITCHEN_READY_LINES = 3;
+
+/** True when a line has nothing typed in it at all. */
+export function isBlankKitchenLine(row: object): boolean {
+  return Object.values(row).every((value) => value === undefined || value === null || String(value).trim() === "");
+}
+
+/** The rows topped up with empty lines to at least `count`. */
+export function withReadyLines<T>(rows: T[], blank: () => T, count = KITCHEN_READY_LINES): T[] {
+  return rows.length >= count ? rows : [...rows, ...Array.from({ length: count - rows.length }, blank)];
+}
+
+/** The rows to save: empty lines added since the last save are left out.
+ *  Lines the server already holds keep their place, even if cleared. */
+export function withoutUnsavedBlankLines<T extends object>(rows: T[], savedCount: number): T[] {
+  return rows.filter((row, index) => index < savedCount || !isBlankKitchenLine(row));
+}

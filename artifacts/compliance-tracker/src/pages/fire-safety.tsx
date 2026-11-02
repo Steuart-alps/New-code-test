@@ -98,6 +98,18 @@ const CHECK_TYPE_LABELS: Record<AnyCheckType, string> = {
   night_walk:       "Night fire walk (night porter, 22:00 / 02:00 / 06:00)",
 };
 
+/** Location examples that fit each check, so a drill isn't shown a door example. */
+const LOCATION_PLACEHOLDER: Partial<Record<AnyCheckType, string>> = {
+  alarm:                   "e.g. CP3, first floor fire exit",
+  emergency_lights:        "e.g. Ground floor corridor and stairwell",
+  emergency_lights_annual: "e.g. Whole building, all fittings",
+  extinguishers:           "e.g. Kitchen, CO₂ and wet chemical",
+  extinguisher_service:    "e.g. Whole building, 14 extinguishers",
+  fire_doors:              "e.g. Kitchen to restaurant door, ground floor",
+  fire_drill:              "e.g. Assembly point, front car park",
+  alarm_service:           "e.g. Main panel, reception",
+};
+
 /** Walks that tick each of the site's escape routes. */
 const ROUTE_WALK_TYPES = new Set<AnyCheckType>(["fire_walk", "night_walk"]);
 
@@ -1378,7 +1390,7 @@ function RecordCheckDialog({
           {checkType !== "fire_walk" && checkType !== "night_walk" && checkType !== "alarm_panel" && checkType !== "alarm" && (
             <div className="space-y-1.5">
               <Label>Location <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Input value={location} onChange={e => setLocation(e.target.value)} placeholder="e.g. Ground floor near kitchen" className="rounded-sm" />
+              <Input value={location} onChange={e => setLocation(e.target.value)} placeholder={LOCATION_PLACEHOLDER[checkType] ?? "e.g. Ground floor"} className="rounded-sm" />
             </div>
           )}
 
@@ -1660,7 +1672,8 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
               {((!isAlarm && !isNightWalk) || check.location) && (
                 <div className="space-y-1.5">
                   <Label>{isAlarm ? "Location / Call Point" : "Location"}</Label>
-                  <Input value={location} onChange={e => setLocation(e.target.value)} className="rounded-sm" />
+                  <Input value={location} onChange={e => setLocation(e.target.value)} className="rounded-sm"
+                    placeholder={LOCATION_PLACEHOLDER[checkType]} />
                 </div>
               )}
             </>

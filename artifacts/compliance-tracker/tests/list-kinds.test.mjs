@@ -11,6 +11,8 @@ assert.equal(guessListKind(["Appliance name", "Asset tag", "Appliance type", "Si
 assert.equal(guessListKind(["Room number", "Room name", "Floor"], "Book1.xlsx", all), "room-track-rooms");
 assert.equal(guessListKind(["Call point", "Location"], "Book1.xlsx", all), "fire-call-points");
 assert.equal(guessListKind(["name", "type", "make", "model", "serial_no", "fleet_no"], "Book1.xlsx", all), "greentrack-equipment");
+assert.equal(guessListKind(["Outlet or tank", "Type", "Location", "Site"], "Book1.xlsx", all), "legionella-outlets", "the LegionellaTrack template");
+assert.equal(guessListKind(["Sentinel outlet", "Hot/Cold", "Location"], "Book1.xlsx", all), "legionella-outlets");
 assert.equal(guessListKind(["Name", "Email"], "Book1.xlsx", all), null, "headings every list shares don't decide it");
 assert.equal(guessListKind(["Name", "Email"], "contractors.xlsx", all), null, "a file name alone isn't enough for a spreadsheet");
 assert.equal(guessListKind(["Name", "Email", "Department"], "contractors.xlsx", all), "staff-roster", "a heading outweighs the file name");

@@ -10,7 +10,8 @@
     "./kitchen-weekly": "./src/kitchen-weekly.ts",
     "./nsts-sprayer-tests": "./src/nsts-sprayer-tests.ts",
     "./error-report-scrub": "./src/error-report-scrub.ts",
-    "./reminder-timings": "./src/reminder-timings.ts"
+    "./reminder-timings": "./src/reminder-timings.ts",
+    "./legionella-condition": "./src/legionella-condition.ts"
   },
   "scripts": {
     "test:kitchen-temperature": "node tests/kitchen-temperature.mjs",
@@ -18,7 +19,8 @@
     "test:kitchen-temperature-guidance": "node tests/kitchen-temperature-guidance.mjs",
     "test:kitchen-weekly": "node tests/kitchen-weekly.mjs",
     "test:nsts-sprayer-tests": "node tests/nsts-sprayer-tests.mjs",
-    "test:error-report-scrub": "node tests/error-report-scrub.mjs"
+    "test:error-report-scrub": "node tests/error-report-scrub.mjs",
+    "test:legionella-condition": "node tests/legionella-condition.mjs"
   },
   "dependencies": {
     "zod": "catalog:"
