@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { Link } from "wouter";
 import { takeLinkParams } from "@/lib/deep-link";
 import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -60,6 +61,7 @@ import { GreenDailyChecksTab } from "@/components/green-daily-checks";
 import { sortByLabel, sortedEntries } from "@/lib/sort-options";
 import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import { RecordSignedBy } from "@/components/record-signature";
+import { GREEN_SERVICE_CHECKLIST, type GreenServiceChecklistLine, type GreenServiceResult } from "@workspace/api-client-react";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -337,6 +339,14 @@ interface ServiceRecord {
   servicedByRosterId: number | null;
   costPence: number | null;
   notes: string | null;
+  /** Empty on services logged before October 2026. */
+  doneBy: "in_house" | "contractor" | null;
+  contractorId: number | null;
+  contractorName: string | null;
+  checklist: GreenServiceChecklistLine[] | null;
+  safeToUse: boolean | null;
+  /** Defects raised from problems found on the service. */
+  defectsRaised: number;
 }
 
 interface Defect {
@@ -1103,8 +1113,26 @@ function PreUseDialog({
 
 // ─── Service record dialog ────────────────────────────────────────────────────
 
+const SERVICE_RESULT_OPTIONS: { value: GreenServiceResult; label: string; on: string }[] = [
+  { value: "done", label: "Done", on: "bg-emerald-600 text-white border-emerald-600" },
+  { value: "na", label: "N/A", on: "bg-slate-600 text-white border-slate-600" },
+  { value: "problem", label: "Problem", on: "bg-rose-600 text-white border-rose-600" },
+];
+
+type ChecklistAnswers = Record<string, { result: GreenServiceResult | ""; note: string }>;
+
+const blankChecklist = (): ChecklistAnswers =>
+  Object.fromEntries(GREEN_SERVICE_CHECKLIST.map(item => [item.key, { result: "" as const, note: "" }]));
+
+interface ServiceContractor { id: number; name: string; company?: string | null; trades?: string[] | null }
+interface ServiceVisit { visitKey: string; siteId: number; contractorId: number | null; notNeeded?: boolean }
+
+/** Contractors page line for machine servicing (lib/contractorVisits.ts). */
+const MACHINE_SERVICE_VISIT = "green:service";
+const MACHINE_SERVICE_TRADES = ["grounds_machinery", "equipment"];
+
 function ServiceDialog({
-  open, onClose, record, machines, onSaved, presetMachineId,
+  open, onClose, record, machines, onSaved, presetMachineId, presetDoneBy,
 }: {
   open: boolean; onClose: () => void;
   record?: ServiceRecord | null;
@@ -1112,8 +1140,11 @@ function ServiceDialog({
   onSaved: () => void;
   /** A new record for this machine (opened from a scanned QR label). */
   presetMachineId?: string;
+  /** A new record opened from "Log an in-house service". */
+  presetDoneBy?: "in_house";
 }) {
   const { toast } = useToast();
+  const { activeClientId } = useAuth();
   const apiFetch = useGreenTrackApi();
   const photoEvidence = useNewRecordPhotoEvidence("green_service", open && !record);
   const today = new Date().toISOString().split("T")[0];
@@ -1121,58 +1152,150 @@ function ServiceDialog({
     machineId: "", serviceDate: today, serviceType: "scheduled",
     hoursAtService: "", nextServiceHours: "", nextServiceDate: "",
     workPerformed: "", servicedBy: "", servicedByRosterId: null, costPounds: "", notes: "",
+    doneBy: "" as "" | "in_house" | "contractor", contractorId: "", safeToUse: "" as "" | "yes" | "no",
   };
   const [form, setForm] = useState({ ...blank, servicedByRosterId: null as number | null });
+  const [checklist, setChecklist] = useState<ChecklistAnswers>(blankChecklist);
   const [saving, setSaving] = useState(false);
+  // Has the person chosen who did it (so a machine change doesn't override them)?
+  const doneByChosen = useRef(false);
   const photoEvidenceBlocked = photoEvidence.enabled && (
     !photoEvidence.ready || photoEvidence.loading || !!photoEvidence.error || photoEvidence.uploading ||
     (photoEvidence.required && photoEvidence.uploadIds.length < photoEvidence.minimum)
   );
 
+  const { data: contractors = [] } = useQuery({
+    queryKey: ["contractors", activeClientId],
+    queryFn: () => apiFetch<ServiceContractor[]>("/contractors"),
+    enabled: open && !!activeClientId,
+  });
+  const { data: visitData } = useQuery({
+    queryKey: ["contractor-visits", activeClientId],
+    queryFn: () => apiFetch<{ visits: ServiceVisit[] }>("/contractor-visits"),
+    enabled: open && !!activeClientId,
+  });
+
+  // A new service starts as the Contractors page says machine servicing is
+  // done at the machine's site: by the chosen contractor, or in house when
+  // it is marked "No contractor needed".
+  const suggestedFor = (machineId: string): { doneBy: "" | "in_house" | "contractor"; contractorId: string } => {
+    const siteId = machines.find(m => String(m.id) === machineId)?.siteId;
+    const lines = (visitData?.visits ?? []).filter(v => v.visitKey === MACHINE_SERVICE_VISIT && (siteId == null || v.siteId === siteId));
+    const withContractor = lines.find(v => v.contractorId != null);
+    if (withContractor) return { doneBy: "contractor", contractorId: String(withContractor.contractorId) };
+    if (lines.length > 0 && lines.every(v => v.notNeeded)) return { doneBy: "in_house", contractorId: "" };
+    return { doneBy: "", contractorId: "" };
+  };
+
   const reset = () => {
     photoEvidence.reset();
-    setForm(record ? {
-      machineId: String(record.machineId), serviceDate: record.serviceDate,
-      serviceType: record.serviceType, hoursAtService: record.hoursAtService ? String(record.hoursAtService) : "",
-      nextServiceHours: record.nextServiceHours ? String(record.nextServiceHours) : "",
-      nextServiceDate: record.nextServiceDate ?? "", workPerformed: record.workPerformed ?? "",
-      servicedBy: record.servicedBy ?? "", servicedByRosterId: (record as any).servicedByRosterId ?? (record as any).serviced_by_roster_id ?? null,
-      costPounds: record.costPence ? (record.costPence / 100).toFixed(2) : "",
-      notes: record.notes ?? "",
-    } : { ...blank, machineId: presetMachineId ?? "" });
+    doneByChosen.current = !!presetDoneBy;
+    if (record) {
+      setForm({
+        machineId: String(record.machineId), serviceDate: record.serviceDate,
+        serviceType: record.serviceType, hoursAtService: record.hoursAtService ? String(record.hoursAtService) : "",
+        nextServiceHours: record.nextServiceHours ? String(record.nextServiceHours) : "",
+        nextServiceDate: record.nextServiceDate ?? "", workPerformed: record.workPerformed ?? "",
+        servicedBy: record.servicedBy ?? "", servicedByRosterId: (record as any).servicedByRosterId ?? (record as any).serviced_by_roster_id ?? null,
+        costPounds: record.costPence ? (record.costPence / 100).toFixed(2) : "",
+        notes: record.notes ?? "",
+        doneBy: record.doneBy ?? "", contractorId: record.contractorId != null ? String(record.contractorId) : "",
+        safeToUse: record.safeToUse == null ? "" : record.safeToUse ? "yes" : "no",
+      });
+      const answers = blankChecklist();
+      for (const line of record.checklist ?? []) {
+        if (answers[line.key]) answers[line.key] = { result: line.result, note: line.note ?? "" };
+      }
+      setChecklist(answers);
+      return;
+    }
+    const machineId = presetMachineId ?? "";
+    const suggested = presetDoneBy ? { doneBy: presetDoneBy, contractorId: "" } : suggestedFor(machineId);
+    setForm({ ...blank, machineId, ...suggested });
+    setChecklist(blankChecklist());
   };
+
+  const chooseMachine = (machineId: string) => setForm(f => ({
+    ...f, machineId, ...(record || doneByChosen.current ? {} : suggestedFor(machineId)),
+  }));
+
+  const chooseDoneBy = (doneBy: "in_house" | "contractor") => {
+    doneByChosen.current = true;
+    // The staff picker is for in-house work; a contractor's engineer is typed.
+    setForm(f => f.doneBy === doneBy ? f : { ...f, doneBy, servicedBy: "", servicedByRosterId: null });
+  };
+
+  const setAnswer = (key: string, change: Partial<ChecklistAnswers[string]>) =>
+    setChecklist(c => ({ ...c, [key]: { ...c[key], ...change } }));
+
+  const inHouse = form.doneBy === "in_house";
+  const unanswered = GREEN_SERVICE_CHECKLIST.filter(item => !checklist[item.key]?.result);
+  const problems = GREEN_SERVICE_CHECKLIST.filter(item => checklist[item.key]?.result === "problem");
+  const sortedContractors = useMemo(() => {
+    const matches = (c: ServiceContractor) => !!c.trades?.some(t => MACHINE_SERVICE_TRADES.includes(t));
+    const byName = sortByLabel(contractors, c => c.name);
+    return [...byName.filter(matches), ...byName.filter(c => !matches(c))];
+  }, [contractors]);
 
   const handleSave = async () => {
     if (!record && photoEvidenceBlocked) return;
     if (!form.machineId) { toast({ title: "Select a machine", variant: "destructive" }); return; }
+    if (!record && !form.doneBy) { toast({ title: "Say who did the service", description: "Choose in house or contractor.", variant: "destructive" }); return; }
+    if (inHouse) {
+      if (!form.servicedBy.trim()) { toast({ title: "Say who did the service", variant: "destructive" }); return; }
+      if (unanswered.length) { toast({ title: "Answer every line of the service checklist", description: unanswered[0].label, variant: "destructive" }); return; }
+      const noNote = problems.find(item => !checklist[item.key].note.trim());
+      if (noNote) { toast({ title: "Say what the problem was", description: noNote.label, variant: "destructive" }); return; }
+      if (!form.safeToUse) { toast({ title: "Is the machine safe to use?", description: "Choose yes or no.", variant: "destructive" }); return; }
+    }
     setSaving(true);
     try {
-      const body = {
+      const body: Record<string, unknown> = {
         machineId: parseInt(form.machineId, 10), serviceDate: form.serviceDate,
         serviceType: form.serviceType,
         hoursAtService: form.hoursAtService ? parseInt(form.hoursAtService, 10) : null,
         nextServiceHours: form.nextServiceHours ? parseInt(form.nextServiceHours, 10) : null,
         nextServiceDate: form.nextServiceDate || null,
         workPerformed: form.workPerformed.trim() || null,
-        servicedBy: form.servicedBy.trim() || null, servicedByRosterId: form.servicedByRosterId,
+        servicedBy: form.servicedBy.trim() || null, servicedByRosterId: form.doneBy === "contractor" ? null : form.servicedByRosterId,
         costPence: form.costPounds ? Math.round(parseFloat(form.costPounds) * 100) : null,
         notes: form.notes.trim() || null,
       };
+      if (form.doneBy) {
+        body.doneBy = form.doneBy;
+        body.contractorId = form.doneBy === "contractor" && form.contractorId ? Number(form.contractorId) : null;
+        body.safeToUse = form.safeToUse ? form.safeToUse === "yes" : null;
+        body.checklist = inHouse
+          ? GREEN_SERVICE_CHECKLIST.map(item => ({ key: item.key, result: checklist[item.key].result, note: checklist[item.key].note.trim() || null }))
+          : null;
+      }
+      let raised = 0;
       if (record) {
         await apiFetch(`/green-track/service-records/${record.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/green-track/service-records", {
+        const created = await apiFetch<{ defects_raised?: number }>("/green-track/service-records", {
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
+        raised = created?.defects_raised ?? 0;
         photoEvidence.consume();
       }
-      toast({ title: record ? "Service record updated" : "Service record logged" });
+      toast({
+        title: record ? "Service record updated" : "Service record logged",
+        description: raised > 0
+          ? `${raised} defect${raised === 1 ? "" : "s"} added to the Defects tab${form.safeToUse === "no" ? " and the machine is out of service until fixed" : ""}.`
+          : undefined,
+      });
       onSaved(); onClose();
     } catch (err: any) {
       toast({ title: "Failed to save", description: err.message, variant: "destructive" });
     } finally { setSaving(false); }
   };
+
+  const choiceButton = (active: boolean, activeClass: string) => cn(
+    "rounded-sm border px-3 py-1.5 text-sm font-medium transition-colors",
+    active ? activeClass : "border-border text-muted-foreground hover:text-foreground",
+  );
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
@@ -1183,7 +1306,7 @@ function ServiceDialog({
         <div className="space-y-4 py-1 max-h-[70vh] overflow-y-auto pr-1">
           <div>
             <Label>Machine *</Label>
-            <Select value={form.machineId || "_none"} onValueChange={v => setForm(f => ({ ...f, machineId: v === "_none" ? "" : v }))}>
+            <Select value={form.machineId || "_none"} onValueChange={v => chooseMachine(v === "_none" ? "" : v)}>
               <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select machine" /></SelectTrigger>
               <SelectContent>
                 {sortByLabel(machines, m => m.name).map(m => (
@@ -1191,6 +1314,17 @@ function ServiceDialog({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+          <div>
+            <Label id="service-done-by">Who did the service?{!record && " *"}</Label>
+            <div role="radiogroup" aria-labelledby="service-done-by" className="mt-1 flex flex-wrap gap-2">
+              <button type="button" role="radio" aria-checked={form.doneBy === "in_house"} data-testid="service-done-in-house"
+                className={choiceButton(form.doneBy === "in_house", "bg-primary text-primary-foreground border-primary")}
+                onClick={() => chooseDoneBy("in_house")}>In house (our own team)</button>
+              <button type="button" role="radio" aria-checked={form.doneBy === "contractor"} data-testid="service-done-contractor"
+                className={choiceButton(form.doneBy === "contractor", "bg-primary text-primary-foreground border-primary")}
+                onClick={() => chooseDoneBy("contractor")}>Contractor</button>
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -1224,18 +1358,97 @@ function ServiceDialog({
               <Input type="date" className="mt-1 rounded-sm" value={form.nextServiceDate}
                 onChange={e => setForm(f => ({ ...f, nextServiceDate: e.target.value }))} />
             </div>
-            <div>
-              <Label>Serviced by <span className="text-muted-foreground text-xs">optional</span></Label>
-              <StaffPerformerSelect label="Serviced by" value={form.servicedBy}
-                onChange={v => setForm(f => ({ ...f, servicedBy: v }))}
-                onRosterIdChange={v => setForm(f => ({ ...f, servicedByRosterId: v }))} optional />
-            </div>
+            {form.doneBy === "contractor" ? (
+              <>
+                <div className="col-span-2">
+                  <Label>Contractor <span className="text-muted-foreground text-xs">optional</span></Label>
+                  <Select value={form.contractorId || "_none"} onValueChange={v => setForm(f => ({ ...f, contractorId: v === "_none" ? "" : v }))}>
+                    <SelectTrigger className="mt-1 rounded-sm" aria-label="Contractor"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_none">Not on the Contractors page</SelectItem>
+                      {sortedContractors.map(c => (
+                        <SelectItem key={c.id} value={String(c.id)}>{[c.name, c.company].filter(Boolean).join(", ")}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Engineer's name <span className="text-muted-foreground text-xs">optional</span></Label>
+                  <Input className="mt-1 rounded-sm" value={form.servicedBy}
+                    onChange={e => setForm(f => ({ ...f, servicedBy: e.target.value, servicedByRosterId: null }))} />
+                </div>
+              </>
+            ) : (
+              <div>
+                <Label>Serviced by {inHouse ? "*" : <span className="text-muted-foreground text-xs">optional</span>}</Label>
+                <StaffPerformerSelect label="Serviced by" value={form.servicedBy}
+                  onChange={v => setForm(f => ({ ...f, servicedBy: v }))}
+                  onRosterIdChange={v => setForm(f => ({ ...f, servicedByRosterId: v }))} optional={!inHouse} />
+              </div>
+            )}
             <div>
               <Label>Cost (£) <span className="text-muted-foreground text-xs">optional</span></Label>
               <Input type="number" step="0.01" min="0" className="mt-1 rounded-sm" value={form.costPounds}
                 onChange={e => setForm(f => ({ ...f, costPounds: e.target.value }))} placeholder="0.00" />
             </div>
           </div>
+          {inHouse && (
+            <fieldset className="space-y-2" data-testid="in-house-service-checklist">
+              <div className="flex items-center justify-between gap-2">
+                <legend className="text-sm font-medium">Service checklist *</legend>
+                <Button type="button" variant="ghost" size="sm" className="h-7 text-xs"
+                  onClick={() => setChecklist(c => Object.fromEntries(Object.entries(c).map(([k, v]) => [k, v.result ? v : { ...v, result: "done" as const }])))}>
+                  Mark the rest done
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Answer each line. Use N/A when it does not apply to this machine. Each problem becomes a defect in the Defects tab.
+              </p>
+              <ul className="divide-y divide-border rounded-sm border border-border">
+                {GREEN_SERVICE_CHECKLIST.map(item => {
+                  const answer = checklist[item.key];
+                  return (
+                    <li key={item.key} className="p-2 space-y-1.5">
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:justify-between">
+                        <span className="text-sm">{item.label}</span>
+                        <div role="radiogroup" aria-label={item.label} className="flex gap-1 flex-shrink-0">
+                          {SERVICE_RESULT_OPTIONS.map(option => (
+                            <button key={option.value} type="button" role="radio" aria-checked={answer.result === option.value}
+                              className={cn("rounded-sm border px-2 py-0.5 text-xs font-medium",
+                                answer.result === option.value ? option.on : "border-border text-muted-foreground hover:text-foreground")}
+                              onClick={() => setAnswer(item.key, { result: option.value })}>
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {answer.result === "problem" && (
+                        <Input className="h-8 rounded-sm text-sm" value={answer.note} aria-label={`What was wrong: ${item.label}`}
+                          placeholder="What was wrong, and what is needed?"
+                          onChange={e => setAnswer(item.key, { note: e.target.value })} />
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </fieldset>
+          )}
+          {inHouse && (
+            <div>
+              <Label id="service-safe-to-use">Is the machine safe to use? *</Label>
+              <div role="radiogroup" aria-labelledby="service-safe-to-use" className="mt-1 flex flex-wrap gap-2">
+                <button type="button" role="radio" aria-checked={form.safeToUse === "yes"}
+                  className={choiceButton(form.safeToUse === "yes", "bg-emerald-600 text-white border-emerald-600")}
+                  onClick={() => setForm(f => ({ ...f, safeToUse: "yes" }))}>Yes, safe to use</button>
+                <button type="button" role="radio" aria-checked={form.safeToUse === "no"}
+                  className={choiceButton(form.safeToUse === "no", "bg-rose-600 text-white border-rose-600")}
+                  onClick={() => setForm(f => ({ ...f, safeToUse: "no" }))}>No, take it out of service</button>
+              </div>
+              {form.safeToUse === "no" && !record && (
+                <p className="text-xs text-rose-700 mt-1">The machine is taken out of service until its defects are fixed in the Defects tab.</p>
+              )}
+            </div>
+          )}
           <div>
             <Label>Work performed <span className="text-muted-foreground text-xs">optional</span></Label>
             <Textarea className="mt-1 rounded-sm" value={form.workPerformed} rows={2}
@@ -1257,6 +1470,29 @@ function ServiceDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** An in-house service's checklist result, and what it raised. */
+function ServiceOutcome({ record }: { record: ServiceRecord }) {
+  const lines = record.checklist ?? [];
+  const problems = lines.filter(line => line.result === "problem");
+  if (!lines.length && record.safeToUse == null) return null;
+  return (
+    <div className="mt-1 space-y-0.5 text-[11px]" data-testid={`service-outcome-${record.id}`}>
+      {lines.length > 0 && (
+        <p className={problems.length ? "text-rose-700 font-medium" : "text-emerald-700"}>
+          {problems.length
+            ? `${problems.length} problem${problems.length === 1 ? "" : "s"} found`
+            : `Checklist: ${lines.filter(line => line.result === "done").length} done, ${lines.filter(line => line.result === "na").length} N/A`}
+          {record.defectsRaised > 0 && ` · ${record.defectsRaised} defect${record.defectsRaised === 1 ? "" : "s"} raised`}
+        </p>
+      )}
+      {record.safeToUse === false && <p className="text-rose-700 font-semibold">Not safe to use</p>}
+      {problems.map(line => (
+        <p key={line.key} className="text-muted-foreground" title={line.label}>{line.label}: {line.note}</p>
+      ))}
+    </div>
   );
 }
 
@@ -2119,6 +2355,7 @@ export default function GreenTrackPage() {
   const [editPreUse, setEditPreUse] = useState<PreUseCheck | null>(null);
   const [serviceDialog, setServiceDialog] = useState(false);
   const [editService, setEditService] = useState<ServiceRecord | null>(null);
+  const [serviceInHouse, setServiceInHouse] = useState(false);
   const [defectDialog, setDefectDialog] = useState(false);
   const [editDefect, setEditDefect] = useState<Defect | null>(null);
   const [puwerDialog, setPuwerDialog] = useState(false);
@@ -2748,6 +2985,25 @@ export default function GreenTrackPage() {
         {/* ── Services tab ──────────────────────────────────────────────── */}
         {activeTab === "services" && (
           <>
+            <div className="rounded-sm border border-border bg-muted/30 px-4 py-3 text-sm flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between"
+              data-testid="service-who-note">
+              <p className="text-muted-foreground">
+                Serviced by your own mechanic? Log it as <strong>in house</strong>: it has a full service checklist, and any problem
+                found becomes a defect. Serviced by a dealer or engineer? Choose them for machine servicing on the Contractors page so
+                they get a reminder before it is due.
+              </p>
+              <div className="flex flex-wrap gap-2 flex-shrink-0">
+                {canAdmin && (
+                  <Button size="sm" variant="outline" className="rounded-sm h-8"
+                    onClick={() => { setEditService(null); setServiceInHouse(true); setServiceDialog(true); }}>
+                    Log in-house service
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" className="rounded-sm h-8" asChild>
+                  <Link href="/contractors?visit=green%3Aservice">Machine servicing contractor →</Link>
+                </Button>
+              </div>
+            </div>
             {servicesLoading ? (
               <div className="py-10 text-center text-sm text-muted-foreground animate-pulse">Loading records…</div>
             ) : filteredServices.length === 0 ? (
@@ -2798,8 +3054,12 @@ export default function GreenTrackPage() {
                             )}>
                               {SERVICE_TYPE_LABELS[s.serviceType] ?? s.serviceType}
                             </Badge>
+                            <ServiceOutcome record={s} />
                           </td>
-                          <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{s.servicedBy ?? "—"}</td>
+                          <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
+                            {s.doneBy && <p className="text-[11px] font-semibold uppercase tracking-wide">{s.doneBy === "in_house" ? "In house" : "Contractor"}</p>}
+                            <p>{[s.doneBy === "contractor" ? s.contractorName : null, s.servicedBy].filter(Boolean).join(" · ") || "—"}</p>
+                          </td>
                           <td className="px-4 py-3 hidden md:table-cell">
                             {s.nextServiceDate ? (
                               <span className={cn("text-xs font-medium",
@@ -3154,8 +3414,8 @@ export default function GreenTrackPage() {
         presetMachineId={scanMachineId}
         check={editPreUse} machines={activeMachines} onSaved={invalidate} spoken={spoken} />
 
-      <ServiceDialog open={serviceDialog} onClose={() => { setServiceDialog(false); setEditService(null); setScanMachineId(undefined); }}
-        presetMachineId={scanMachineId}
+      <ServiceDialog open={serviceDialog} onClose={() => { setServiceDialog(false); setEditService(null); setScanMachineId(undefined); setServiceInHouse(false); }}
+        presetMachineId={scanMachineId} presetDoneBy={serviceInHouse ? "in_house" : undefined}
         record={editService} machines={machines} onSaved={invalidate} />
 
       <DefectDialog open={defectDialog} onClose={() => { setDefectDialog(false); setEditDefect(null); setScanMachineId(undefined); setSpoken(null); }}

@@ -45,6 +45,7 @@ export const TRADE_OPTIONS: readonly { value: string; label: string; group: Trad
   { value: "asbestos",                 label: "Asbestos", group: "Specialist services" },
   { value: "tree_surgeon_arborist",    label: "Tree Surgeon / Arborist", group: "Specialist services" },
   { value: "pool_spa_maintenance",     label: "Pool / Spa Maintenance", group: "Specialist services" },
+  { value: "grounds_machinery",        label: "Grounds Machinery / Greenkeeping Equipment", group: "Specialist services" },
   { value: "waste_collection",         label: "Waste Collection", group: "Specialist services" },
 ];
 

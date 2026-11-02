@@ -67,7 +67,7 @@ const CONTRACTOR_SERVICES: [track: string, service: string, trade: string][] = [
   ["LegionellaTrack", "Thermostatic mixing valve (TMV) service", "Plumbing"],
   ["PestTrack", "Routine pest control visit", "Pest Control"],
   ["PATtrack", "PAT testing visit", "PAT Testing"],
-  ["GreenTrack", "Machine servicing", "Equipment"],
+  ["GreenTrack", "Machine servicing (greenkeeping machinery)", "Grounds Machinery"],
   ["GreenTrack", "PUWER inspection", "LOLER PUWER Inspection"],
   ["GreenTrack", "LOLER thorough examination, 6-monthly (e.g. vehicle lift)", "LOLER PUWER Inspection"],
   ["GreenTrack", "LOLER thorough examination, annual (e.g. axle stands)", "LOLER PUWER Inspection"],
