@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { legionellaChecksTable, sitesTable, appSettingsTable, trackControlProfilesTable, auditEventsTable } from "@workspace/db/schema";
@@ -124,7 +125,7 @@ const legionellaProfileSchema = z.object({
   schemeReviewDate: blankAsNull(z.string().date().nullable().optional()),
   ukNation: blankAsNull(z.enum(["england", "scotland", "wales", "northern_ireland"]).nullable().optional()),
   frequencyDays: z.record(z.string(), z.number().int().min(1).max(3650)).optional(),
-  temperatureLimits: z.record(z.enum(CHECK_TYPES), z.object({
+  temperatureLimits: z.partialRecord(z.enum(CHECK_TYPES), z.object({
     min: z.number().finite().optional(), max: z.number().finite().optional(),
   }).refine(v => v.min == null || v.max == null || v.min <= v.max, "min must not exceed max")).optional(),
 }).strict();
@@ -165,7 +166,7 @@ const createSchema = z.object({
   findings: z.record(z.string(), z.string()).nullable().optional(),
 });
 
-const updateSchema = createSchema.partial().omit({ checkType: true });
+const updateSchema = partialUpdate(createSchema).omit({ checkType: true });
 // Creation only: the mobile outbox's device entry ID (see clientEntryReplay).
 const postSchema = createSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
@@ -495,7 +496,7 @@ const outletCreateSchema = z.object({
   sortOrder: z.number().int().optional(),
 });
 
-const outletUpdateSchema = outletCreateSchema.partial();
+const outletUpdateSchema = partialUpdate(outletCreateSchema);
 
 // GET /api/legionella/outlets
 router.get("/outlets", requireAuth, async (req, res) => {

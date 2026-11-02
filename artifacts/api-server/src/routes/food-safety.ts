@@ -21,7 +21,7 @@ import { getAccountToday } from "../lib/accountClock";
 const router = Router();
 
 // Rows are user-defined shapes, but must be flat objects of primitive values
-const rowSchema = z.record(z.union([z.string().max(500), z.number(), z.boolean(), z.null()]));
+const rowSchema = z.record(z.string(), z.union([z.string().max(500), z.number(), z.boolean(), z.null()]));
 const rowsSchema = z.array(rowSchema).max(200);
 const mobileEntryIdSchema = z.string().regex(/^[A-Za-z0-9_-]{12,100}$/).optional();
 type MobileReceipt = { entryId: string; userId: number; fingerprint: string };

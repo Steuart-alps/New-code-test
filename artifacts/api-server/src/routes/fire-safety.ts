@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { fireSafetyChecksTable, fireCallPointsTable, sitesTable, appSettingsTable, trackControlProfilesTable } from "@workspace/db/schema";
@@ -82,7 +83,7 @@ const createSchema = z.object({
   walkTime: z.enum(NIGHT_WALK_TIMES).nullable().optional(),
 });
 
-const updateSchema = createSchema.partial().omit({ checkType: true });
+const updateSchema = partialUpdate(createSchema).omit({ checkType: true });
 
 type FireDetails = Pick<FireSafetyCheck,
   "callPointId" | "callPoint" | "nightStaff" | "drillTime" | "evacuationSeconds"

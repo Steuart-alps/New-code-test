@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { bikesTable, bikeHireRecordsTable, bikeChecksTable, appSettingsTable, sitesTable } from "@workspace/db/schema";
@@ -148,7 +149,7 @@ router.put("/bikes/:id", requireAuth, denyViewers, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-  const parsed = bikeSchema.partial().safeParse(req.body);
+  const parsed = partialUpdate(bikeSchema).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
   const [existing] = await db.select({ id: bikesTable.id, type: bikesTable.type })
@@ -373,7 +374,7 @@ router.put("/hires/:id", requireAuth, denyViewers, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-  const updateSchema = hireSchema.omit({ bikeId: true, preHireCheck: true }).partial();
+  const updateSchema = partialUpdate(hireSchema.omit({ bikeId: true, preHireCheck: true }));
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   if (!(await siteBelongsToClient(parsed.data.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
@@ -574,7 +575,7 @@ router.put("/services/:id", requireAuth, denyViewers, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-  const parsed = serviceSchema.omit({ bikeId: true }).partial().safeParse(req.body);
+  const parsed = partialUpdate(serviceSchema.omit({ bikeId: true })).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const d = parsed.data;
 
