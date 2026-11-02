@@ -131,8 +131,9 @@ export function CertificateInboxCard() {
 
       {items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Nothing waiting. Contractors can email certificates to this address, or upload them from the link in their reminder
-          emails. Forward any you receive yourself, too: each one is read and waits here for you to check.
+          Nothing waiting. Contractors can reply to their reminder emails with the certificate attached, upload it from the
+          link in those emails, or email it to this address. Forward any you receive yourself, too: each one is read and waits
+          here for you to check. Replies without a certificate are passed on to you by email.
         </p>
       ) : (
         <ul className="divide-y rounded-lg border">

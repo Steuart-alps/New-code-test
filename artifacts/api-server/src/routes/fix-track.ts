@@ -42,7 +42,7 @@ async function markComplianceNotified(q: any, clientId: number): Promise<void> {
 }
 import { DEFAULT_FIX_TRACK_STALE_DAYS, parseFixTrackStaleDays } from "../lib/fixTrackAlertSettings";
 import { CERTIFICATE_FOLLOW_UP_EMAIL_TYPE } from "../lib/certificateFollowUp";
-import { CERTIFICATE_UPLOAD_PLACEHOLDER, certificateReplyToFor } from "../lib/certificateInbox";
+import { CERTIFICATE_UPLOAD_PLACEHOLDER, certificateReplyToForLink } from "../lib/certificateInbox";
 import { resolveAssigneeChange } from "../lib/assignees";
 import { filterName } from "../lib/contentFilter";
 
@@ -67,7 +67,10 @@ function hydrateQueuedContent(q: any) {
     : Array.isArray(value) ? value.map(replace)
     : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, replace(v)]))
     : value;
-  return { subject: replace(q.subject) as string, html: replace(q.body_html) as string, text: replace(q.body_text) as string | null, preview: replace(q.email_preview_json) };
+  return {
+    subject: replace(q.subject) as string, html: replace(q.body_html) as string, text: replace(q.body_text) as string | null,
+    preview: replace(q.email_preview_json), certUpload: payload.certUpload,
+  };
 }
 const DAMAGED_DRAFT_ERROR =
   "This draft's secure contractor links are damaged, so it cannot be previewed or sent. Cancel it and request a new contractor email.";
@@ -2031,9 +2034,10 @@ async function sendClaimedDraft(q: any, clientId: number) {
       icsFilename: row.ics_filename ?? undefined,
       clientId,
       idempotencyKey: row.idempotency_key,
-      // A certificate chase is answered with the certificate, so the reply
-      // goes to the business's certificate address when it has one.
-      replyTo: row.email_type === CERTIFICATE_FOLLOW_UP_EMAIL_TYPE ? await certificateReplyToFor(clientId) ?? undefined : undefined,
+      // An email with a certificate upload link (reminder, visit confirmation,
+      // certificate chase) is answered to ComplyTrack, tagged with its check:
+      // a certificate waits to be confirmed, anything else goes on to the business.
+      replyTo: hydrated.certUpload ? await certificateReplyToForLink(clientId, hydrated.certUpload) ?? undefined : undefined,
     });
     return hydrated;
   };

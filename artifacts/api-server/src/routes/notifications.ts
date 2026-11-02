@@ -8,7 +8,7 @@ import { TestEmailBody } from "@workspace/api-zod";
 import { randomUUID } from "crypto";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
 import { digestBearerToken, encryptTokenPayload, newBearerToken } from "../lib/bearerTokens";
-import { certificateReplyToFor, certificateUploadBlock, certificateUploadUrl, issueCertificateUploadLink } from "../lib/certificateInbox";
+import { certificateEmailConfigured, certificateUploadBlock, certificateUploadUrl, issueCertificateUploadLink } from "../lib/certificateInbox";
 import { lockReminderItem, reminderCycleOf, supersedeStaleReminderCycles } from "../lib/reminderCycles";
 import { logger } from "../lib/logger";
 import { syncContractorVisitChecks } from "../lib/contractorVisits";
@@ -86,7 +86,7 @@ async function sendReminderForItem(opts: {
   // email; the link's token rides in the encrypted payload like the booking one.
   const uploadToken = newBearerToken();
   const certificateRequest = certificateUploadBlock({
-    uploadUrl: certificateUploadUrl(), address: await certificateReplyToFor(item.clientId),
+    uploadUrl: certificateUploadUrl(), byReply: certificateEmailConfigured(),
   });
 
   const { html, text } = buildReminderEmail({
@@ -459,7 +459,7 @@ notificationsPublicRouter.post("/:token", async (req, res) => {
     itemTitle: item.title,
     visitDate: proposed,
     certificateRequest: certificateUploadBlock({
-      uploadUrl: certificateUploadUrl(), address: await certificateReplyToFor(item.clientId),
+      uploadUrl: certificateUploadUrl(), byReply: certificateEmailConfigured(),
     }),
   });
   // Consume the link and queue the confirmation atomically. The conditional

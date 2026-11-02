@@ -44,7 +44,13 @@ const picture = await sharp({ create: { width: 640, height: 480, channels: 3, ba
 const stored = new Map();
 const reads = [];
 const emails = new Map();
+const forwards = [];
+let forwardFails = false;
 const deps = {
+  async forward(message) {
+    if (forwardFails) throw new Error('Email provider unavailable');
+    forwards.push(message);
+  },
   async fetchEmail(id) {
     const email = emails.get(id);
     if (!email) throw new Error('Provider unavailable');
@@ -102,6 +108,8 @@ async function received(providerEmailId, details, to) {
   if (row?.status === 'pending') await inbox.processInboundEmail(row.id, deps);
   return row ? (await pool.query('SELECT * FROM certificate_inbox_emails WHERE id = $1', [row.id])).rows[0] : null;
 }
+const ownerEmail = async (clientId) => (await pool.query(
+  `SELECT lower(email) AS email FROM users WHERE client_id = $1 AND role = 'client_admin' ORDER BY id LIMIT 1`, [clientId])).rows[0].email;
 const itemsFor = async (emailRowId) => (await pool.query(
   'SELECT * FROM certificate_inbox_items WHERE email_id = $1 ORDER BY id', [emailRowId])).rows;
 const publicLink = async (token, init) => {
@@ -138,7 +146,7 @@ try {
   assert.match(reminderPayload.certUpload, /^[a-f0-9]{64}$/);
   assert.ok(reminder.body_text.includes(`/certificate-upload/${inbox.CERTIFICATE_UPLOAD_PLACEHOLDER}`), 'the stored draft holds the placeholder');
   assert.ok(!`${reminder.body_html}${reminder.body_text}`.includes(reminderPayload.certUpload), 'the raw upload token is never stored in the draft');
-  assert.ok(reminder.body_text.includes(address), 'the reminder names the certificate address');
+  assert.match(reminder.body_text, /Or reply to this email with it attached/, 'the reminder says a reply with the certificate works');
   assert.match(reminder.body_html, /Upload certificate/);
   const reminderLink = await inbox.findCertificateUploadLink(reminderPayload.certUpload);
   assert.equal(reminderLink?.itemId, eicr.id);
@@ -150,7 +158,12 @@ try {
   ok(await owner.request('POST', `/fix-track/contractor-email-queue/${reminder.id}/approve-and-send`));
   const [sentReminder] = await readOutbox();
   assert.ok(sentReminder.text.includes(`/certificate-upload/${reminderPayload.certUpload}`), 'the sent reminder carries the real link');
-  assert.ok(!sentReminder.replyTo, 'replies to a reminder go to the business, not the certificate address');
+  // Replies go to the certificate address, tagged with this email's check.
+  const [localPart] = address.split('@');
+  const tagged = (replyTo) => new RegExp(`^${localPart}\\+([a-z2-9]{10})@certs\\.test\\.local$`).exec(replyTo ?? '')?.[1];
+  const reminderTag = tagged(sentReminder.replyTo);
+  assert.ok(reminderTag, `a reply to the reminder comes to ComplyTrack, tagged: ${sentReminder.replyTo}`);
+  assert.equal((await pool.query('SELECT item_id FROM certificate_upload_links WHERE reply_ref = $1', [reminderTag])).rows[0]?.item_id, eicr.id);
 
   // The contractor books a visit: the confirmation has its own upload link.
   const bookResponse = await fetch(`${apiBase}/notifications/public/schedule/${reminderPayload.booked}`, {
@@ -162,12 +175,14 @@ try {
      WHERE entity_type = 'compliance' AND entity_id = $1 AND idempotency_key LIKE 'schedule-confirmation-%'`, [eicr.id])).rows;
   const confirmationToken = decryptTokenPayload(confirmation.encrypted_token_payload).certUpload;
   assert.ok(confirmation.body_text.includes(inbox.CERTIFICATE_UPLOAD_PLACEHOLDER));
-  assert.ok(confirmation.body_text.includes(address));
+  assert.match(confirmation.body_text, /Or reply to this email with it attached/);
   assert.equal((await inbox.findCertificateUploadLink(confirmationToken))?.itemId, eicr.id);
   await clearOutbox();
   ok(await owner.request('POST', `/fix-track/contractor-email-queue/${confirmation.id}/approve-and-send`));
   const [sentConfirmation] = await readOutbox();
   assert.ok(sentConfirmation.text.includes(`/certificate-upload/${confirmationToken}`), 'the sent confirmation carries the real link');
+  const confirmationTag = tagged(sentConfirmation.replyTo);
+  assert.ok(confirmationTag && confirmationTag !== reminderTag, 'each email has its own reply tag');
 
   // The visit happened two weeks ago with no certificate: the follow-up is
   // sent with the link, the address and Reply-To the certificate address.
@@ -176,7 +191,8 @@ try {
   await runCertificateFollowUpJob({ now: new Date(`${day(0)}T08:30:00Z`), send: async (email) => { followUps.push(email); } });
   const followUp = followUps.find((email) => email.subject.includes('EICR'));
   assert.ok(followUp, 'the certificate follow-up was sent');
-  assert.equal(followUp.replyTo, address, 'a reply to the certificate chase goes to the certificate address');
+  const followUpTag = tagged(followUp.replyTo);
+  assert.ok(followUpTag, `a reply to the certificate chase comes to ComplyTrack, tagged: ${followUp.replyTo}`);
   assert.match(followUp.text, /reply to this email with it attached/);
   const followUpToken = followUp.text.match(/certificate-upload\/([a-f0-9]{64})/)?.[1];
   assert.ok(followUpToken, 'the follow-up carries a working upload link');
@@ -272,11 +288,52 @@ try {
   assert.equal((await itemsFor(forged.id))[0].status, 'held');
   assert.equal(reads.length, readsBeforeHeld, 'held certificates are never read until accepted');
 
-  // A contractor's reply with no certificate is kept as a message.
+  // A reply to the chase from someone else at the contractor (another
+  // address, a free mail account) is trusted and matched to the chase's check.
+  const engineer = await received('email-engineer', {
+    from: 'Sam Engineer <sam.engineer@gmail.test>', subject: 'Re: Certificate needed: EICR', text: 'Cert attached', headers: null,
+    attachments: [attachment('att-engineer')],
+  }, followUp.replyTo);
+  const [engineerCert] = await itemsFor(engineer.id);
+  assert.equal(engineerCert.status, 'ready', 'a reply to the business\'s own email is trusted');
+  assert.equal(engineerCert.item_id, eicr.id, 'the reply is matched to the check its email was about');
+  assert.equal(engineerCert.contractor_id, sparky.id);
+  assert.equal(reads.at(-1).itemId, eicr.id, 'the reader is told which check the reply is about');
+  // ...but not when the sender looks forged.
+  const forgedReply = await received('email-forged-reply', {
+    from: 'sam.engineer@gmail.test', subject: 'Re: EICR', text: null,
+    headers: { 'authentication-results': 'dmarc=fail' }, attachments: [attachment('att-forged-reply')],
+  }, followUp.replyTo);
+  assert.equal((await itemsFor(forgedReply.id))[0].status, 'held');
+
+  // A reply with no certificate goes straight on to the business, without
+  // the email it answers (which carries the links).
   const reply = await received('email-reply', {
+    from: 'Dave Sparks <dave@sparky-electrical.test>', subject: 'Re: Compliance check reminder: EICR', headers: null, attachments: [],
+    text: `Can we do Tuesday instead?\nDave\n\nOn Mon, 2 Nov 2026 at 09:00, Kilmarnock Golf Club <noreply@test.local>\nwrote:\n> Upload certificate: ${apiBase}/certificate-upload/${reminderPayload.certUpload}`,
+  }, sentReminder.replyTo);
+  assert.equal(reply.status, 'done');
+  assert.equal((await itemsFor(reply.id)).length, 0, 'a forwarded reply does not wait in the list');
+  const [forwarded] = forwards;
+  assert.deepEqual(forwarded.to, [await ownerEmail(owner.clientId)], 'with no maintenance address or assignee, the Owner gets it');
+  assert.equal(forwarded.replyTo, 'dave@sparky-electrical.test', 'the business can answer the contractor directly');
+  assert.match(forwarded.subject, /Dave Sparks replied about EICR at Inbox site/);
+  assert.match(forwarded.text, /Can we do Tuesday instead\?\nDave/);
+  assert.ok(!forwarded.text.includes(reminderPayload.certUpload) && !forwarded.html.includes('wrote:'), 'the quoted email is left out');
+  assert.equal(forwarded.idempotencyKey, 'certificate-reply-email-reply', 'a retry cannot forward it twice');
+  // The check's assignee and the maintenance address get it when there are.
+  await pool.query(`INSERT INTO app_settings (client_id, key, value) VALUES ($1, 'maintenanceEmail', 'maintenance@club.test')`, [owner.clientId]);
+  await received('email-reply-maintenance', {
+    from: 'dave@sparky-electrical.test', subject: 'Re: EICR', text: 'Invoice attached separately.', headers: null, attachments: [],
+  }, followUp.replyTo);
+  assert.deepEqual(forwards.at(-1).to, ['maintenance@club.test']);
+  // If it cannot be forwarded, it waits in the list as a message.
+  forwardFails = true;
+  const unsent = await received('email-reply-unsent', {
     from: 'dave@sparky-electrical.test', subject: 'Re: Certificate needed: EICR', text: 'I will send it on Friday.', headers: null, attachments: [],
   }, address);
-  const [message] = await itemsFor(reply.id);
+  forwardFails = false;
+  const [message] = await itemsFor(unsent.id);
   assert.equal(message.status, 'message');
   assert.equal(message.message_text, 'I will send it on Friday.');
   // A stranger's email with nothing attached is dropped.
@@ -376,6 +433,10 @@ try {
   // ── Pure helpers ──────────────────────────────────────────────────────────
   assert.deepEqual(inbox.parseAddress('"Dave Sparks" <Dave@Sparky.test>'), { email: 'dave@sparky.test', name: 'Dave Sparks' });
   assert.deepEqual(inbox.inboxLocalParts(['a-b+x@certs.test.local', 'c@other.test', 'A-B@certs.test.local'], 'certs.test.local'), ['a-b']);
+  assert.deepEqual(inbox.inboxRecipients(['"Club" <a-b+code1@certs.test.local>', 'a-b@certs.test.local'], 'certs.test.local'),
+    [{ localPart: 'a-b', tag: 'code1' }, { localPart: 'a-b', tag: null }]);
+  assert.equal(inbox.replyText('Thanks\r\n\r\n-----Original Message-----\r\nFrom: x'), 'Thanks');
+  assert.equal(inbox.replyText('> quoted only'), null);
   assert.equal(inbox.senderLooksForged({ 'authentication-results': 'dmarc=pass' }), false);
 
   console.log('Certificate inbox: addresses, upload links, emailed certificates, checking and saving all pass.');
