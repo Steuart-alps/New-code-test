@@ -45,6 +45,7 @@ Wednesday 28 October.
 | 26 | Combine SafeTrack into DocTrack | After launch | None; affects pricing | Your call on pricing |
 | 27 | One Owner login for several separate businesses | After launch | None | Your go-ahead |
 | 28 | Staff roster "Open kiosk": show the shift starts it records | After launch | None | Nothing; you decided to keep the button |
+| 29 | Management review checklists for each track, plus one review of all tracks | After launch | None | How often (weekly or monthly) and who signs |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -989,6 +990,57 @@ The work after launch is to show the shift start times the kiosk records, so
 managers can see who started when. Later it could also become a full tablet
 sign-in sheet (sign in and out, who is on site, feeding the fire roll call
 alongside contractor sign-in, item 23).
+
+**Cost:** none. No extra hosting.
+
+---
+
+## 29. Management review checklists for each track
+
+**When:** after launch. Your idea on 2 November: "management overview
+checklists for each track, maybe weekly or monthly, high level review of all
+tracks".
+
+Today staff fill in the day-to-day checks, and the Owner gets a weekly (or
+monthly) email update. What is missing is a short, signed review where a
+manager looks back over a track and records that they have done so. Auditors
+and inspectors like to see this, because it shows someone in charge is
+checking the checks.
+
+**1. A review checklist for each track.** On a set day (weekly or monthly,
+chosen per track), the manager responsible for that track gets a short review
+to complete. ComplyTrack fills in the facts for them, for example:
+
+- how many checks were done on time, late or missed;
+- any fails, and whether each one has a corrective action that is closed;
+- contractor checks that are overdue or still waiting for a certificate;
+- open FixTrack issues and incidents for that track.
+
+The manager then answers a few plain questions ("Are you happy the records
+are complete?", "Anything to raise with the Owner?"), adds a note if needed
+and signs. Anything they flag becomes an action with a due date.
+
+**2. One review of all tracks.** Once a month (or each quarter), the Owner,
+or the ALPS consultant for that business, gets one page that pulls the track
+reviews together: the compliance score for each track, what changed since last
+time, which reviews were not signed, and the main things to act on. They sign
+it off, and it can be printed or saved as a PDF for the board, the insurer or
+an inspector.
+
+This builds on things already in the app: the KitchenTrack "This month"
+summary panel (change #273), the Owner's weekly or monthly update email
+(changes #166 and #212), and the drawn signatures planned in draft #251. A
+missed review would be treated like any other missed check, so it shows on
+the dashboard and goes into the responsible person's reminders, not to
+everyone.
+
+**Questions for you:**
+
+1. Weekly or monthly for the track reviews, or let each business choose?
+2. Who signs a track review: the manager for that department, or always an
+   Owner?
+3. Should the all-tracks review go to the Owner, the ALPS consultant, or
+   both?
 
 **Cost:** none. No extra hosting.
 
