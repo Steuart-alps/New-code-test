@@ -45,7 +45,7 @@ Wednesday 28 October.
 | 26 | Combine SafeTrack into DocTrack | After launch | None; affects pricing | Your call on pricing |
 | 27 | One Owner login for several separate businesses | After launch | None | Your go-ahead |
 | 28 | Staff roster "Open kiosk": show the shift starts it records | After launch | None | Nothing; you decided to keep the button |
-| 29 | Management review checklists for each track, plus one review of all tracks | After launch | None | How often (weekly or monthly) and who signs |
+| 29 | Management walk-round inspections for each track, plus one overall review | After launch | None | How often, who does them, and your existing checklists |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -995,52 +995,60 @@ alongside contractor sign-in, item 23).
 
 ---
 
-## 29. Management review checklists for each track
+## 29. Management walk-round inspections for each track
 
 **When:** after launch. Your idea on 2 November: "management overview
 checklists for each track, maybe weekly or monthly, high level review of all
-tracks".
+tracks", and you confirmed "that's physical reviews".
 
-Today staff fill in the day-to-day checks, and the Owner gets a weekly (or
-monthly) email update. What is missing is a short, signed review where a
-manager looks back over a track and records that they have done so. Auditors
-and inspectors like to see this, because it shows someone in charge is
-checking the checks.
+Staff already do the day-to-day checks. This adds a manager's own physical
+inspection: they walk round and look at each track's area in person, weekly or
+monthly, to check that standards are being kept and the records match what is
+really there. Auditors and inspectors like to see this, because it shows
+someone in charge is checking the checks.
 
-**1. A review checklist for each track.** On a set day (weekly or monthly,
-chosen per track), the manager responsible for that track gets a short review
-to complete. ComplyTrack fills in the facts for them, for example:
+**1. A walk-round checklist for each track.** A short list of things to look
+at in person, ready-made for each track and editable by the business. For
+example:
 
-- how many checks were done on time, late or missed;
-- any fails, and whether each one has a corrective action that is closed;
-- contractor checks that are overdue or still waiting for a certificate;
-- open FixTrack issues and incidents for that track.
+- **KitchenTrack:** cleanliness, food covered, labelled and in date, fridge
+  and freezer readings on the display match the records, probe and wipes
+  available, allergen information up to date at the pass.
+- **FireTrack:** escape routes and fire exits clear, fire doors closing
+  properly, extinguishers in place and in date, fire action notices up.
+- **GreenTrack:** machinery shed tidy and safe, chemical store locked and
+  labelled, spill kit and protective equipment ready.
+- **LegionellaTrack, COSHHTrack, PATrack and the rest:** the same idea, with
+  a few things to look at that suit that track.
 
-The manager then answers a few plain questions ("Are you happy the records
-are complete?", "Anything to raise with the Owner?"), adds a note if needed
-and signs. Anything they flag becomes an action with a due date.
+The manager can open it from the dashboard or by scanning the track's QR
+label, answers each line Pass, Fail or N/A, takes photos, and signs. Any fail
+needs a corrective action, the same as every other check (change #270), and
+it goes to the person responsible with a due date. To help them, the
+checklist can show a few facts beside it, such as checks missed since the last
+walk round.
 
-**2. One review of all tracks.** Once a month (or each quarter), the Owner,
-or the ALPS consultant for that business, gets one page that pulls the track
-reviews together: the compliance score for each track, what changed since last
-time, which reviews were not signed, and the main things to act on. They sign
-it off, and it can be printed or saved as a PDF for the board, the insurer or
-an inspector.
+**2. One overall review of all tracks.** Once a month (or each quarter), a
+wider site walk round covering every track at a high level, done by the Owner
+or the ALPS consultant on their visit. It shows the result of each track's
+latest walk round, they record what they find, and they sign it. It can be
+printed or saved as a PDF for the board, the insurer or an inspector.
 
-This builds on things already in the app: the KitchenTrack "This month"
-summary panel (change #273), the Owner's weekly or monthly update email
-(changes #166 and #212), and the drawn signatures planned in draft #251. A
-missed review would be treated like any other missed check, so it shows on
-the dashboard and goes into the responsible person's reminders, not to
-everyone.
+This builds on things already in the app: the FireTrack walk round, the QR
+labels on each track, photos on records, corrective actions on every fail, and
+the drawn signatures planned in draft #251. A missed walk round would be
+treated like any other missed check, so it shows on the dashboard and goes
+into the responsible person's reminders, not to everyone.
 
 **Questions for you:**
 
-1. Weekly or monthly for the track reviews, or let each business choose?
-2. Who signs a track review: the manager for that department, or always an
-   Owner?
-3. Should the all-tracks review go to the Owner, the ALPS consultant, or
-   both?
+1. Weekly or monthly for each track's walk round, or let each business choose?
+2. Who does a track's walk round: the manager for that department, or always
+   an Owner?
+3. Should the overall review be done by the Owner, the ALPS consultant on
+   their visit, or both?
+4. Do you have walk-round checklists you already use with clients that we
+   should start from?
 
 **Cost:** none. No extra hosting.
 
