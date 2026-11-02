@@ -4,6 +4,7 @@ import type {
   ToastActionElement,
   ToastProps,
 } from "@/components/ui/toast"
+import { toastDuration } from "@/lib/toast-duration"
 
 const TOAST_LIMIT = 1
 const TOAST_REMOVE_DELAY = 1000000
@@ -137,15 +138,23 @@ function dispatch(action: Action) {
   })
 }
 
-type Toast = Omit<ToasterToast, "id">
+type Toast = Omit<ToasterToast, "id"> & {
+  /**
+   * true keeps the message open until it is closed; false lets it close
+   * itself. Left out, a message holding instructions (or a button or link)
+   * stays open and anything else closes after long enough to read it (see
+   * lib/toast-duration.ts).
+   */
+  stay?: boolean
+}
 
-function toast({ ...props }: Toast) {
+function toast({ stay, ...props }: Toast) {
   const id = genId()
 
-  const update = (props: ToasterToast) =>
+  const update = ({ stay: stayOpen, ...next }: ToasterToast & { stay?: boolean }) =>
     dispatch({
       type: "UPDATE_TOAST",
-      toast: { ...props, id },
+      toast: { ...next, duration: toastDuration({ ...next, stay: stayOpen }), id },
     })
   const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id })
 
@@ -153,6 +162,7 @@ function toast({ ...props }: Toast) {
     type: "ADD_TOAST",
     toast: {
       ...props,
+      duration: toastDuration({ ...props, stay }),
       id,
       open: true,
       onOpenChange: (open) => {

@@ -129,6 +129,8 @@ jobs:
         run: pnpm --filter @workspace/compliance-tracker run test:word-doc
       - name: Upload your lists sorting test
         run: pnpm --filter @workspace/compliance-tracker run test:list-kinds
+      - name: Pop-up messages with instructions stay open test
+        run: pnpm --filter @workspace/compliance-tracker run test:toast-duration
 
       - name: Setup "What we need from you" workbooks match the import templates
         run: pnpm --filter @workspace/compliance-tracker run test:setup-info-sheets

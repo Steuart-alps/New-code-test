@@ -14,7 +14,11 @@ import { chromium, firefox, webkit } from "@playwright/test";
 //   - a drop that carries only a file:// link (Safari, dragging straight out
 //     of the Mac Photos app) is held and explained, never opened;
 //   - text and links can still be dropped into text boxes;
-//   - a HEIC photo the browser can read is turned into a JPEG.
+//   - a HEIC photo the browser can read is turned into a JPEG;
+//   - a box that takes only spreadsheets (Import spreadsheet) gets a
+//     spreadsheet dropped anywhere on the page, but not a photo;
+//   - a message that says what to do stays open until it is closed, while a
+//     plain "Saved" closes itself (src/lib/toast-duration.ts).
 // FILE_DROP_BROWSER=chromium|firefox|webkit picks the engine.
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const browserName = process.env.FILE_DROP_BROWSER ?? "chromium";
@@ -53,10 +57,11 @@ const executablePath = browserName === "chromium"
 // A 1x1 PNG.
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
 
-async function open(query = "") {
+async function open(query = "", { clock = false } = {}) {
   const page = await browser.newPage();
+  if (clock) await page.clock.install();
   await page.goto(`${baseUrl}/tests/file-drop-harness.html${query}`, { waitUntil: "domcontentloaded" });
-  await page.getByTestId("media-first").waitFor();
+  await page.getByTestId(query.includes("sheet-only") ? "sheet-button" : "media-first").waitFor();
   return page;
 }
 
@@ -115,9 +120,14 @@ try {
   });
 
   await test("with two boxes in view a stray photo is held and the page says where to drop it", async () => {
-    const page = await open("?two");
+    const page = await open("?two", { clock: true });
     assert.equal(await drop(page, "[data-testid='page-heading']", { files: [{ name: "stray.png", type: "image/png" }] }), true, "the browser must not open the file");
     await page.getByText("Drop it on an upload box", { exact: true }).waitFor();
+    // The message says what to do, so it stays until it is closed.
+    await page.clock.runFor(60_000);
+    assert.equal(await page.getByText("Drop it on an upload box", { exact: true }).isVisible(), true, "an instruction stays open");
+    await page.getByRole("button", { name: "Close" }).click();
+    await page.getByText("Drop it on an upload box", { exact: true }).waitFor({ state: "detached" });
     assert.deepEqual(await filesIn(page, "first"), []);
     assert.deepEqual(await filesIn(page, "second"), []);
     // Dropped on a box, it goes to that box only.
@@ -151,6 +161,42 @@ try {
     assert.equal(await drop(page, "[data-testid='media-first'] p", { files: [{ name: "IMG_0001.HEIC", type: "image/heic" }] }), true);
     await page.waitForFunction(() => window.__files.first?.length === 1);
     assert.deepEqual(await filesIn(page, "first"), [{ name: "IMG_0001.jpg", type: "image/jpeg" }]);
+    await page.close();
+  });
+
+  await test("a plain message closes itself after long enough to read", async () => {
+    const page = await open("", { clock: true });
+    await page.getByRole("button", { name: "Show saved message" }).click();
+    const saved = page.getByText("Saved", { exact: true });
+    await saved.waitFor();
+    await page.clock.runFor(3_000);
+    assert.equal(await saved.isVisible(), true, "still up after 3 seconds");
+    await page.clock.runFor(10_000);
+    await saved.waitFor({ state: "detached" });
+    await page.close();
+  });
+
+  await test("a spreadsheet dropped anywhere goes to the Import spreadsheet button", async () => {
+    const page = await open("?sheet-only");
+    assert.equal(await drop(page, "[data-testid='page-heading']", { files: [{ name: "checks.xlsx", type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }] }), true);
+    await page.waitForFunction(() => window.__files.sheet?.length === 1);
+    assert.deepEqual(await filesIn(page, "sheet"), [{ name: "checks.xlsx", type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }]);
+    // A photo isn't a spreadsheet, so it isn't sent there.
+    assert.equal(await drop(page, "[data-testid='page-heading']", { files: [{ name: "photo.png", type: "image/png" }] }), true, "the browser must not open the file");
+    await page.getByText("Drop it on an upload box", { exact: true }).waitFor();
+    assert.equal((await filesIn(page, "sheet")).length, 1);
+    await page.close();
+  });
+
+  await test("beside a photos box and an import button, each file goes where it belongs", async () => {
+    const page = await open("?sheet");
+    assert.equal(await drop(page, "[data-testid='page-heading']", { files: [{ name: "leak.png", type: "image/png" }] }), true);
+    await page.waitForFunction(() => window.__files.first?.length === 1);
+    assert.deepEqual(await filesIn(page, "sheet"), [], "the import button doesn't take photos");
+    // Both take a spreadsheet, so the page asks where it should go.
+    assert.equal(await drop(page, "[data-testid='page-heading']", { files: [{ name: "checks.csv", type: "text/csv" }] }), true);
+    await page.getByText("Drop it on an upload box", { exact: true }).waitFor();
+    assert.deepEqual(await filesIn(page, "sheet"), []);
     await page.close();
   });
 

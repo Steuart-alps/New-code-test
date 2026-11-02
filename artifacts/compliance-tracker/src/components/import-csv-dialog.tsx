@@ -4,6 +4,7 @@ import { Download, FileSpreadsheet, Loader2, Upload, X } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
+import { useFileDrop } from "@/hooks/use-file-drop";
 import { API_BASE, getApiErrorMessage } from "@/lib/api";
 import { downloadBlob, getDownloadErrorMessage } from "@/lib/download";
 import { downloadCsvAsExcel, downloadExcel, readSpreadsheet } from "@/lib/spreadsheet";
@@ -98,7 +99,7 @@ const IMPORTS: Record<ImportCsvType, {
 };
 
 type RowAction = "create" | "update" | "skip" | "error";
-interface ImportResult {
+export interface ImportResult {
   preview: boolean;
   committed: boolean;
   summary: { total: number; create: number; update: number; skip: number; error: number };
@@ -112,6 +113,30 @@ const ACTION_STYLE: Record<RowAction, { label: string; className: string }> = {
   skip: { label: "Skip", className: "bg-muted text-muted-foreground border-border" },
   error: { label: "Error", className: "bg-rose-50 text-rose-800 border-rose-200" },
 };
+
+/**
+ * The preview's counts once the rows someone chose to leave out are taken
+ * off: each one counts as skipped instead of new, updated or an error.
+ */
+export function summaryLeavingOut(result: ImportResult, leftOut: ReadonlySet<number>): ImportResult["summary"] {
+  const summary = { ...result.summary };
+  for (const row of result.rows) {
+    if (!leftOut.has(row.row) || row.action === "skip") continue;
+    summary[row.action] -= 1;
+    summary.skip += 1;
+  }
+  return summary;
+}
+
+/**
+ * The spreadsheet as sent for the import, with the left-out rows emptied.
+ * The API passes over empty lines, so every other row keeps its row number.
+ */
+export function sheetLeavingOut(sheet: { headers: string[]; rows: string[][] }, leftOut: ReadonlySet<number>) {
+  if (leftOut.size === 0) return sheet;
+  // Row numbers count the heading line as row 1, as the spreadsheet does.
+  return { ...sheet, rows: sheet.rows.map((cells, index) => leftOut.has(index + 2) ? cells.map(() => "") : cells) };
+}
 
 export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, initialFile }: {
   type: ImportCsvType; open: boolean; onOpenChange: (open: boolean) => void; onImported?: () => void;
@@ -135,6 +160,8 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, 
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"reading" | "reading-list" | "preview" | "import" | null>(null);
+  // Rows of the preview someone chose not to import, by row number.
+  const [leftOut, setLeftOut] = useState<ReadonlySet<number>>(new Set());
   usePastedFile(open && busy === null && !result?.committed, selected => dropped(selected));
   // Once the AI status is known, so a photo can go to the reader.
   const startedWith = useRef<File | null>(null);
@@ -146,7 +173,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, 
   }, [open, initialFile, reading.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function reset() {
-    setFile(null); setSheet(null); setResult(null); setError(null); setBusy(null); setReadFromList(null);
+    setFile(null); setSheet(null); setResult(null); setError(null); setBusy(null); setReadFromList(null); setLeftOut(new Set());
   }
   function close() {
     if (busy === "import") return;
@@ -157,7 +184,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, 
   async function send(data: { headers: string[]; rows: string[][] }, preview: boolean) {
     const response = await clientApiFetch(`/imports/${type}`, { method: "POST", body: JSON.stringify({ ...data, preview, ...(siteId !== undefined ? { siteId } : {}) }) });
     const body = await response.json().catch(() => null) as (ImportResult & { error?: string }) | null;
-    if (body?.rows) setResult(body);
+    if (body?.rows) { setResult(body); if (preview) setLeftOut(new Set()); }
     if (!response.ok) throw new Error(body?.error ?? await getApiErrorMessage(response, "The import could not be checked"));
     return body as ImportResult;
   }
@@ -220,8 +247,8 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, 
     setBusy("import");
     setError(null);
     try {
-      const done = await send(sheet, false);
-      toast({ title: `${config.noun[0].toUpperCase()}${config.noun.slice(1)} imported`, description: `${done.summary.create} added, ${done.summary.update} updated, ${done.summary.skip} skipped.` });
+      const done = await send(sheetLeavingOut(sheet, leftOut), false);
+      toast({ title: `${config.noun[0].toUpperCase()}${config.noun.slice(1)} imported`, description: `${done.summary.create} added, ${done.summary.update} updated, ${done.summary.skip + leftOut.size} skipped.` });
       await queryClient.invalidateQueries();
       onImported?.();
       reset();
@@ -245,7 +272,12 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, 
     }
   }
 
-  const summary = result?.summary;
+  const summary = result ? summaryLeavingOut(result, leftOut) : undefined;
+  const toggleLeftOut = (row: number) => setLeftOut((current) => {
+    const next = new Set(current);
+    if (!next.delete(row)) next.add(row);
+    return next;
+  });
   const canImport = !!summary && !result?.committed && summary.error === 0 && summary.create + summary.update > 0 && busy === null;
 
   return (
@@ -304,7 +336,8 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, 
               <div><strong>{summary.update}</strong><br /><span className="text-muted-foreground">Updated</span></div>
               <div><strong>{summary.skip}</strong><br /><span className="text-muted-foreground">Skipped</span></div>
               <div><strong className={summary.error ? "text-destructive" : undefined}>{summary.error}</strong><br /><span className="text-muted-foreground">Errors</span></div>
-              {summary.error > 0 && <p className="col-span-2 text-xs text-destructive sm:col-span-4">Fix the rows marked as errors in your file and choose it again. Nothing is imported while any row has an error.</p>}
+              {summary.error > 0 && <p className="col-span-2 text-xs text-destructive sm:col-span-4">Fix the rows marked as errors in your file and choose it again, or press Leave out on them. Nothing is imported while any row has an error.</p>}
+              {!result?.committed && summary.create + summary.update + summary.error > 0 && <p className="col-span-2 text-xs text-muted-foreground sm:col-span-4">To skip a row you don't want, press Leave out next to it. Rows marked Skip are passed over for the reason shown under them.</p>}
               {result?.ignoredHeaders.length ? <p className="col-span-2 text-xs text-muted-foreground sm:col-span-4">Columns not used: {result.ignoredHeaders.join(", ")}</p> : null}
             </div>
           )}
@@ -320,11 +353,21 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, 
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {[...result.rows].sort((a, b) => Number(b.action === "error") - Number(a.action === "error") || a.row - b.row).map(row => (
-                    <tr key={row.row} data-testid={`import-row-${row.row}`}>
+                  {[...result.rows].sort((a, b) => Number(b.action === "error") - Number(a.action === "error") || a.row - b.row).map(row => {
+                    const isLeftOut = leftOut.has(row.row) && row.action !== "skip";
+                    const style = isLeftOut ? { label: "Left out", className: ACTION_STYLE.skip.className } : ACTION_STYLE[row.action];
+                    return (
+                    <tr key={row.row} data-testid={`import-row-${row.row}`} className={isLeftOut ? "text-muted-foreground" : undefined}>
                       <td className="px-2 py-1.5 align-top text-muted-foreground">{row.row}</td>
                       <td className="px-2 py-1.5 align-top">
-                        <span className={cn("inline-block rounded-sm border px-1.5 py-0.5 font-medium", ACTION_STYLE[row.action].className)}>{ACTION_STYLE[row.action].label}</span>
+                        <span className={cn("inline-block cursor-default whitespace-nowrap rounded-sm border px-1.5 py-0.5 font-medium", style.className)}>{style.label}</span>
+                        {row.action !== "skip" && !result.committed && (
+                          <button type="button" onClick={() => toggleLeftOut(row.row)} disabled={busy !== null}
+                            className="mt-1 block whitespace-nowrap text-xs font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                            data-testid={`button-leave-out-${row.row}`}>
+                            {isLeftOut ? "Put back" : "Leave out"}
+                          </button>
+                        )}
                       </td>
                       <td className="px-2 py-1.5 align-top">
                         <span className="font-medium break-words">{row.label}</span>
@@ -333,10 +376,12 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, 
                             {sheet.rows[row.row - 2].slice(2).filter(Boolean).join(" · ")}
                           </span>
                         )}
+                        {isLeftOut && <span className="block break-words">Not imported: you left this row out.</span>}
                         {row.reasons.map(reason => <span key={reason} className="block break-words text-muted-foreground">{reason}</span>)}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -365,18 +410,23 @@ export function ImportCsvButton({ type, onImported, className, siteId, label = "
 }) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
+  const [droppedFile, setDroppedFile] = useState<File | null>(null);
   const isAdmin = user?.role === "consultant" || user?.role === "client_admin";
   // PATTrack appliances and KitchenTrack ingredients: managers too.
   const managersToo = type === "pat-appliances" || type === "allergen-ingredients";
   const allowed = isAdmin || (managersToo && (user?.role === "client_manager" || (user?.role === "client_staff" && user.isDepartmentManager === true)))
     || (type === "legionella-outlets" && user?.role === "client_manager");
+  // A spreadsheet dragged onto the button, or anywhere on a page whose only
+  // upload is this button, opens the import with that file.
+  const drop = useFileDrop((files) => { setDroppedFile(files[0] ?? null); setOpen(true); }, allowed && !open, isSpreadsheetFile);
   if (!allowed) return null;
   return (
     <>
-      <Button type="button" variant="outline" size="sm" className={className} onClick={() => setOpen(true)} data-testid={`button-import-${type}`}>
+      <Button type="button" variant="outline" size="sm" className={cn(className, drop.isDragging && "ring-2 ring-primary")}
+        onClick={() => { setDroppedFile(null); setOpen(true); }} data-testid={`button-import-${type}`} {...drop.dropZoneProps}>
         <Upload className="mr-1 h-4 w-4" /> {label}
       </Button>
-      <ImportCsvDialog type={type} open={open} onOpenChange={setOpen} onImported={onImported} siteId={siteId} />
+      <ImportCsvDialog type={type} open={open} onOpenChange={setOpen} onImported={onImported} siteId={siteId} initialFile={droppedFile} />
     </>
   );
 }
