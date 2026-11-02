@@ -15,7 +15,10 @@ import { chromium } from "@playwright/test";
 //   - an old Word (.doc) table is read in the browser;
 //   - pasting into a text box is left alone;
 //   - without the add-on, a pasted screenshot gets a plain message and the
-//     picker lists only spreadsheets.
+//     picker lists only spreadsheets;
+//   - Leave out takes a new or error row out of the import (the row is sent
+//     empty, so the rest keep their row numbers) and Put back returns it;
+//     rows the API skips have no button.
 // API responses mirror artifacts/api-server/src/routes/csv-imports.ts.
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const freePort = async () => {
@@ -78,8 +81,14 @@ async function open(aiActive) {
       return json(route, { headers: READ_HEADERS, rows: [["Jo Spark", "jo@spark.test", "Spark Ltd", "", "Electrical", ""]], unclear: 0, unclearRows: [] });
     }
     if (url.pathname === "/api/imports/contractors" && method === "POST") {
-      const rows = body.rows.map((row, index) => ({ row: index + 2, action: "create", label: row[0], reasons: [] }));
-      return json(route, { preview: true, committed: false, summary: { total: rows.length, create: rows.length, update: 0, skip: 0, error: 0 }, rows, ignoredHeaders: [] });
+      // "Bad ..." rows are errors and "Skip ..." rows are skipped; empty rows are passed over.
+      const rows = body.rows.flatMap((row, index) => row.some(Boolean) ? [{
+        row: index + 2, label: row[0],
+        action: row[0].startsWith("Bad") ? "error" : row[0].startsWith("Skip") ? "skip" : "create",
+        reasons: row[0].startsWith("Bad") ? ["Email is not valid"] : row[0].startsWith("Skip") ? ["Already on your list"] : [],
+      }] : []);
+      const count = action => rows.filter(row => row.action === action).length;
+      return json(route, { preview: body.preview !== false, committed: body.preview === false, summary: { total: rows.length, create: count("create"), update: 0, skip: count("skip"), error: count("error") }, rows, ignoredHeaders: [] });
     }
     return json(route, {});
   });
@@ -195,6 +204,30 @@ try {
     // Excel cells still paste in.
     await paste(page, "[role=dialog]", { text: "Contact name\tEmail\nAl Pipe\tal@pipe.test" });
     await waitFor(() => previews(requests).length === 1, "the pasted cells to be previewed");
+
+    // Leave out and Put back.
+    await chooseAnother(page);
+    await paste(page, "[role=dialog]", { text: "Contact name\tEmail\nAl Pipe\tal@pipe.test\nBad Email\tnot-an-email\nSkip Me\tskip@me.test\nCy Keep\tcy@keep.test" });
+    await waitFor(() => previews(requests).length === 2, "the four rows to be previewed");
+    const confirm = page.getByTestId("button-confirm-contractors-import");
+    await page.getByTestId("button-leave-out-2").waitFor();
+    assert.equal(await confirm.isDisabled(), true, "an error row blocks the import");
+    assert.equal(await page.getByTestId("button-leave-out-4").count(), 0, "a row the import skips has no Leave out button");
+    await page.getByTestId("button-leave-out-3").click();
+    assert.equal(await confirm.isDisabled(), false, "leaving out the error row lets the rest import");
+    assert.match(await confirm.innerText(), /Import 2 /);
+    await page.getByTestId("button-leave-out-2").click();
+    assert.match(await confirm.innerText(), /Import 1 /);
+    assert.match(await page.getByTestId("import-row-2").innerText(), /Left out[\s\S]*Put back[\s\S]*you left this row out/);
+    await page.getByTestId("button-leave-out-2").click();
+    assert.match(await confirm.innerText(), /Import 2 /, "Put back returns the row");
+    await page.getByTestId("button-leave-out-2").click();
+    await confirm.click();
+    await waitFor(() => previews(requests).length === 3, "the import to be sent");
+    const sent = previews(requests)[2].body;
+    assert.equal(sent.preview, false);
+    assert.deepEqual(sent.rows, [["", ""], ["", ""], ["Skip Me", "skip@me.test"], ["Cy Keep", "cy@keep.test"]], "left-out rows are sent empty, in place");
+    await page.getByText("1 added, 0 updated, 3 skipped.").waitFor();
     assert.deepEqual(pageErrors, []);
   }
   console.log("Import file type browser checks passed: spreadsheet, photo, screenshot, PDF, pasted screenshot, pasted Excel cells and an old Word (.doc) table.");
