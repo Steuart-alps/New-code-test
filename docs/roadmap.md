@@ -29,7 +29,7 @@ Wednesday 28 October.
 | 10 | Offline working | After launch | None for the recommended route | Phone app first |
 | 11 | Actions from uploaded audit and inspection reports | After launch | Pennies per report (being worked out) | Plan in its own thread |
 | 12 | CareTrack (care homes and care services) | Later | Not yet known | Scope from you |
-| 13 | Kitchens: stock, costings, GP, recipe spec sheets, supplier details, voice | After launch | None, except a few pence per spec sheet read | Allergen charts built, parked as draft #169 |
+| 13 | Kitchens: stock, costings, GP, recipe spec sheets, supplier details, recipe ideas for leftovers, voice | After launch | None, except a few pence per AI spec sheet read or recipe suggestion | Nothing; allergen charts are live (#169) |
 | 14 | Label scanning (chemicals, food, GreenTrack products, equipment plates) | After launch | About 1-2p per label read; more when it also finds a data sheet and drafts COSHH | Anthropic key on Render |
 | 15 | FireTrack: sound level meter for fire alarm tests | After launch (with the iPhone app) | None | Phone app; your check of the dB limits |
 | 16 | Temperature probes and sensors: Bluetooth probes, Wi-Fi fridge, freezer and water tank monitoring | After launch (probes with the phone app) | Hardware bought by each business; possibly a bigger database later | Phone app; choice of sensor make |
@@ -404,13 +404,12 @@ should it keep day to day?
 All the parts below share one list of ingredients and recipes, so they belong
 together.
 
-### Allergen charts (built, parked as draft #169)
+### Allergen charts (live, #169)
 
 KitchenTrack allergen charts, with the ingredients list and recipes everything
-below builds on, have been built in the thread "KitchenTrack allergen charts".
-On 21 October you decided to keep it parked as draft #169 for now while the
-core service is launched. It is the first kitchen item to switch on when you're
-ready.
+below builds on, were built in the thread "KitchenTrack allergen charts". You
+parked them on 21 October, then had #169 merged on 22 October, so they are now
+live. Everything below builds on them.
 
 ### Stock control
 
@@ -493,6 +492,31 @@ cheapest for the whole order, or for each item, using the prices from the
 supplier price import above. This is the KitchenTrack version of the consumer
 shopping comparison app (see "Future apps").
 
+### Recipe ideas for leftover stock
+
+Your idea on 3 November: "suggest recipes for leftover kitchen stock". Using
+the kitchen's stock list, ComplyTrack picks out what needs using up (close to
+its use-by date, opened, or over-ordered) and suggests dishes or specials that
+use it. This would be part of the AI add-on, paid for from the business's AI
+allowance like the other AI features.
+
+Each suggestion would show:
+
+- which leftover items it uses and roughly how much;
+- the allergens it contains, worked out from the kitchen's own ingredient
+  allergen records, never guessed by the AI;
+- the cost per portion and GP at the kitchen's usual price, from the costings
+  above.
+
+The chef chooses whether to use a suggestion. If they do, it can be saved as a
+recipe with its spec sheet, so the allergen chart and costings stay right. A
+chef must always check a suggested recipe, especially its allergens, before it
+is served. It would also favour the kitchen's existing recipes first ("you
+could run the chicken curry special") before suggesting new dishes.
+
+This needs the kitchen stock list first (dates and amounts), so it comes after
+kitchen stock control.
+
 ### Voice
 
 Speak things in rather than typing: a list of ingredients, a recipe, or a
@@ -500,8 +524,9 @@ stock count ("12 tins of chopped tomatoes, 3 bags of flour"). This reuses the
 free dictation microphone that is already on every notes box and the COSHH
 "Speak a list" button (#151), so it costs nothing extra.
 
-**Cost:** none for stock, costings, GP and voice. Reading spec sheets would cost a
-few pence each with the live AI (the exact figure to be worked out with the
+**Cost:** none for stock, costings, GP and voice. Reading spec sheets, and
+each set of recipe ideas for leftover stock, would cost a few pence with the
+live AI, taken from the business's AI allowance (the exact figure to be worked out with the
 Live AI plan). No extra hosting.
 
 **Questions for you:**
@@ -548,7 +573,7 @@ covered by the same scan.
 - **Certificates:** this is item 2, using the same photo screen.
 - **Food labels (KitchenTrack):** ingredients, allergens and "may contain"
   warnings (about 1-2p), checked by a manager, landing in the ingredients list
-  from the parked allergen charts (#169). So this waits for #169 and pairs with
+  from the allergen charts (#169, now live). It pairs with
   supplier allergens and prices in item 13.
 - **Equipment data plates:** make, model and serial number for PUWER, LOLER
   and PAT records, linked to the equipment's QR label (#159). Also FireTrack
@@ -1099,6 +1124,7 @@ work:
 | Kitchen stock, costings and GP | None |
 | Recipe spec sheet reading | A few pence per sheet |
 | Supplier allergens and prices | Pennies per invoice or product read; nothing for a supplier file |
+| Recipe ideas for leftover kitchen stock | A few pence per set of ideas, from the AI allowance |
 | Kitchen voice input | None |
 | Maintenance inventory | None |
 | Reorder the side menu | None |
