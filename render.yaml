@@ -22,7 +22,7 @@ services:
       PORT=5173 BASE_PATH=/ npx --yes pnpm@10.28.0 --filter @workspace/compliance-tracker run build &&
       npx --yes pnpm@10.28.0 --filter @workspace/api-server run build
     preDeployCommand: node lib/db/bootstrap.mjs
-    startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
+    startCommand: node artifacts/api-server/dist/index.mjs
     # /readyz stays 503 until Stripe is configured, so the platform health
     # check uses /healthz, which is 503 until runtime migrations finish (a
     # failed migration exits, so a broken deploy is never promoted).
