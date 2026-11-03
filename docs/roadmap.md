@@ -35,7 +35,7 @@ Wednesday 28 October.
 | 16 | Temperature probes and sensors: Bluetooth probes, Wi-Fi fridge, freezer and water tank monitoring | After launch (probes with the phone app) | Hardware bought by each business; possibly a bigger database later | Phone app; choice of sensor make |
 | 17 | Maintenance inventory: stock, cheapest supplier, low-stock reminder | After launch | None | Kitchen supplier price import for the cheapest supplier part |
 | 18 | Reorder the side menu to each user's preference | After launch | None | Nothing |
-| 19 | Bar opening and closing checks, including beer tap tips | After launch | None | Your list of bar checks |
+| 19 | Bars: opening and closing checks (including beer tap tips) and bar stock | After launch | None | Your list of bar checks; how much stock detail you want |
 | 20 | Send site safety information to contractors before their visit | After launch | None | Contractor sign-in work (in its own thread) |
 | 21 | White-labelling for resellers (for example insurance brokers) | After launch | Possibly small extra email and web address costs per partner | Your answers on billing and what partners see |
 | 22 | Let Owners choose the AI model and effort for each AI feature | After launch | Depends on the choices made; capped | AI features live first |
@@ -756,7 +756,7 @@ new modules appear in their default place until the user moves them.
 
 ---
 
-## 19. Bar opening and closing checks (beer tap tips)
+## 19. Bars: opening and closing checks (beer tap tips) and bar stock
 
 **When:** after launch. Asked for on 27 October.
 
@@ -775,11 +775,37 @@ a reminder when the next clean is due) and a cellar temperature check.
 opening and closing checklists with the checklist editor. This item makes them
 part of a ready-made bar list so every new bar gets them without typing.
 
+### Bar stock
+
+Your idea on 3 November: "bar stock". The bar keeps track of what it has in,
+using the same stock control as kitchens (item 13) and GreenTrack (#164),
+not a separate system:
+
+- **Deliveries in:** kegs, cases and bottles, typed in, spoken (voice) or read
+  from the delivery note.
+- **Stock counts:** a regular count (weekly or monthly) on a phone or tablet,
+  with part bottles recorded in tenths and kegs as full, part or empty.
+- **Waste:** line cleaning losses, spillage, out-of-date and breakages, so
+  they don't look like missing stock.
+- **Running low list:** a reminder to the bar manager when an item reaches its
+  re-order level, in their usual daily email rather than a separate alert.
+- **Cost and GP per drink:** the cost of a pint, a single measure or a glass of
+  wine from the latest delivery price, and the GP at the bar's selling price.
+
+Later it could compare what was used against what the till says was sold, to
+show unexplained losses (sometimes called "variance" or "yield"). That needs
+sales figures from the till, so it would start with a simple sales upload
+before any link to a till system.
+
 **Cost:** none. No extra hosting.
 
-**Question for you:** what else should be on the bar list? If you have a bar
-checklist you already use with clients, send it over and it can be the
-starting point.
+**Questions for you:**
+
+1. What else should be on the bar checklist? If you have a bar checklist you
+   already use with clients, send it over and it can be the starting point.
+2. For bar stock, is a count with deliveries, waste and GP per drink enough to
+   start, or do clients want the till comparison from day one?
+3. Which till systems do your bar clients use?
 
 ---
 
