@@ -38,6 +38,11 @@ export const incidentsTable = pgTable("incidents", {
   description: text("description").notNull(),
   involvedName: text("involved_name").notNull(),
   involvedJobTitle: text("involved_job_title"),
+  // Accident book (Social Security (Claims and Payments) Regulations 1979):
+  // the injured person's address, and the reporter's when someone else reports.
+  // Personal data: shown only to those who can read injury details.
+  involvedAddress: text("involved_address"),
+  reporterAddress: text("reporter_address"),
   involvedEmploymentType: text("involved_employment_type").default("employee"),
   injuriesSustained: text("injuries_sustained"),
   firstAidGiven: boolean("first_aid_given").notNull().default(false),

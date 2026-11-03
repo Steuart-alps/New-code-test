@@ -2747,7 +2747,7 @@ function InvoicesCard() {
           <div className="py-6 flex justify-center"><div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" /></div>
         ) : invoices.length === 0 ? (
           <div className="text-sm text-muted-foreground">
-            No invoices yet. Your first invoice will appear here after your first billing cycle.
+            No invoices yet. Your first one appears here after your first payment.
           </div>
         ) : (
           <div className="divide-y divide-border">

@@ -447,7 +447,7 @@ function ConfigDialog() {
                     className="h-8 text-sm rounded-sm flex-1"
                     onChange={e => { const n = [...coldUnits]; n[i] = { ...n[i], name: e.target.value }; setColdUnits(n); }} />
                   <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0"
-                    onClick={() => setColdUnits(coldUnits.filter((_, x) => x !== i))}>
+                    aria-label={`Remove line ${i + 1}`} onClick={() => setColdUnits(coldUnits.filter((_, x) => x !== i))}>
                     <Trash2 className="w-3.5 h-3.5 text-destructive" />
                   </Button>
                 </div>
@@ -1470,7 +1470,7 @@ export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Delivery {i + 1}</span>
                       {!isSubmitted && (
-                        <Button variant="ghost" size="sm" onClick={() => setDeliveries(deliveries.filter((_, x) => x !== i))}>
+                        <Button variant="ghost" size="sm" aria-label={`Remove line ${i + 1}`} onClick={() => setDeliveries(deliveries.filter((_, x) => x !== i))}>
                           <Trash2 className="w-3.5 h-3.5 text-destructive" />
                         </Button>
                       )}
@@ -1554,18 +1554,18 @@ export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {
                     return (
                       <tr key={i} className="hover:bg-muted/10">
                         <td className="px-3 py-1.5">
-                          <Input value={row.unit} disabled={isSubmitted} onChange={e => upd("unit", e.target.value)}
+                          <Input aria-label={`Fridge or freezer name, line ${i + 1}`} value={row.unit} disabled={isSubmitted} onChange={e => upd("unit", e.target.value)}
                             className="h-7 text-xs rounded-sm min-w-[120px]" placeholder="Fridge 1" />
                         </td>
                         <td className="px-3 py-1.5">
-                          <Input value={row.tempAm} disabled={isSubmitted} onChange={e => upd("tempAm", e.target.value)}
+                          <Input aria-label={`AM temperature °C, line ${i + 1}`} value={row.tempAm} disabled={isSubmitted} onChange={e => upd("tempAm", e.target.value)}
                             data-cold-unit-row={i} data-cold-unit-field="am" inputMode="decimal"
-                            className="h-7 text-xs rounded-sm w-24" placeholder="e.g. 3" />
+                            className="h-7 text-xs rounded-sm w-24" placeholder="°C" />
                         </td>
                         <td className="px-3 py-1.5">
-                          <Input value={row.tempPm} disabled={isSubmitted} onChange={e => upd("tempPm", e.target.value)}
+                          <Input aria-label={`PM temperature °C, line ${i + 1}`} value={row.tempPm} disabled={isSubmitted} onChange={e => upd("tempPm", e.target.value)}
                             data-cold-unit-row={i} data-cold-unit-field="pm" inputMode="decimal"
-                            className="h-7 text-xs rounded-sm w-24" placeholder="e.g. 4" />
+                            className="h-7 text-xs rounded-sm w-24" placeholder="°C" />
                         </td>
                         <td className="px-3 py-1.5">
                           <CorrectiveActionInput value={row.correctiveAction} disabled={isSubmitted} onChange={v => upd("correctiveAction", v)}
@@ -1573,7 +1573,7 @@ export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {
                         </td>
                         {!isSubmitted && (
                           <td className="px-2 py-1.5">
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0"
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label={`Remove line ${i + 1}`}
                               onClick={() => setColdFood(coldFood.filter((_, x) => x !== i))}>
                               <Trash2 className="w-3.5 h-3.5 text-destructive" />
                             </Button>
@@ -1622,13 +1622,13 @@ export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {
                       const upd = (f: keyof CookingRow, v: string) => { const n = [...cooking]; n[i] = { ...n[i], [f]: v }; setCooking(n); };
                       return (
                         <tr key={i} className={cn("hover:bg-muted/10", needsAction("hotTemperature", i) && "bg-rose-50")}>
-                          <td className="px-3 py-1.5"><Input value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)} className="h-7 text-xs rounded-sm min-w-[110px]" placeholder="e.g. Chicken" /></td>
-                          <td className="px-2 py-1.5"><Input type="time" value={row.timeStart} disabled={isSubmitted} onChange={e => upd("timeStart", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
-                          <td className="px-2 py-1.5"><Input type="time" value={row.timeFinish} disabled={isSubmitted} onChange={e => upd("timeFinish", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
-                          <td className="px-2 py-1.5"><Input value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder="°C" /></td>
+                          <td className="px-3 py-1.5"><Input aria-label={`Food item, line ${i + 1}`} value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)} className="h-7 text-xs rounded-sm min-w-[110px]" placeholder="e.g. Chicken" /></td>
+                          <td className="px-2 py-1.5"><Input aria-label={`Time started, line ${i + 1}`} type="time" value={row.timeStart} disabled={isSubmitted} onChange={e => upd("timeStart", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
+                          <td className="px-2 py-1.5"><Input aria-label={`Time finished, line ${i + 1}`} type="time" value={row.timeFinish} disabled={isSubmitted} onChange={e => upd("timeFinish", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
+                          <td className="px-2 py-1.5"><Input aria-label={`Core temperature °C, line ${i + 1}`} value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder="°C" /></td>
                           <td className="px-2 py-1.5"><Input inputMode="numeric" aria-label={`${row.item || `Cooking row ${i + 1}`} seconds held at core temperature`} value={row.holdSeconds ?? ""} disabled={isSubmitted} onChange={e => upd("holdSeconds", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder={holdPlaceholder("hotTemperature", row.item)} /></td>
                           <td className="px-2 py-1.5"><CorrectiveActionInput value={row.correctiveAction} disabled={isSubmitted} onChange={v => upd("correctiveAction", v)} needed={needsAction("hotTemperature", i)} line={row.item || `Cooking line ${i + 1}`} /></td>
-                          {!isSubmitted && <td className="px-2 py-1.5"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setCooking(cooking.filter((_, x) => x !== i))}><Trash2 className="w-3 h-3 text-destructive" /></Button></td>}
+                          {!isSubmitted && <td className="px-2 py-1.5"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label={`Remove line ${i + 1}`} onClick={() => setCooking(cooking.filter((_, x) => x !== i))}><Trash2 className="w-3 h-3 text-destructive" /></Button></td>}
                         </tr>
                       );
                     })}
@@ -1676,18 +1676,18 @@ export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {
                       const durationLabel = mins === null ? "" : mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
                       return (
                         <tr key={i} className={cn("hover:bg-muted/10", (overTime || needsAction("cooling", i)) && "bg-rose-50")}>
-                          <td className="px-3 py-1.5"><Input value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)} className="h-7 text-xs rounded-sm min-w-[110px]" placeholder="e.g. Soup" /></td>
-                          <td className="px-2 py-1.5"><Input type="time" value={row.timeStart} disabled={isSubmitted} onChange={e => upd("timeStart", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
+                          <td className="px-3 py-1.5"><Input aria-label={`Food item, line ${i + 1}`} value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)} className="h-7 text-xs rounded-sm min-w-[110px]" placeholder="e.g. Soup" /></td>
+                          <td className="px-2 py-1.5"><Input aria-label={`Time started, line ${i + 1}`} type="time" value={row.timeStart} disabled={isSubmitted} onChange={e => upd("timeStart", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
                           <td className="px-2 py-1.5"><Input inputMode="decimal" aria-label={`${row.item || `Cooling row ${i + 1}`} temperature when cooling started`} value={row.startTemp ?? ""} disabled={isSubmitted} onChange={e => upd("startTemp", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder="°C" /></td>
-                          <td className="px-2 py-1.5"><Input type="time" value={row.timeFinish} disabled={isSubmitted} onChange={e => upd("timeFinish", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
-                          <td className="px-2 py-1.5"><Input value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder="°C" /></td>
+                          <td className="px-2 py-1.5"><Input aria-label={`Time finished, line ${i + 1}`} type="time" value={row.timeFinish} disabled={isSubmitted} onChange={e => upd("timeFinish", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
+                          <td className="px-2 py-1.5"><Input aria-label={`Core temperature °C, line ${i + 1}`} value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder="°C" /></td>
                           <td className="px-2 py-1.5">
                             <span className={cn("text-xs font-medium", overTime ? "text-rose-600" : "text-muted-foreground")}>
                               {overTime && <AlertTriangle className="w-3 h-3 inline mr-0.5" />}{durationLabel}
                             </span>
                           </td>
                           <td className="px-2 py-1.5"><CorrectiveActionInput value={row.correctiveAction} disabled={isSubmitted} onChange={v => upd("correctiveAction", v)} needed={needsAction("cooling", i)} line={row.item || `Cooling line ${i + 1}`} /></td>
-                          {!isSubmitted && <td className="px-2 py-1.5"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setCooling(cooling.filter((_, x) => x !== i))}><Trash2 className="w-3 h-3 text-destructive" /></Button></td>}
+                          {!isSubmitted && <td className="px-2 py-1.5"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label={`Remove line ${i + 1}`} onClick={() => setCooling(cooling.filter((_, x) => x !== i))}><Trash2 className="w-3 h-3 text-destructive" /></Button></td>}
                         </tr>
                       );
                     })}
@@ -1730,12 +1730,12 @@ export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {
                       const upd = (f: keyof ReheatingRow, v: string) => { const n = [...reheating]; n[i] = { ...n[i], [f]: v }; setReheating(n); };
                       return (
                         <tr key={i} className={cn("hover:bg-muted/10", needsAction("reheating", i) && "bg-rose-50")}>
-                          <td className="px-3 py-1.5"><Input value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)} className="h-7 text-xs rounded-sm min-w-[110px]" placeholder="e.g. Curry" /></td>
-                          <td className="px-2 py-1.5"><Input type="time" value={row.timeStart} disabled={isSubmitted} onChange={e => upd("timeStart", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
-                          <td className="px-2 py-1.5"><Input type="time" value={row.timeFinish} disabled={isSubmitted} onChange={e => upd("timeFinish", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
-                          <td className="px-2 py-1.5"><Input value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder="°C" /></td>
+                          <td className="px-3 py-1.5"><Input aria-label={`Food item, line ${i + 1}`} value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)} className="h-7 text-xs rounded-sm min-w-[110px]" placeholder="e.g. Curry" /></td>
+                          <td className="px-2 py-1.5"><Input aria-label={`Time started, line ${i + 1}`} type="time" value={row.timeStart} disabled={isSubmitted} onChange={e => upd("timeStart", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
+                          <td className="px-2 py-1.5"><Input aria-label={`Time finished, line ${i + 1}`} type="time" value={row.timeFinish} disabled={isSubmitted} onChange={e => upd("timeFinish", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
+                          <td className="px-2 py-1.5"><Input aria-label={`Core temperature °C, line ${i + 1}`} value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder="°C" /></td>
                           <td className="px-2 py-1.5"><CorrectiveActionInput value={row.correctiveAction} disabled={isSubmitted} onChange={v => upd("correctiveAction", v)} needed={needsAction("reheating", i)} line={row.item || `Reheating line ${i + 1}`} /></td>
-                          {!isSubmitted && <td className="px-2 py-1.5"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setReheating(reheating.filter((_, x) => x !== i))}><Trash2 className="w-3 h-3 text-destructive" /></Button></td>}
+                          {!isSubmitted && <td className="px-2 py-1.5"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label={`Remove line ${i + 1}`} onClick={() => setReheating(reheating.filter((_, x) => x !== i))}><Trash2 className="w-3 h-3 text-destructive" /></Button></td>}
                         </tr>
                       );
                     })}
@@ -1779,11 +1779,11 @@ export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {
                     return (
                       <tr key={i} className={cn("hover:bg-muted/10", needsAction("hotHolding", i) && "bg-rose-50")}>
                         <td className="px-3 py-1.5">
-                          <Input value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)}
+                          <Input aria-label={`Food item, line ${i + 1}`} value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)}
                             className="h-7 text-xs rounded-sm" placeholder="Food item" />
                         </td>
                         <td className="px-3 py-1.5">
-                          <Input value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)}
+                          <Input aria-label={`Core temperature °C, line ${i + 1}`} value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)}
                             className="h-7 text-xs rounded-sm w-24" placeholder="e.g. 65" />
                         </td>
                         <td className="px-3 py-1.5">
@@ -1796,7 +1796,7 @@ export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {
                         </td>
                         {!isSubmitted && (
                           <td className="px-2 py-1.5">
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0"
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label={`Remove line ${i + 1}`}
                               onClick={() => setHotHolding(hotHolding.filter((_, x) => x !== i))}>
                               <Trash2 className="w-3.5 h-3.5 text-destructive" />
                             </Button>
@@ -1851,15 +1851,15 @@ export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {
                       return (
                         <tr key={i} className={cn("hover:bg-muted/10", needsAction("sousVide", i) && "bg-rose-50")}>
                           <td className="px-3 py-1.5">
-                            <Input value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)}
+                            <Input aria-label={`Food item, line ${i + 1}`} value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)}
                               className="h-7 text-xs rounded-sm min-w-[110px]" placeholder="e.g. Chicken breast" />
                           </td>
                           <td className="px-2 py-1.5">
-                            <Input value={row.targetTemp} disabled={isSubmitted} onChange={e => upd("targetTemp", e.target.value)}
+                            <Input aria-label={`Target temperature °C, line ${i + 1}`} value={row.targetTemp} disabled={isSubmitted} onChange={e => upd("targetTemp", e.target.value)}
                               className="h-7 text-xs rounded-sm w-16" placeholder="63" />
                           </td>
                           <td className="px-2 py-1.5">
-                            <Input value={row.waterTemp} disabled={isSubmitted} onChange={e => upd("waterTemp", e.target.value)}
+                            <Input aria-label={`Water temperature °C, line ${i + 1}`} value={row.waterTemp} disabled={isSubmitted} onChange={e => upd("waterTemp", e.target.value)}
                               className="h-7 text-xs rounded-sm w-16" placeholder="63.2" />
                           </td>
                           <td className="px-2 py-1.5">
@@ -1871,7 +1871,7 @@ export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {
                               className="h-7 text-xs rounded-sm w-24" />
                           </td>
                           <td className="px-2 py-1.5">
-                            <Input value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)}
+                            <Input aria-label={`Core temperature °C, line ${i + 1}`} value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)}
                               className="h-7 text-xs rounded-sm w-16" placeholder="°C" />
                           </td>
                           <td className="px-2 py-1.5">
@@ -1893,7 +1893,7 @@ export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {
                             </div>
                           </td>
                           <td className="px-2 py-1.5">
-                            <Input value={row.notes} disabled={isSubmitted} onChange={e => upd("notes", e.target.value)}
+                            <Input aria-label={`Notes, line ${i + 1}`} value={row.notes} disabled={isSubmitted} onChange={e => upd("notes", e.target.value)}
                               className="h-7 text-xs rounded-sm min-w-[100px]" placeholder="Notes" />
                           </td>
                           <td className="px-2 py-1.5">
@@ -1902,7 +1902,7 @@ export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {
                           </td>
                           {!isSubmitted && (
                             <td className="px-2 py-1.5">
-                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0"
+                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label={`Remove line ${i + 1}`}
                                 onClick={() => setSousVide(sousVide.filter((_, x) => x !== i))}>
                                 <Trash2 className="w-3 h-3 text-destructive" />
                               </Button>

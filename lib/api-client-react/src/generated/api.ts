@@ -335,6 +335,33 @@ import type {
 import { customFetch } from '../custom-fetch';
 import type { ErrorType , BodyType } from '../custom-fetch';
 
+// https://stackoverflow.com/questions/49579094/typescript-conditional-types-filter-out-readonly-properties-pick-only-requir/49579497#49579497
+type IfEquals<X, Y, A = X, B = never> = (<T>() => T extends X ? 1 : 2) extends <
+T,
+>() => T extends Y ? 1 : 2
+? A
+: B;
+
+type WritableKeys<T> = {
+[P in keyof T]-?: IfEquals<
+  { [Q in P]: T[P] },
+  { -readonly [Q in P]: T[P] },
+  P
+>;
+}[keyof T];
+
+type UnionToIntersection<U> =
+  (U extends any ? (k: U)=>void : never) extends ((k: infer I)=>void) ? I : never;
+type DistributeReadOnlyOverUnions<T> = T extends any ? NonReadonly<T> : never;
+
+type Writable<T> = Pick<T, WritableKeys<T>>;
+type NonReadonly<T> = [T] extends [UnionToIntersection<T>] ? {
+  [P in keyof Writable<T>]: T[P] extends object
+    ? NonReadonly<NonNullable<T[P]>>
+    : T[P];
+} : DistributeReadOnlyOverUnions<T>;
+
+
 type AwaitedInput<T> = PromiseLike<T> | T;
 
       type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
@@ -14041,7 +14068,7 @@ export const getUpdateIncidentConfigUrl = () => {
 /**
  * @summary Update Incident configuration
  */
-export const updateIncidentConfig = async (incidentConfig: IncidentConfig, options?: RequestInit): Promise<IncidentConfig> => {
+export const updateIncidentConfig = async (incidentConfig: NonReadonly<IncidentConfig>, options?: RequestInit): Promise<IncidentConfig> => {
 
   return customFetch<IncidentConfig>(getUpdateIncidentConfigUrl(),
   {
@@ -14057,8 +14084,8 @@ export const updateIncidentConfig = async (incidentConfig: IncidentConfig, optio
 
 
 export const getUpdateIncidentConfigMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateIncidentConfig>>, TError,{data: BodyType<IncidentConfig>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof updateIncidentConfig>>, TError,{data: BodyType<IncidentConfig>}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateIncidentConfig>>, TError,{data: BodyType<NonReadonly<IncidentConfig>>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateIncidentConfig>>, TError,{data: BodyType<NonReadonly<IncidentConfig>>}, TContext> => {
 
 const mutationKey = ['updateIncidentConfig'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -14070,7 +14097,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateIncidentConfig>>, {data: BodyType<IncidentConfig>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateIncidentConfig>>, {data: BodyType<NonReadonly<IncidentConfig>>}> = (props) => {
           const {data} = props ?? {};
 
           return  updateIncidentConfig(data,requestOptions)
@@ -14084,18 +14111,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type UpdateIncidentConfigMutationResult = NonNullable<Awaited<ReturnType<typeof updateIncidentConfig>>>
-    export type UpdateIncidentConfigMutationBody = BodyType<IncidentConfig>
+    export type UpdateIncidentConfigMutationBody = BodyType<NonReadonly<IncidentConfig>>
     export type UpdateIncidentConfigMutationError = ErrorType<unknown>
 
     /**
  * @summary Update Incident configuration
  */
 export const useUpdateIncidentConfig = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateIncidentConfig>>, TError,{data: BodyType<IncidentConfig>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateIncidentConfig>>, TError,{data: BodyType<NonReadonly<IncidentConfig>>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof updateIncidentConfig>>,
         TError,
-        {data: BodyType<IncidentConfig>},
+        {data: BodyType<NonReadonly<IncidentConfig>>},
         TContext
       > => {
       return useMutation(getUpdateIncidentConfigMutationOptions(options));
