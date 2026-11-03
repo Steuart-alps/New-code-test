@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, boolean, index } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, boolean, index, doublePrecision } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { clientsTable } from "./clients";
@@ -34,6 +34,13 @@ export const sitesTable = pgTable("sites", {
   // null means 11:00 for opening and 21:00 for closing.
   openingReminderAt: text("opening_reminder_at"),
   closingReminderAt: text("closing_reminder_at"),
+  // Where the site is, for its frost warnings (api-server lib/frostWarnings.ts):
+  // looked up from the postcode in the address. locationPostcode is the
+  // postcode last looked up, so a new postcode is looked up again; latitude
+  // and longitude stay null when it could not be found.
+  locationPostcode: text("location_postcode"),
+  latitude: doublePrecision("latitude"),
+  longitude: doublePrecision("longitude"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [

@@ -6,6 +6,7 @@ import { apiFetch } from "@/lib/api";
 import { type KitchenCheckState } from "@/lib/kitchen-dashboard-status";
 import { KitchenStatusPill } from "@/components/kitchen-status-pill";
 import { ComplianceChecksDue } from "@/components/compliance-checks-due";
+import { FrostWarningCard } from "@/components/frost-warning-card";
 import { TodayByDepartmentCard } from "@/components/today-by-department";
 import { RegisterReviewsDue } from "@/components/register-reviews-due";
 import { DashboardStartCards } from "@/components/dashboard-start-cards";
@@ -732,6 +733,7 @@ export default function Dashboard() {
 
         <SayItButton siteId={siteId === "all" ? null : Number(siteId)} className="w-full sm:w-auto h-11" />
 
+        <FrostWarningCard siteId={siteId === "all" ? null : Number(siteId)} />
         <DashboardStartCards />
         <ComplianceChecksDue siteId={siteId === "all" ? null : Number(siteId)} />
         <RegisterReviewsDue siteId={siteId === "all" ? null : Number(siteId)} />

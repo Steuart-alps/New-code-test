@@ -246,6 +246,7 @@ export default function SitesPage() {
             <div className="space-y-1.5">
               <Label>Site Address</Label>
               <Textarea value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="Street, town, postcode" rows={2} />
+              <p className="text-xs text-muted-foreground">Include the postcode: it is used to warn you the afternoon before a frosty night, so you can grit and de-ice.</p>
             </div>
             <div className="space-y-1.5">
               <Label>Site Telephone</Label>

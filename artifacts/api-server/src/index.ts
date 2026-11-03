@@ -52,6 +52,7 @@ import { runPersonalReminderJob } from "./lib/personalReminders";
 import { ensureRosterCheckTasks } from "./lib/rosterChecks";
 import { runUrgentAlertJob } from "./lib/urgentAlerts";
 import { runNightFireWalkChaseJob } from "./lib/nightFireWalks";
+import { runFrostWarningJob } from "./lib/frostWarnings";
 import { runTrackReminderJob } from "./lib/trackReminders";
 import { runScheduledServicePriceAudit, SERVICE_PRICE_AUDIT_CRON } from "./lib/servicePriceAudit";
 import { runStripeTaxCheck, STRIPE_TAX_CHECK_CRON } from "./lib/stripeTaxCheck";
@@ -324,6 +325,15 @@ function startScheduler() {
     (result) => result.actionsRaised === 0 && result.errors === 0,
   ));
   logger.info("Night fire walk chase scheduler started (hourly at :15)");
+
+  // Frost warnings: each business's sites get tonight's forecast checked from
+  // its local 15:00; a low below 4°C emails the people who look after the
+  // site (lib/frostWarnings.ts). Hourly, so a failed request retries.
+  schedule("35 * * * *", "frost-warnings", logged(
+    "Frost warning job complete", () => runFrostWarningJob(),
+    (result) => result.forecastsFetched === 0 && result.emailsSent === 0 && result.errors === 0,
+  ));
+  logger.info("Frost warning scheduler started (hourly at :35)");
 
   schedule("0 8 * * *", "contractor-reminders", logged("Scheduled reminder job complete", runReminderJob), { daily: true });
   logger.info("Contractor reminder scheduler started (daily at 08:00)");
