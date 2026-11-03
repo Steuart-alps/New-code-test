@@ -2327,6 +2327,9 @@ async function runRuntimeMigrationsOnce() {
     await migrateRecordSignatures();
     await addFireAlarmPanelToSavedPremisesChecks();
 
+    // ---- Frost warnings (Nov 2026) ----
+    await migrateFrostWarnings();
+
     // ---- Accident book addresses (Nov 2026) ----
     // Mirrors lib/db/src/schema/incidents.ts involvedAddress / reporterAddress.
     await db.execute(sql`ALTER TABLE "incidents" ADD COLUMN IF NOT EXISTS "involved_address" text`);
@@ -6333,6 +6336,29 @@ async function migrateFireCallPoints() {
   // ... and when the reminder about them goes out (blank = 11:00 and 21:00).
   await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "opening_reminder_at" text`);
   await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "closing_reminder_at" text`);
+}
+
+// Frost warnings (Nov 2026): each site's location, looked up from the postcode
+// in its address, and the overnight forecast checked each afternoon.
+// Mirrors lib/db/src/schema/sites.ts and frost-forecasts.ts.
+async function migrateFrostWarnings() {
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "location_postcode" text`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "latitude" double precision`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "longitude" double precision`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "frost_forecasts" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer NOT NULL REFERENCES "sites"("id") ON DELETE CASCADE,
+      "night_of" date NOT NULL,
+      "lowest_c" real NOT NULL,
+      "coldest_at" timestamptz,
+      "warn" boolean NOT NULL DEFAULT false,
+      "checked_at" timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_frost_forecasts_site_night" ON "frost_forecasts" ("site_id", "night_of")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_frost_forecasts_client_night" ON "frost_forecasts" ("client_id", "night_of")`);
 }
 
 // Equipment list and QR labels (Oct 2026). Water checks and Compliance Checks

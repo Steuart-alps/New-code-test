@@ -301,6 +301,24 @@ export interface AllergenChartSignoffInput {
   note?: string | null;
 }
 
+export type FrostWarningsWarningsItem = {
+  siteId: number;
+  siteName: string;
+  /** The overnight low (°C). */
+  lowestC: number;
+  coldestAt: string | null;
+};
+
+export interface FrostWarnings {
+  /** The evening tonight's night starts. */
+  nightOf: string;
+  /** Warnings are for an overnight low below this (°C). */
+  belowC: number;
+  /** Credit for the forecast, shown with the warning. */
+  credit: string;
+  warnings: FrostWarningsWarningsItem[];
+}
+
 export type TodayByDepartmentRowKind = typeof TodayByDepartmentRowKind[keyof typeof TodayByDepartmentRowKind];
 
 
@@ -5736,6 +5754,10 @@ export const ListComplianceItemsPriority = {
 } as const;
 
 export type GetTodayByDepartmentParams = {
+siteId?: number;
+};
+
+export type GetFrostWarningsParams = {
 siteId?: number;
 };
 

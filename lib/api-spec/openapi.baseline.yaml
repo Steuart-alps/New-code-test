@@ -1985,6 +1985,34 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /dashboard/frost-warnings:
+    get:
+      operationId: getFrostWarnings
+      tags: [compliance-items]
+      summary: Tonight's frost warnings
+      description: >
+        Sites the person can see whose overnight forecast (18:00 to 09:00 local)
+        drops below 4°C, so they grit and de-ice. The forecast is checked from
+        15:00 for sites whose address has a UK postcode; tonight runs from midday
+        to midday the next day.
+      parameters:
+        - in: query
+          name: siteId
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Tonight's frost warnings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FrostWarnings"
+        "400":
+          description: The site is not one of this client's sites
+        "403":
+          description: The site belongs to a department the caller cannot see
+
   /settings:
     get:
       operationId: getSettings
@@ -6962,6 +6990,38 @@ components:
           type: string
           nullable: true
           maxLength: 1000
+    FrostWarnings:
+      type: object
+      required: [nightOf, belowC, credit, warnings]
+      properties:
+        nightOf:
+          type: string
+          format: date
+          description: The evening tonight's night starts.
+        belowC:
+          type: number
+          description: Warnings are for an overnight low below this (°C).
+        credit:
+          type: string
+          description: Credit for the forecast, shown with the warning.
+        warnings:
+          type: array
+          items:
+            type: object
+            required: [siteId, siteName, lowestC, coldestAt]
+            properties:
+              siteId:
+                type: integer
+              siteName:
+                type: string
+              lowestC:
+                type: number
+                description: The overnight low (°C).
+              coldestAt:
+                type: string
+                format: date-time
+                nullable: true
+
     TodayByDepartment:
       type: object
       required: [date, groups]

@@ -124,6 +124,7 @@ import type {
   FoodSafetyMonthlySummary,
   FoodSafetyRecord,
   FoodSafetyRecordSummary,
+  FrostWarnings,
   GetBusinessDashboardParams,
   GetCoshhTrackStatusParams,
   GetDailyTrackHistoryParams,
@@ -137,6 +138,7 @@ import type {
   GetFoodSafetyMonthSummaryParams,
   GetFoodSafetyRecordByDateParams,
   GetFoodSafetySummaryParams,
+  GetFrostWarningsParams,
   GetGreenTrackPreStartDayParams,
   GetGreenTrackShedTeamParams,
   GetHotTubConfigParams,
@@ -6362,6 +6364,91 @@ export function useGetTodayByDepartment<TData = Awaited<ReturnType<typeof getTod
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetTodayByDepartmentQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFrostWarningsUrl = (params?: GetFrostWarningsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/dashboard/frost-warnings?${stringifiedParams}` : `/api/dashboard/frost-warnings`
+}
+
+/**
+ * Sites the person can see whose overnight forecast (18:00 to 09:00 local) drops below 4°C, so they grit and de-ice. The forecast is checked from 15:00 for sites whose address has a UK postcode; tonight runs from midday to midday the next day.
+ * @summary Tonight's frost warnings
+ */
+export const getFrostWarnings = async (params?: GetFrostWarningsParams, options?: RequestInit): Promise<FrostWarnings> => {
+
+  return customFetch<FrostWarnings>(getGetFrostWarningsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFrostWarningsQueryKey = (params?: GetFrostWarningsParams,) => {
+    return [
+    `/api/dashboard/frost-warnings`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetFrostWarningsQueryOptions = <TData = Awaited<ReturnType<typeof getFrostWarnings>>, TError = ErrorType<void>>(params?: GetFrostWarningsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFrostWarnings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFrostWarningsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFrostWarnings>>> = ({ signal }) => getFrostWarnings(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFrostWarnings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFrostWarningsQueryResult = NonNullable<Awaited<ReturnType<typeof getFrostWarnings>>>
+export type GetFrostWarningsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Tonight's frost warnings
+ */
+
+export function useGetFrostWarnings<TData = Awaited<ReturnType<typeof getFrostWarnings>>, TError = ErrorType<void>>(
+ params?: GetFrostWarningsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFrostWarnings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFrostWarningsQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
