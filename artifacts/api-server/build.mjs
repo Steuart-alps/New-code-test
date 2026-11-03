@@ -124,6 +124,12 @@ import __bannerUrl from 'node:url';
 globalThis.require = __bannerCrReq(import.meta.url);
 globalThis.__filename = __bannerUrl.fileURLToPath(import.meta.url);
 globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
+
+// Mapping an error's stack through this bundle's ~25 MB source map takes
+// over 100 MB of heap, which on a 512 MB instance (about 256 MB of heap)
+// crashes the server on its first logged error. Keep source maps off even
+// if a start command still passes --enable-source-maps.
+process.setSourceMapsEnabled?.(false);
     `,
     },
   });
