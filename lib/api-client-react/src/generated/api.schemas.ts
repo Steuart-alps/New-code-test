@@ -402,6 +402,20 @@ export interface SignTrainingRecordRequest {
   signature: string;
 }
 
+export interface ActiveBusinessRequest {
+  businessId: number;
+}
+
+export type OwnerBusinessesBusinessesItem = {
+  id: number;
+  name: string;
+};
+
+export interface OwnerBusinesses {
+  activeClientId: number | null;
+  businesses: OwnerBusinessesBusinessesItem[];
+}
+
 export interface ActiveDepartmentRequest {
   departmentId: number;
 }

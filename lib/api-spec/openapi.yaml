@@ -528,6 +528,41 @@ paths:
           description: Not a Manager
         "404":
           description: Not one of the Manager's departments
+  /users/me/businesses:
+    get:
+      operationId: listOwnerBusinesses
+      tags: [users]
+      summary: The businesses an Owner can switch between (their own first) and the one they're working in
+      responses:
+        "200":
+          description: The Owner's businesses
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OwnerBusinesses" }
+        "403":
+          description: Not an Owner
+  /users/me/active-business:
+    put:
+      operationId: setActiveBusiness
+      tags: [users]
+      summary: Choose which of their businesses an Owner of several is working in (kept for the session)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActiveBusinessRequest" }
+      responses:
+        "200":
+          description: The chosen business and all of the Owner's businesses
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OwnerBusinesses" }
+        "400":
+          description: No business given
+        "403":
+          description: Not an Owner
+        "404":
+          description: Not one of the Owner's businesses
   /healthz:
     get:
       operationId: healthCheck
@@ -7141,6 +7176,24 @@ components:
       required: [signature]
       properties:
         signature: { type: string, description: Signature image as a data URL }
+    ActiveBusinessRequest:
+      type: object
+      required: [businessId]
+      properties:
+        businessId: { type: integer }
+    OwnerBusinesses:
+      type: object
+      required: [activeClientId, businesses]
+      properties:
+        activeClientId: { type: integer, nullable: true }
+        businesses:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id: { type: integer }
+              name: { type: string }
     ActiveDepartmentRequest:
       type: object
       required: [departmentId]

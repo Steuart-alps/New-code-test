@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { eq, sql } from "drizzle-orm";
 import { auditContext, db } from "@workspace/db";
-import { clientsTable, consultantClientsTable, userDepartmentsTable } from "@workspace/db/schema";
+import { clientsTable, consultantClientsTable, ownerBusinessesTable, userDepartmentsTable } from "@workspace/db/schema";
 import { getUserById } from "../lib/auth";
 import { isTwoFactorRequired } from "../lib/twoFactorPolicy";
 import { storedCredentialCandidates } from "../lib/sessionRevocation";
@@ -15,6 +15,10 @@ declare global {
       // consultant-role users from consultant_clients plus their own clientId;
       // a consultant who is also a platform operator gets every business.
       allowedClientIds?: Set<number>;
+      // Every business an Owner owns, their own (users.client_id) first. Set
+      // only for Owners of more than one; currentUser.clientId is then the
+      // one they're working in, so every route stays scoped to that business.
+      ownerBusinessIds?: number[];
       // Every department a Manager covers, main one first. Set for Managers
       // without every-department access; currentUser.departmentId is then
       // the one they're working in.
@@ -70,6 +74,35 @@ async function loadManagerDepartments(req: Request) {
   if (active !== user.departmentId) req.currentUser = { ...user, departmentId: active };
 }
 
+/** Every business an Owner owns: their own first, then the ones added to them. */
+export async function ownerBusinessIds(user: Pick<SafeUser, "id" | "role" | "clientId">): Promise<number[]> {
+  if (user.role !== "client_admin" || user.clientId == null) return user.clientId != null ? [user.clientId] : [];
+  const links = await db
+    .select({ clientId: ownerBusinessesTable.clientId })
+    .from(ownerBusinessesTable)
+    .where(eq(ownerBusinessesTable.userId, user.id))
+    .orderBy(ownerBusinessesTable.id);
+  const ids = [user.clientId];
+  for (const link of links) if (!ids.includes(link.clientId)) ids.push(link.clientId);
+  return ids;
+}
+
+// An Owner of several businesses works in one at a time, chosen in the web
+// session. Only that business is theirs for the request: canAccessClient and
+// getClientId read currentUser.clientId, so nothing else needs to know. The
+// phone app (no session choice) stays on their own business.
+async function loadOwnerBusinesses(req: Request) {
+  const user = req.currentUser;
+  if (!user || user.role !== "client_admin" || user.clientId == null) return;
+  const ids = await ownerBusinessIds(user);
+  if (ids.length < 2) return;
+  req.ownerBusinessIds = ids;
+  const chosen = req.session?.activeClientId;
+  if (chosen != null && chosen !== user.clientId && ids.includes(chosen)) {
+    req.currentUser = { ...user, clientId: chosen };
+  }
+}
+
 export async function loadUser(req: Request, _res: Response, next: NextFunction) {
   let userId: number | undefined;
 
@@ -104,6 +137,7 @@ export async function loadUser(req: Request, _res: Response, next: NextFunction)
     if (user && user.active) {
       req.currentUser = user;
       await loadConsultantClients(req, userId);
+      await loadOwnerBusinesses(req);
       await loadManagerDepartments(req);
     }
   }

@@ -38,6 +38,7 @@ import { emailButton, escapeHtml, getPublicAppUrl, sendSystemEmail } from "./ema
 import { claimEmailDelivery, emailDeliveryIdempotencyKey, settleEmailDelivery } from "./emailDeliveryClaims";
 import { logger as defaultLogger } from "./logger";
 import { STORAGE_AUTO_TOP_UP_SETTING, StorageFullError } from "./storageFull";
+import { ownersOfClient } from "./ownerBusinesses";
 
 export { STORAGE_AUTO_TOP_UP_SETTING, STORAGE_FULL_CODE, STORAGE_FULL_MESSAGE, StorageFullError } from "./storageFull";
 
@@ -238,9 +239,8 @@ async function topUpStorage(clientId: number, log: Log): Promise<boolean> {
 export async function storageOwnersOf(clientId: number) {
   const result = await db.execute(sql`
     SELECT id, name, email FROM users
-     WHERE client_id = ${clientId}
+     WHERE ((client_id = ${clientId} AND role = 'consultant') OR ${ownersOfClient(clientId)})
        AND active
-       AND role IN ('consultant', 'client_admin')
        AND email IS NOT NULL AND email <> ''
      ORDER BY id
      LIMIT 30
