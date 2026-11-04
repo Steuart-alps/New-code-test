@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
@@ -384,6 +384,7 @@ export default function TreeTrackPage() {
   const [form, setForm] = useState(emptyForm());
   const [resultChanged, setResultChanged] = useState(false);
   const [tab, setTab] = useState<"trees" | "log">("trees");
+  const tabsRef = useRef<HTMLDivElement>(null);
   const [treeSearch, setTreeSearch] = useState("");
   const [showRemoved, setShowRemoved] = useState(false);
   const [showTreeDialog, setShowTreeDialog] = useState(false);
@@ -489,6 +490,22 @@ export default function TreeTrackPage() {
     setForm({ ...emptyForm(), siteId: workingSiteId ? String(workingSiteId) : "" });
     media.clear();
     setShowDialog(true);
+  }
+
+  /**
+   * A box at the top: show that type's records in the Inspection log, or
+   * start one when none has been recorded yet. Clicking it again shows all.
+   */
+  function openCheckTypeBox(checkType: CheckType, status: CheckStatus) {
+    if (status === "never") {
+      openAdd();
+      setForm(f => ({ ...f, checkType }));
+      return;
+    }
+    const showing = tab === "log" && filterType === checkType;
+    setFilterType(showing ? "all" : checkType);
+    setTab("log");
+    if (!showing) requestAnimationFrame(() => tabsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
   /** The inspection form for one tree, its place filled in from the tree list. */
@@ -749,11 +766,13 @@ export default function TreeTrackPage() {
             return (
               <button
                 key={s.checkType}
-                onClick={() => setFilterType(filterType === s.checkType ? "all" : s.checkType as CheckType)}
+                type="button"
+                onClick={() => openCheckTypeBox(s.checkType as CheckType, s.status)}
+                title={s.status === "never" ? "Record the first one" : "Show these in the inspection log"}
                 className={cn(
                   "p-3 rounded-sm border text-left transition-all hover:shadow-sm",
                   cfg.bg,
-                  filterType === s.checkType && "ring-2 ring-offset-1 ring-primary"
+                  tab === "log" && filterType === s.checkType && "ring-2 ring-offset-1 ring-primary"
                 )}
               >
                 <div className={cn("flex items-center gap-1 mb-1.5", cfg.text)}>
@@ -773,7 +792,7 @@ export default function TreeTrackPage() {
                   </div>
                 )}
                 {s.status === "never" && (
-                  <div className="text-xs mt-1 text-slate-400">Not yet recorded</div>
+                  <div className="text-xs mt-1 text-slate-400">Not yet recorded · tap to record</div>
                 )}
               </button>
             );
@@ -816,7 +835,7 @@ export default function TreeTrackPage() {
         </div>
       )}
 
-      <Tabs value={tab} onValueChange={v => setTab(v as "trees" | "log")} className="space-y-4">
+      <Tabs ref={tabsRef} value={tab} onValueChange={v => setTab(v as "trees" | "log")} className="space-y-4 scroll-mt-24">
         <TabsList>
           <TabsTrigger value="trees">Trees ({activeTrees.length})</TabsTrigger>
           <TabsTrigger value="log">Inspection log ({records.length})</TabsTrigger>
