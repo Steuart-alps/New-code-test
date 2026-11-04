@@ -18,6 +18,7 @@ import { TRACK_MODULES, TRACK_MODULE_KEYS } from "../lib/trackModules";
 import { candidateCanSeeSite, loadEligibleOwners } from "../lib/trackOwners";
 import { siteVisibleSql, siteVisibleToDepartment } from "../lib/departmentSites";
 import { listAssignees } from "../lib/assignees";
+import { getPickedModules } from "./setup";
 
 const router: IRouter = Router();
 
@@ -39,8 +40,9 @@ router.get("/track-owners", requireAuth, async (req, res) => {
   const admin = isAdmin(req.currentUser?.role);
   const departmentId = getActiveDepartmentId(req);
 
-  const [services, candidates, siteResult, ownerResult] = await Promise.all([
+  const [services, picked, candidates, siteResult, ownerResult] = await Promise.all([
     getEntitledServices(clientId),
+    getPickedModules(clientId).catch(() => [] as string[]),
     loadEligibleOwners(clientId),
     db.execute(sql`
       SELECT s.id, s.name FROM sites s
@@ -73,12 +75,25 @@ router.get("/track-owners", requireAuth, async (req, res) => {
       eligible: eligibleIds.has(Number(row.user_id)),
     }));
 
+  // "chosen": the tracks this business said it uses in the setup wizard
+  // (Modules to start with). Trial, free and Complete businesses are entitled
+  // to every track, so Settings lists only the chosen ones and keeps the rest
+  // behind "Show other tracks". Always chosen: tracks every business has
+  // (Report actions, Compliance checks), any track that already has an owner,
+  // and every track when nothing was picked.
+  const pickedKeys = new Set(picked);
+  const ownedModules = new Set(owners.map((row) => row.module));
   res.json({
-    modules: TRACK_MODULES.map((module) => ({
-      key: module.key,
-      label: module.label,
-      enabled: module.services.some((key) => isEntitled(services, key)),
-    })),
+    modules: TRACK_MODULES.map((module) => {
+      const enabled = module.services.some((key) => isEntitled(services, key));
+      const chosen = enabled && (
+        pickedKeys.size === 0
+        || module.services.includes("core")
+        || module.services.some((key) => pickedKeys.has(key))
+        || ownedModules.has(module.key)
+      );
+      return { key: module.key, label: module.label, enabled, chosen };
+    }),
     owners,
     sites,
     // Colleague details are only listed for the people who assign owners.

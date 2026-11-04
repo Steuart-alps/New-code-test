@@ -3,10 +3,11 @@ import { z } from "zod";
 import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import { passwordProblem } from "../lib/passwordPolicy";
-import { usersTable, userRoleEnum, clientsTable, departmentsTable, userDepartmentsTable, staffMembersTable, passwordResetTokensTable, auditEventsTable, incidentRiddorEventsTable, feedbackReportReviewsTable } from "@workspace/db/schema";
+import { usersTable, userRoleEnum, clientsTable, ownerBusinessesTable, departmentsTable, userDepartmentsTable, staffMembersTable, passwordResetTokensTable, auditEventsTable, incidentRiddorEventsTable, feedbackReportReviewsTable } from "@workspace/db/schema";
 import { eq, and, inArray, isNull, desc, gt, sql } from "drizzle-orm";
 import { hashPassword, getUserWithClientByEmail } from "../lib/auth";
 import { requireAuth, requireClientAdmin, requireRole, requireUserManager, canAccessClient } from "../middleware/requireAuth";
+import { isAddedOwner, ownerBusinessList } from "../lib/ownerBusinesses";
 import { escapeHtml, sendSystemEmail, getPublicAppUrl } from "../lib/email";
 import { resetTwoFactorWithAlert, deliverTwoFactorResetAlert } from "../lib/twoFactorResetAlerts";
 import { hashStoredCredential, revokeUserSessions } from "../lib/sessionRevocation";
@@ -93,6 +94,43 @@ async function inviteDetails(user: InvitedUser) {
  * Existing unused reset/setup links are superseded before the new link is sent.
  * The email names who added them, the business, their role and departments.
  */
+/** Tells an existing Owner they were added as an Owner of another business. */
+async function sendAddedOwnerEmail(
+  user: { email: string; name: string },
+  clientId: number,
+  addedBy: string | null,
+  log?: { error: (o: unknown, m?: string) => void },
+): Promise<boolean> {
+  try {
+    const [client] = await db.select({ name: clientsTable.name }).from(clientsTable).where(eq(clientsTable.id, clientId));
+    const business = client?.name ?? "another business";
+    const who = addedBy?.trim() || "An administrator";
+    const appUrl = getPublicAppUrl();
+    await sendSystemEmail({
+      to: user.email,
+      subject: `You're now an Owner of ${business} on ComplyTrack`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #1e293b;">You've been added to ${escapeHtml(business)}</h2>
+          <p>Hi ${escapeHtml(user.name)},</p>
+          <p>${escapeHtml(who)} has added you as an <strong>Owner</strong> of <strong>${escapeHtml(business)}</strong> on ComplyTrack.</p>
+          <p>Sign in as usual with your existing login. Use the business menu at the top of the page to switch between your businesses.</p>
+          <p style="margin: 24px 0;">
+            <a href="${appUrl}/login" style="background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">Sign in</a>
+          </p>
+          <p>If you weren't expecting this, ask ${escapeHtml(who)} to take you off in User Management.</p>
+          <p>Best regards,<br><strong>ComplyTrack</strong></p>
+        </div>
+      `,
+      text: `Hi ${user.name},\n\n${who} has added you as an Owner of ${business} on ComplyTrack.\n\nSign in as usual with your existing login (${appUrl}/login). Use the business menu at the top of the page to switch between your businesses.\n\nIf you weren't expecting this, ask ${who} to take you off in User Management.\n\nBest regards,\nComplyTrack`,
+    });
+    return true;
+  } catch (err) {
+    log?.error({ err }, "Failed to send added-owner email");
+    return false;
+  }
+}
+
 async function sendInviteEmail(
   user: InvitedUser,
   invitedBy: string | null,
@@ -377,8 +415,32 @@ router.get("/users", requireAuth, requireUserManager, async (req, res) => {
     if (isManager(user)) rows = rows.filter((row) => row.id === user.id || managerCanActOn(user, row));
   }
 
+  // Owners added from another business (one login for several businesses)
+  // are listed with this business's people. They are changed in their own
+  // business; here they can only be taken off (DELETE removes the link).
+  const listedClientId = user.role === "consultant"
+    ? (req.query.clientId ? Number(req.query.clientId) : null)
+    : user.clientId;
+  let addedOwnerIds = new Set<number>();
+  if (listedClientId != null && !isManager(user)) {
+    const added = await db
+      .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, staffRosterId: usersTable.staffRosterId, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
+      .from(ownerBusinessesTable)
+      .innerJoin(usersTable, eq(usersTable.id, ownerBusinessesTable.userId))
+      .where(and(eq(ownerBusinessesTable.clientId, listedClientId), eq(usersTable.role, "client_admin")));
+    const listed = new Set(rows.map((row) => row.id));
+    for (const row of added) {
+      addedOwnerIds.add(row.id);
+      if (!listed.has(row.id)) rows.push({ ...row, clientId: listedClientId });
+    }
+  }
+
   const invitations = await invitationsFor(rows.map((row) => row.id));
-  res.json((await withDepartmentIds(rows)).map((row) => ({ ...row, invitation: invitations.get(row.id) ?? null })));
+  res.json((await withDepartmentIds(rows)).map((row) => ({
+    ...row,
+    invitation: invitations.get(row.id) ?? null,
+    ...(addedOwnerIds.has(row.id) ? { addedOwner: true } : {}),
+  })));
 });
 
 router.post("/users", requireAuth, requireUserManager, async (req, res) => {
@@ -459,6 +521,38 @@ router.post("/users", requireAuth, requireUserManager, async (req, res) => {
   // One account per address (sign-in matches case-insensitively). Retrying a
   // failed invitation uses resend-invite on the existing account instead.
   const existing = await getUserWithClientByEmail(email);
+  // An Owner of another business added as an Owner here keeps their one login
+  // and can switch between the businesses. Only Owners (or ALPS) can do this.
+  if (existing && body.role === "client_admin" && body.clientId != null
+    && (actor.role === "client_admin" || actor.role === "consultant")
+    && existing.user.role === "client_admin" && existing.user.active
+    && existing.user.clientId != null && existing.user.clientId !== body.clientId) {
+    const clientId = body.clientId;
+    const linked = await db.insert(ownerBusinessesTable)
+      .values({ userId: existing.user.id, clientId, addedBy: actor.id })
+      .onConflictDoNothing()
+      .returning({ id: ownerBusinessesTable.id });
+    if (linked.length === 0) {
+      res.status(409).json({ error: `${existing.user.email} is already an Owner here.` });
+      return;
+    }
+    await appendAuditEvent(req, {
+      clientId,
+      entityType: "user",
+      entityId: existing.user.id,
+      action: "owner_business_added",
+      after: { email: existing.user.email },
+    }).catch((err: unknown) => req.log.error({ err }, "Could not record the added Owner"));
+    const addedEmail = await sendAddedOwnerEmail(existing.user, clientId, req.currentUser?.name ?? null, req.log) ? "sent" : "failed";
+    const [row] = await withDepartmentIds([{
+      id: existing.user.id, email: existing.user.email, name: existing.user.name, role: existing.user.role,
+      clientId, departmentId: null, active: existing.user.active, totpEnabled: existing.user.totpEnabled,
+      isMaintenanceManager: false, isDepartmentManager: false, allDepartments: false, staffRosterId: null,
+      createdAt: existing.user.createdAt, updatedAt: existing.user.updatedAt,
+    }]);
+    res.status(201).json({ ...row, addedOwner: true, inviteEmail: null, addedEmail });
+    return;
+  }
   if (existing) {
     const sameBusiness = existing.user.clientId != null && canAccessClient(req, existing.user.clientId);
     res.status(409).json({
@@ -599,6 +693,28 @@ router.put("/users/me/active-department", requireAuth, requireRole("client_manag
   }
   req.session.activeDepartmentId = parsed.data.departmentId;
   res.json({ departmentId: parsed.data.departmentId, departmentIds: ids });
+});
+
+// An Owner of several businesses picks the one they're working in; it is kept
+// in their session (see loadUser) and scopes every page they open.
+router.get("/users/me/businesses", requireAuth, requireRole("client_admin"), async (req, res) => {
+  const ids = req.ownerBusinessIds ?? (req.currentUser!.clientId != null ? [req.currentUser!.clientId] : []);
+  res.json({ activeClientId: req.currentUser!.clientId ?? null, businesses: await ownerBusinessList(ids) });
+});
+
+router.put("/users/me/active-business", requireAuth, requireRole("client_admin"), async (req, res) => {
+  const parsed = z.object({ businessId: z.number().int().positive() }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "businessId is required" });
+    return;
+  }
+  const ids = req.ownerBusinessIds ?? (req.currentUser!.clientId != null ? [req.currentUser!.clientId] : []);
+  if (!ids.includes(parsed.data.businessId)) {
+    res.status(404).json({ error: "Business not found" });
+    return;
+  }
+  req.session.activeClientId = parsed.data.businessId;
+  res.json({ activeClientId: parsed.data.businessId, businesses: await ownerBusinessList(ids) });
 });
 
 router.put("/users/:id", requireAuth, requireUserManager, async (req, res) => {
@@ -770,6 +886,28 @@ router.delete("/users/:id", requireAuth, requireUserManager, async (req, res) =>
   const target = targetRows[0];
   if (!target) {
     res.status(404).json({ error: "User not found" });
+    return;
+  }
+
+  // An Owner added from another business: take them off this business only.
+  // Their login and their own business are untouched.
+  const workingClientId = actor.role === "consultant"
+    ? (req.query.clientId ? Number(req.query.clientId) : null)
+    : actor.clientId;
+  if (target.clientId !== workingClientId && workingClientId != null
+    && (actor.role === "client_admin" || actor.role === "consultant")
+    && canAccessClient(req, workingClientId)
+    && await isAddedOwner(target.id, workingClientId)) {
+    await db.delete(ownerBusinessesTable)
+      .where(and(eq(ownerBusinessesTable.userId, target.id), eq(ownerBusinessesTable.clientId, workingClientId)));
+    await appendAuditEvent(req, {
+      clientId: workingClientId,
+      entityType: "user",
+      entityId: target.id,
+      action: "owner_business_removed",
+      before: { email: target.email },
+    }).catch((err: unknown) => req.log.error({ err }, "Could not record the removed Owner"));
+    res.json({ ok: true, removedFromBusiness: true });
     return;
   }
 

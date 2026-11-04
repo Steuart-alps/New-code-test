@@ -282,6 +282,8 @@ app.use("/api/imports/pat-appliances/read", express.json({ limit: "12mb" }));
 // encoding, all files together).
 app.use("/api/certificates/read", express.json({ limit: "28mb" }));
 app.use("/api/certificates/read-files", express.json({ limit: "28mb" }));
+// So does a safety data sheet read into a COSHH assessment draft.
+app.use("/api/coshh-track/assessments/read-sds", express.json({ limit: "28mb" }));
 // A contractor's certificate upload arrives as base64 (10 MB at most before encoding).
 app.use("/api/certificate-upload", express.json({ limit: "14mb" }));
 // A contractor's drawn signature arrives as a PNG data URL when they sign in at a site.

@@ -73,6 +73,22 @@ assert.equal(aiAssessment.checkedBy, owner.userId);
 await ok(owner.request("PUT", `/coshh-track/assessments/${aiAssessment.id}`, { ...draft, task: "Descaling" }), 400, "editing an AI draft needs the tick again");
 await ok(owner.request("PUT", `/coshh-track/assessments/${aiAssessment.id}`, { ...draft, task: "Descaling", checkedAgainstSds: true }), 200, "edit AI draft with the tick");
 
+// Drafting from a safety data sheet: owners and managers only; off without an Anthropic key.
+const sdsStatus = await ok(owner.request("GET", "/coshh-track/sds-reading"), 200, "SDS reading status");
+assert.equal(typeof sdsStatus.available, "boolean");
+assert.equal(typeof sdsStatus.ai.active, "boolean", "the AI add-on's state comes with it");
+await ok(lead.request("GET", "/coshh-track/sds-reading"), 200, "department manager SDS reading status");
+await ok(staff.request("GET", "/coshh-track/sds-reading"), 403, "staff SDS reading status");
+const sdsFile = { fileName: "sds.pdf", mimeType: "application/pdf", data: Buffer.from("%PDF-1.4\n").toString("base64") };
+await ok(staff.request("POST", "/coshh-track/assessments/read-sds", { files: [sdsFile] }), 403, "staff read SDS");
+await ok(viewer.request("POST", "/coshh-track/assessments/read-sds", { files: [sdsFile] }), 403, "viewer read SDS");
+if (!sdsStatus.available) {
+  const off = await ok(owner.request("POST", "/coshh-track/assessments/read-sds", { files: [sdsFile] }), 503, "SDS reading without a key");
+  assert.equal(off.code, "SDS_READING_UNAVAILABLE");
+} else {
+  await ok(owner.request("POST", "/coshh-track/assessments/read-sds", { files: [] }), 400, "no SDS file");
+}
+
 // Staff record checks; only owners and managers change assessments.
 await ok(staff.request("POST", "/coshh-track/assessments", base), 403, "staff create assessment");
 await ok(staff.request("PUT", `/coshh-track/assessments/${assessment.id}`, base), 403, "staff edit assessment");

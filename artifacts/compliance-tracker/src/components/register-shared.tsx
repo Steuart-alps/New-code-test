@@ -112,6 +112,24 @@ export interface DocumentValue { objectPath: string | null; fileName: string | n
 
 const ACCEPTED_TYPES = ["application/pdf", "image/jpeg", "image/png"];
 
+/** Whether a file can be attached to a register or COSHHTrack record (PDF, JPEG or PNG). */
+export const isAttachableDocument = (file: File) => ACCEPTED_TYPES.includes(file.type);
+
+/**
+ * Uploads a PDF/JPEG/PNG straight to storage and returns its staging path for
+ * the form; the API verifies the contents and secures the file on save.
+ */
+export async function uploadRegisterDocument(api: RegisterApi, file: File, requestUrlPath = "/registers/uploads/request-url"): Promise<DocumentValue> {
+  const signed = await ensureOk(await api(requestUrlPath, {
+    method: "POST",
+    body: JSON.stringify({ contentType: file.type }),
+  }), "Could not start the upload");
+  const { uploadUrl, objectPath } = await signed.json();
+  const put = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+  if (!put.ok) throw new Error("Upload failed");
+  return { objectPath, fileName: file.name };
+}
+
 /**
  * Uploads a PDF/JPEG/PNG straight to storage, then hands the staging path to
  * the form. The API verifies the contents and secures the file on save.
@@ -136,14 +154,7 @@ export function DocumentField({ label, value, onChange, disabled, requestUrlPath
     }
     setUploading(true);
     try {
-      const signed = await ensureOk(await api(requestUrlPath, {
-        method: "POST",
-        body: JSON.stringify({ contentType: file.type }),
-      }), "Could not start the upload");
-      const { uploadUrl, objectPath } = await signed.json();
-      const put = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
-      if (!put.ok) throw new Error("Upload failed");
-      onChange({ objectPath, fileName: file.name });
+      onChange(await uploadRegisterDocument(api, file, requestUrlPath));
     } catch (err) {
       toast({ title: "Upload failed", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {

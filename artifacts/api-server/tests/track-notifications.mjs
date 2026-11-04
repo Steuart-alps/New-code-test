@@ -184,6 +184,20 @@ try {
     assert.ok(listAdmin.data.modules.find((m) => m.key === "daily_am")?.enabled, "trial businesses have every track");
     assert.deepEqual(sorted(listAdmin.data.users.map((u) => u.id)), sorted([ownerA.userId, admin.userId, staff.userId, linked.userId]));
     assert.ok(!listAdmin.data.users.some((u) => u.id === viewer.userId));
+    const chosenOf = (list) => Object.fromEntries(list.data.modules.map((m) => [m.key, m.chosen]));
+    assert.ok(Object.values(chosenOf(listAdmin)).every(Boolean), "nothing picked in setup: every track is chosen");
+    await q(`INSERT INTO app_settings (client_id, key, value, updated_at) VALUES ($1, 'setup_modules', $2, now())
+             ON CONFLICT (client_id, key) DO UPDATE SET value = EXCLUDED.value`, [A, JSON.stringify(["firetrack"])]);
+    const picked = chosenOf(await asOwnerA("GET", "/track-owners"));
+    assert.equal(picked.fire, true, "picked in setup");
+    assert.equal(picked.pool, false, "AquaTrack not picked: hidden in Settings");
+    assert.equal(picked.swim, false);
+    assert.equal(picked.green, false);
+    assert.equal(picked.compliance, true, "tracks every business has stay listed");
+    assert.equal(picked.audit, true);
+    assert.equal(picked.daily_am, true, "a track that already has an owner stays listed");
+    await q(`DELETE FROM app_settings WHERE client_id = $1 AND key = 'setup_modules'`, [A]);
+    ok("Settings lists only the tracks chosen in setup, plus core and owned tracks");
     const listB = await asOwnerB("GET", "/track-owners");
     assert.equal(listB.data.owners.length, 0, "business B sees none of A's owners");
     ok("owner API validates users/sites against the business and enforces roles");

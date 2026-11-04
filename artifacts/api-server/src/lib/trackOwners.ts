@@ -14,6 +14,7 @@
  */
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { ownersOfClient } from "./ownerBusinesses";
 
 export interface OwnerCandidate {
   id: number;
@@ -65,6 +66,7 @@ export async function loadEligibleOwners(clientId: number): Promise<OwnerCandida
     WHERE u.active = true
       AND (
         (u.client_id = ${clientId} AND u.role IN ('client_admin', 'client_manager', 'client_staff', 'consultant'))
+        OR ${ownersOfClient(clientId, "u")}
         OR (u.role = 'consultant' AND EXISTS (
           SELECT 1 FROM consultant_clients cc WHERE cc.user_id = u.id AND cc.client_id = ${clientId}
         ))

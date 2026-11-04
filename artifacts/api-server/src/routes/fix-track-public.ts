@@ -14,6 +14,7 @@ import { digestBearerToken } from "../lib/bearerTokens";
 import { recordPublicLinkAccess } from "../lib/publicLinkEvidence";
 import { createUserNotifications } from "../lib/userNotifications";
 import { logger } from "../lib/logger";
+import { ownersOfClient } from "../lib/ownerBusinesses";
 
 const router = Router();
 export const fixTrackQuoteRouter = Router();
@@ -64,13 +65,13 @@ fixTrackQuoteRouter.post("/:token", async (req, res) => {
     ON CONFLICT (queue_id) DO NOTHING RETURNING id`);
   if (!(inserted.rows as any[])[0]) return res.status(409).json({ error: "A quote has already been submitted" });
   await db.execute(sql`UPDATE contractor_email_queue SET status='approved', updated_at=now() WHERE id=${q.id}`);
-  const managers = await db.execute(sql`SELECT id,email FROM users WHERE client_id=${q.client_id}
-    AND role IN ('client_admin','consultant') AND active=true AND email IS NOT NULL`);
+  const managers = await db.execute(sql`SELECT id,email FROM users WHERE ((client_id=${q.client_id}
+    AND role='consultant') OR ${ownersOfClient(q.client_id)}) AND active=true AND email IS NOT NULL`);
   await db.execute(sql`INSERT INTO fix_track_manager_notifications
     (client_id,user_id,issue_id,kind,title,body)
     SELECT ${q.client_id}, id, ${q.issue_id}, 'quote_submitted', ${"Quote submitted: " + q.title},
       ${`A contractor submitted a quote of £${price.toFixed(2)}.`} FROM users
-    WHERE client_id=${q.client_id} AND role IN ('client_admin','consultant') AND active=true`);
+    WHERE ((client_id=${q.client_id} AND role='consultant') OR ${ownersOfClient(q.client_id)}) AND active=true`);
   for (const manager of (managers.rows as any[])) {
     const reviewUrl = `${getPublicAppUrl()}/fix-track?quote=${(inserted.rows as any[])[0].id}`;
     try { await sendEmail({ to: manager.email, subject: `Quote submitted: ${q.title}`,

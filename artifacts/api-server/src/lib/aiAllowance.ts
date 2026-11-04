@@ -9,6 +9,7 @@ import { logger } from "./logger";
 import { aiCostUsdMicros, type AiCallUsage } from "./aiPricing";
 import { addMonthsUtc, replayAiCredit, type AiCreditBalance } from "./aiCredit";
 import { claimEmailDelivery, emailDeliveryIdempotencyKey, markEmailDeliverySent, pruneSentEmailDeliveries, settleEmailDelivery } from "./emailDeliveryClaims";
+import { ownersOfClient } from "./ownerBusinesses";
 
 export { aiCostUsdMicros, usageFromMessage, type AiCallUsage } from "./aiPricing";
 export { addMonthsUtc, replayAiCredit, type AiCreditBalance, type AiCreditLot, type AiCreditUse } from "./aiCredit";
@@ -483,6 +484,7 @@ export async function warnIfAllowanceNearlyUsed(clientId: number): Promise<boole
       SELECT DISTINCT u.id, u.name, u.email FROM users u
        WHERE u.active AND u.email IS NOT NULL AND u.email <> ''
          AND ((u.client_id = ${clientId} AND u.role IN ('consultant', 'client_admin'))
+           OR ${ownersOfClient(clientId, "u")}
            OR (${plan.kind === "included"} AND u.role = 'consultant' AND EXISTS (
              SELECT 1 FROM consultant_clients cc WHERE cc.user_id = u.id AND cc.client_id = ${clientId})))
        ORDER BY u.id LIMIT 30
@@ -734,7 +736,7 @@ async function emailAutoTopUp(clientId: number, kind: "paid" | "failed"): Promis
   const [client] = await db.select({ name: clientsTable.name }).from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
   const owners = await db.execute(sql`
     SELECT id, name, email FROM users
-     WHERE client_id = ${clientId} AND active AND role IN ('consultant', 'client_admin')
+     WHERE ((client_id = ${clientId} AND role = 'consultant') OR ${ownersOfClient(clientId)}) AND active
        AND email IS NOT NULL AND email <> ''
      ORDER BY id LIMIT 30
   `);

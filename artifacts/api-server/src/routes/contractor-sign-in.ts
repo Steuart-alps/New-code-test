@@ -37,6 +37,7 @@ import { dispatchStoredContractorEmail } from "../lib/fixTrackNotifications";
 import { emailButton, escapeHtml, getPublicAppUrl } from "../lib/email";
 import { PDF_BOLD_FONT, PDF_REGULAR_FONT } from "../lib/pdfFonts";
 import { canUseSite, parseId, requireClient } from "./registers";
+import { ownersOfClient } from "../lib/ownerBusinesses";
 
 /** A visit still open after this many hours is "didn't sign out", not on site. */
 export const ON_SITE_HOURS = 16;
@@ -111,9 +112,8 @@ export async function loadBriefing(clientId: number, siteId: number, fireProcedu
 export async function contractorNoticeRecipients(clientId: number): Promise<number[]> {
   const rows = await db.select({ id: usersTable.id }).from(usersTable)
     .where(and(
-      eq(usersTable.clientId, clientId),
       eq(usersTable.active, true),
-      or(eq(usersTable.role, "client_admin"), eq(usersTable.isMaintenanceManager, true)),
+      or(ownersOfClient(clientId), and(eq(usersTable.clientId, clientId), eq(usersTable.isMaintenanceManager, true))),
     ));
   return rows.map((row) => row.id);
 }
