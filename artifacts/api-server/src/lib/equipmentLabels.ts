@@ -179,6 +179,7 @@ export const EQUIPMENT_TYPE_LABELS: Record<EquipmentType, string> = {
   gas_appliance: "Gas appliance",
   air_conditioning: "Air conditioning",
   fire_extinguisher: "Fire extinguisher",
+  defibrillator: "Defibrillator (AED)",
   ladder: "Ladder or step",
   other: "Other equipment",
 };

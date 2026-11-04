@@ -123,12 +123,12 @@ async function open({ aiActive = true, product = "Heavy Duty Degreaser", storage
   return { page, context, dialog, requests, pageErrors };
 }
 
-/** A real file drop, as from Finder or Explorer, on the drop box. */
-async function dropSheet(page, name = "Degreaser SDS.pdf") {
-  return page.evaluate(({ name, bytes }) => {
+/** A real file drop, as from Finder or Explorer, on the drop box (or another box). */
+async function dropSheet(page, name = "Degreaser SDS.pdf", selector = "[data-testid='coshh-sds-drop'] [data-file-drop-zone]") {
+  return page.evaluate(({ name, bytes, selector }) => {
     const transfer = new DataTransfer();
     transfer.items.add(new File([new Uint8Array(bytes)], name, { type: "application/pdf" }));
-    const target = document.querySelector("[data-testid='coshh-sds-drop'] [data-file-drop-zone]");
+    const target = document.querySelector(selector);
     let taken = false;
     for (const type of ["dragenter", "dragover", "drop"]) {
       const event = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer });
@@ -136,7 +136,7 @@ async function dropSheet(page, name = "Degreaser SDS.pdf") {
       if (type === "drop") taken = event.defaultPrevented;
     }
     return taken;
-  }, { name, bytes: [...PDF] });
+  }, { name, bytes: [...PDF], selector });
 }
 
 try {
@@ -240,6 +240,19 @@ try {
     assert.deepEqual(pageErrors, []);
     await context.close();
     console.log("ok - without the AI add-on the sheet is attached to fill in by hand");
+  }
+
+  // ── The "Attach file" box takes a dropped file too ─────────────────────────
+  {
+    const { page, context, dialog, requests, pageErrors } = await open();
+    await dialog.getByRole("button", { name: "Attach file (PDF, JPEG or PNG), or drag it here" }).waitFor();
+    assert.equal(await dropSheet(page, "Signed assessment.pdf", "[data-testid='document-field']"), true, "the attach box takes the dropped file");
+    await dialog.locator("[data-testid='document-field']").getByText("Signed assessment.pdf").waitFor();
+    assert.equal(requests.filter(r => r.path === "/api/coshh-track/assessments/read-sds").length, 0, "a file dropped on the attach box is not read");
+    assert.equal(requests.filter(r => r.path === "/api/registers/uploads/request-url").length, 1, "it is uploaded");
+    assert.deepEqual(pageErrors, []);
+    await context.close();
+    console.log("ok - the Attach file box takes a dropped file");
   }
 
   console.log("COSHH safety data sheet drop browser checks passed.");

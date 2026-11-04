@@ -48,6 +48,10 @@ export const complianceItemsTable = pgTable("compliance_items", {
   /** Equipment list item this check is for (a boiler's gas safety, a lift's
    *  LOLER). The foreign key to equipment_items comes from runtime migrations. */
   equipmentId: integer("equipment_id"),
+  /** Set when this check is the replacement date of a part of the equipment
+   *  item (a defibrillator's pads or battery, see EQUIPMENT_PARTS): its due
+   *  date is the part's expiry date. Kept by the equipment list. */
+  equipmentPart: text("equipment_part"),
   visitScheduledAt: timestamp("visit_scheduled_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -65,6 +69,7 @@ export const insertComplianceItemSchema = createInsertSchema(complianceItemsTabl
   notificationSentAt: true,
   // Set only through the equipment list, which checks the item's business.
   equipmentId: true,
+  equipmentPart: true,
 });
 
 export type InsertComplianceItem = z.infer<typeof insertComplianceItemSchema>;

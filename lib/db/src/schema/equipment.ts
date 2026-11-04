@@ -23,11 +23,27 @@ export const EQUIPMENT_TYPES = [
   "gas_appliance",
   "air_conditioning",
   "fire_extinguisher",
+  "defibrillator",
   "ladder",
   "other",
 ] as const;
 
 export type EquipmentType = (typeof EQUIPMENT_TYPES)[number];
+
+/**
+ * Parts of an item that expire on a printed date and must be replaced, such
+ * as a defibrillator's pads and battery. Each one with a date is kept as a
+ * Compliance Check (compliance_items.equipment_part) due on that date, so it
+ * shows on the dashboard and its reminders go to the person responsible.
+ */
+export const EQUIPMENT_PARTS = ["defib_pads", "defib_battery", "defib_child_pads"] as const;
+
+export type EquipmentPart = (typeof EQUIPMENT_PARTS)[number];
+
+/** The parts each type of item has, in the order they are shown. */
+export const EQUIPMENT_TYPE_PARTS: Partial<Record<EquipmentType, readonly EquipmentPart[]>> = {
+  defibrillator: ["defib_pads", "defib_battery", "defib_child_pads"],
+};
 
 export const equipmentItemsTable = pgTable("equipment_items", {
   id: serial("id").primaryKey(),

@@ -8,6 +8,7 @@ import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
 import { API_BASE, apiFetch, getApiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useFileDrop } from "@/hooks/use-file-drop";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -80,6 +81,7 @@ function BrandingCard() {
   const [practiceName, setPracticeName] = useState("");
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const logoDrop = useFileDrop((files) => void uploadLogo(files[0]!), !uploading);
   const branding = useQuery<Branding>({
     queryKey: ["consultant-branding"],
     queryFn: async () => {
@@ -158,7 +160,7 @@ function BrandingCard() {
           {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}Save name
         </Button>
       </div>
-      <div className="flex flex-wrap items-center gap-3">
+      <div {...logoDrop.dropZoneProps} className={cn("flex flex-wrap items-center gap-3", logoDrop.isDragging && "rounded-md ring-2 ring-primary ring-offset-2 bg-primary/5")}>
         <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-sm border bg-muted/30">
           {data?.hasLogo
             ? <img src={`${API_BASE}/consultant-branding/logo?v=${encodeURIComponent(data.updatedAt ?? "")}`} alt="Practice logo" className="h-full w-full object-contain" />
@@ -169,7 +171,7 @@ function BrandingCard() {
           {uploading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Upload className="mr-1.5 h-3.5 w-3.5" />}{data?.hasLogo ? "Replace logo" : "Upload logo"}
         </Button>
         {data?.hasLogo && <Button variant="ghost" size="sm" onClick={removeLogo}><Trash2 className="mr-1.5 h-3.5 w-3.5" />Remove</Button>}
-        <p className="w-full text-xs text-muted-foreground">PNG, JPEG or WebP, up to 2 MB. The logo only appears once a practice name is set.</p>
+        <p className="w-full text-xs text-muted-foreground">PNG, JPEG or WebP, up to 2 MB. You can also drag the logo here. The logo only appears once a practice name is set.</p>
       </div>
     </Card>
   );

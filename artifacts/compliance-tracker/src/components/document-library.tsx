@@ -31,6 +31,7 @@ import {
 import { API_BASE } from "@/lib/api";
 import { downloadFile } from "@/lib/download";
 import { assertWithinUploadLimit } from "@/lib/upload-limits";
+import { useFileDrop } from "@/hooks/use-file-drop";
 
 /** An optional document type; the list shows only these types when given. */
 export type DocumentCategory = { value: string; label: string };
@@ -104,11 +105,14 @@ function UploadDialog({
     setError("");
   }
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0] ?? null;
+  function chooseFile(f: File | null) {
     setFile(f);
     if (f && !name) setName(f.name.replace(/\.[^.]+$/, ""));
   }
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    chooseFile(e.target.files?.[0] ?? null);
+  }
+  const { isDragging, dropZoneProps } = useFileDrop((files) => chooseFile(files[0] ?? null), !uploading);
 
   async function handleSubmit() {
     if (!file || !name.trim()) return;
@@ -187,8 +191,9 @@ function UploadDialog({
         <div className="space-y-4 py-2">
           {/* File drop zone */}
           <div
+            {...dropZoneProps}
             className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors
-              ${file ? "border-primary/50 bg-primary/5" : "border-border hover:border-primary/40 hover:bg-muted/30"}`}
+              ${isDragging ? "border-primary bg-primary/10" : file ? "border-primary/50 bg-primary/5" : "border-border hover:border-primary/40 hover:bg-muted/30"}`}
             onClick={() => inputRef.current?.click()}
           >
             <input
@@ -207,7 +212,7 @@ function UploadDialog({
             ) : (
               <div className="space-y-2">
                 <Upload className="w-8 h-8 mx-auto text-muted-foreground/50" />
-                <p className="text-sm text-muted-foreground">Click to choose a file</p>
+                <p className="text-sm text-muted-foreground">Drag a file here, or click to choose one</p>
                 <p className="text-xs text-muted-foreground/60">PDF, Word, Excel, images supported</p>
               </div>
             )}

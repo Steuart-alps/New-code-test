@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { ComplianceItemEquipmentPart } from './complianceItemEquipmentPart';
 import type { ComplianceItemNeedsActionReason } from './complianceItemNeedsActionReason';
 import type { ComplianceItemPriority } from './complianceItemPriority';
 import type { ComplianceItemStatus } from './complianceItemStatus';
@@ -38,6 +39,8 @@ export interface ComplianceItem {
   completedAt?: Date | null;
   /** The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it). */
   completedInHouseBy?: string | null;
+  /** Set when this check is the replacement date of a part of an equipment list item (a defibrillator's pads or battery); its due date is the part's expiry date. Marking it done asks for the new part's expiry date (nextDueDate). */
+  equipmentPart?: ComplianceItemEquipmentPart;
   notes?: string | null;
   /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date. */
   needsAction?: boolean;

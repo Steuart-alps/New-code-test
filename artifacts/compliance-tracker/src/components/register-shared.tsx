@@ -13,6 +13,8 @@ import {
 import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
+import { useFileDrop } from "@/hooks/use-file-drop";
+import { cn } from "@/lib/utils";
 import { getApiErrorMessage } from "@/lib/api";
 import { csvCell } from "@/lib/csv";
 import { downloadBlob, downloadFile, getDownloadErrorMessage } from "@/lib/download";
@@ -146,6 +148,7 @@ export function DocumentField({ label, value, onChange, disabled, requestUrlPath
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const { isDragging, dropZoneProps } = useFileDrop((files) => void handleFile(files[0]!), !disabled && !uploading);
 
   async function handleFile(file: File) {
     if (!ACCEPTED_TYPES.includes(file.type)) {
@@ -164,7 +167,7 @@ export function DocumentField({ label, value, onChange, disabled, requestUrlPath
   }
 
   return (
-    <div className="space-y-1.5">
+    <div {...dropZoneProps} className={cn("space-y-1.5", isDragging && "ring-2 ring-primary ring-offset-1 rounded-md bg-primary/5")} data-testid="document-field">
       <Label>{label}</Label>
       <input
         ref={inputRef}
@@ -188,7 +191,7 @@ export function DocumentField({ label, value, onChange, disabled, requestUrlPath
         <Button type="button" variant="outline" size="sm" className="w-full justify-start gap-2"
           disabled={uploading || disabled} onClick={() => inputRef.current?.click()}>
           {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-          {uploading ? "Uploading…" : "Attach file (PDF, JPEG or PNG)"}
+          {uploading ? "Uploading…" : isDragging ? "Drop the file here" : "Attach file (PDF, JPEG or PNG), or drag it here"}
         </Button>
       )}
     </div>

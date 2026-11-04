@@ -19,4 +19,9 @@ export interface UpdateStatusRequest {
      * @maxLength 200
      */
   completedInHouseBy?: string | null;
+  /**
+     * Only with status completed, and only for a check with an equipmentPart. The expiry date of the new part (YYYY-MM-DD), after the date done; the check stays open, due on that date.
+     * @pattern ^\d{4}-\d{2}-\d{2}$
+     */
+  nextDueDate?: string | null;
 }

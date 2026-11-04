@@ -6428,6 +6428,14 @@ async function migrateEquipmentLabels() {
     `));
     await db.execute(sql.raw(`CREATE INDEX IF NOT EXISTS "IDX_${table}_equipment" ON "${table}" ("client_id", "equipment_id") WHERE "equipment_id" IS NOT NULL`));
   }
+  // Nov 2026: a defibrillator's pads and battery expiry dates, each kept as a
+  // Compliance Check due on that date (one check per item and part).
+  await db.execute(sql`ALTER TABLE "compliance_items" ADD COLUMN IF NOT EXISTS "equipment_part" text`);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_compliance_items_equipment_part"
+    ON "compliance_items" ("equipment_id", "equipment_part")
+    WHERE "equipment_id" IS NOT NULL AND "equipment_part" IS NOT NULL
+  `);
 }
 
 async function migrateCertificateOutcomes() {

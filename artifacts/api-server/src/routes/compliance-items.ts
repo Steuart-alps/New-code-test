@@ -515,6 +515,17 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
     res.status(400).json({ error: "completedInHouseBy can only be sent when completing a check" });
     return;
   }
+  // A replaced part (a defibrillator's pads or battery): the new part's expiry
+  // date, which the check is then due on (lib/equipmentParts.ts).
+  const nextDueDay = CompletedDay.safeParse(req.body?.nextDueDate);
+  if (!nextDueDay.success) {
+    res.status(400).json({ error: "nextDueDate must be a date (YYYY-MM-DD)" });
+    return;
+  }
+  if (nextDueDay.data && status !== "completed") {
+    res.status(400).json({ error: "nextDueDate can only be sent when completing a check" });
+    return;
+  }
 
   if (user.role === "client_viewer") {
     res.status(403).json({ error: "Forbidden" });
@@ -551,7 +562,21 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
     }
     completedAt = completionDateFromDay(completedDay.data);
   }
-  const completion = status === "completed" ? completionFields(existing[0].frequencyMonths, completedAt) : null;
+  if (nextDueDay.data) {
+    if (!existing[0].equipmentPart) {
+      res.status(400).json({ error: "nextDueDate is only for a replaced part's expiry date" });
+      return;
+    }
+    if (nextDueDay.data <= completedAt.toISOString().slice(0, 10)) {
+      res.status(400).json({ error: "The new expiry date must be after the date it was replaced", code: "NEXT_DUE_NOT_AFTER_DONE" });
+      return;
+    }
+  }
+  const completion = status === "completed"
+    ? nextDueDay.data
+      ? { recurring: true as const, fields: { status: "pending" as const, completedAt, dueDate: completionDateFromDay(nextDueDay.data) } }
+      : completionFields(existing[0].frequencyMonths, completedAt)
+    : null;
   const statusFields = completion
     ? {
         ...completion.fields,
