@@ -65,6 +65,9 @@ import type {
   CoshhCheck,
   CoshhCheckInput,
   CoshhDocumentUrl,
+  CoshhSdsDraft,
+  CoshhSdsReadRequest,
+  CoshhSdsReadingStatus,
   CoshhSignOffRequest,
   CoshhTrackStatus,
   CreateCategoryRequest,
@@ -18833,6 +18836,155 @@ export const useCreateCoshhAssessment = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getCreateCoshhAssessmentMutationOptions(options));
+    }
+
+export const getGetCoshhSdsReadingUrl = () => {
+
+
+
+
+  return `/api/coshh-track/sds-reading`
+}
+
+/**
+ * @summary Whether ComplyTrack can draft a COSHH assessment from a safety data sheet, and the AI allowance (owners, consultants and managers)
+ */
+export const getCoshhSdsReading = async ( options?: RequestInit): Promise<CoshhSdsReadingStatus> => {
+
+  return customFetch<CoshhSdsReadingStatus>(getGetCoshhSdsReadingUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCoshhSdsReadingQueryKey = () => {
+    return [
+    `/api/coshh-track/sds-reading`
+    ] as const;
+    }
+
+
+export const getGetCoshhSdsReadingQueryOptions = <TData = Awaited<ReturnType<typeof getCoshhSdsReading>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCoshhSdsReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCoshhSdsReadingQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCoshhSdsReading>>> = ({ signal }) => getCoshhSdsReading({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCoshhSdsReading>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCoshhSdsReadingQueryResult = NonNullable<Awaited<ReturnType<typeof getCoshhSdsReading>>>
+export type GetCoshhSdsReadingQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Whether ComplyTrack can draft a COSHH assessment from a safety data sheet, and the AI allowance (owners, consultants and managers)
+ */
+
+export function useGetCoshhSdsReading<TData = Awaited<ReturnType<typeof getCoshhSdsReading>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCoshhSdsReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCoshhSdsReadingQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getReadCoshhSafetyDataSheetUrl = () => {
+
+
+
+
+  return `/api/coshh-track/assessments/read-sds`
+}
+
+/**
+ * Claude reads the supplier's safety data sheet (one PDF, photo or Word file, or up to 10 photos of its pages) and returns the New assessment form's fields: hazards, exposure limits, controls, PPE, storage, spills, first aid and disposal, plus a suggested task, who is at risk, risk level and follow-up. Nothing is saved or stored here: the person checks it against the sheet and saves it with POST /coshh-track/assessments (draftSource ai, checkedAgainstSds true). Off until the server has an Anthropic API key; uses the AI features add-on's allowance.
+ * @summary Draft a COSHH assessment from a safety data sheet with AI (owners, consultants and managers)
+ */
+export const readCoshhSafetyDataSheet = async (coshhSdsReadRequest: CoshhSdsReadRequest, options?: RequestInit): Promise<CoshhSdsDraft> => {
+
+  return customFetch<CoshhSdsDraft>(getReadCoshhSafetyDataSheetUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(coshhSdsReadRequest)
+  }
+);}
+
+
+
+
+
+export const getReadCoshhSafetyDataSheetMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readCoshhSafetyDataSheet>>, TError,{data: BodyType<CoshhSdsReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof readCoshhSafetyDataSheet>>, TError,{data: BodyType<CoshhSdsReadRequest>}, TContext> => {
+
+const mutationKey = ['readCoshhSafetyDataSheet'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof readCoshhSafetyDataSheet>>, {data: BodyType<CoshhSdsReadRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  readCoshhSafetyDataSheet(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReadCoshhSafetyDataSheetMutationResult = NonNullable<Awaited<ReturnType<typeof readCoshhSafetyDataSheet>>>
+    export type ReadCoshhSafetyDataSheetMutationBody = BodyType<CoshhSdsReadRequest>
+    export type ReadCoshhSafetyDataSheetMutationError = ErrorType<void>
+
+    /**
+ * @summary Draft a COSHH assessment from a safety data sheet with AI (owners, consultants and managers)
+ */
+export const useReadCoshhSafetyDataSheet = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readCoshhSafetyDataSheet>>, TError,{data: BodyType<CoshhSdsReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof readCoshhSafetyDataSheet>>,
+        TError,
+        {data: BodyType<CoshhSdsReadRequest>},
+        TContext
+      > => {
+      return useMutation(getReadCoshhSafetyDataSheetMutationOptions(options));
     }
 
 export const getUpdateCoshhAssessmentUrl = (id: number,) => {

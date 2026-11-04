@@ -8038,6 +8038,78 @@ export const CreateCoshhAssessmentResponse = zod.object({
 
 
 /**
+ * @summary Whether ComplyTrack can draft a COSHH assessment from a safety data sheet, and the AI allowance (owners, consultants and managers)
+ */
+export const getCoshhSdsReadingResponseAiPercentUsedMin = 0;
+export const getCoshhSdsReadingResponseAiPercentUsedMax = 100;
+
+export const getCoshhSdsReadingResponseAiCarriedOverPercentMin = 0;
+
+export const getCoshhSdsReadingResponseAiNextLapsePercentMin = 0;
+
+
+
+export const GetCoshhSdsReadingResponse = zod.object({
+  "available": zod.boolean().describe('False until the server has an Anthropic API key.'),
+  "ai": zod.object({
+  "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
+  "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
+  "percentUsed": zod.number().min(getCoshhSdsReadingResponseAiPercentUsedMin).max(getCoshhSdsReadingResponseAiPercentUsedMax).describe('Share of what is available this period, allowance carried over included, that is used'),
+  "resetsAt": zod.date().nullable().describe('When the next month\'s allowance is added'),
+  "usedUp": zod.boolean().describe('Everything available, allowance carried over included, is used up'),
+  "carriedOverPercent": zod.number().min(getCoshhSdsReadingResponseAiCarriedOverPercentMin).describe('Unused allowance carried over from earlier months, as a share of one month\'s allowance (150 = a month and a half)'),
+  "nextLapseAt": zod.date().nullable().describe('When the oldest carried-over allowance lapses if unused'),
+  "nextLapsePercent": zod.number().min(getCoshhSdsReadingResponseAiNextLapsePercentMin).describe('How much lapses then, as a share of one month\'s allowance')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups). Unused allowance and top-ups carry over, oldest used first, and lapse 12 months after the end of the month they were for. Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").')
+})
+
+
+/**
+ * Claude reads the supplier's safety data sheet (one PDF, photo or Word file, or up to 10 photos of its pages) and returns the New assessment form's fields: hazards, exposure limits, controls, PPE, storage, spills, first aid and disposal, plus a suggested task, who is at risk, risk level and follow-up. Nothing is saved or stored here: the person checks it against the sheet and saves it with POST /coshh-track/assessments (draftSource ai, checkedAgainstSds true). Off until the server has an Anthropic API key; uses the AI features add-on's allowance.
+ * @summary Draft a COSHH assessment from a safety data sheet with AI (owners, consultants and managers)
+ */
+export const readCoshhSafetyDataSheetBodyFilesMax = 10;
+
+
+
+export const ReadCoshhSafetyDataSheetBody = zod.object({
+  "files": zod.array(zod.object({
+  "fileName": zod.string(),
+  "mimeType": zod.string(),
+  "data": zod.string().describe('The file, base64-encoded (20 MB at most, all files together).')
+})).min(1).max(readCoshhSafetyDataSheetBodyFilesMax)
+})
+
+export const ReadCoshhSafetyDataSheetResponse = zod.object({
+  "productName": zod.string(),
+  "supplier": zod.string().nullable(),
+  "sdsDate": zod.date().nullable(),
+  "hazardPictograms": zod.array(zod.string()),
+  "signalWord": zod.enum(['danger', 'warning', 'none']).nullable(),
+  "hazardStatements": zod.string(),
+  "healthEffects": zod.string(),
+  "exposureLimits": zod.string(),
+  "exposureRoutes": zod.array(zod.string()),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string(),
+  "controls": zod.string(),
+  "storage": zod.string(),
+  "spillProcedure": zod.string(),
+  "firstAid": zod.string(),
+  "disposal": zod.string(),
+  "task": zod.string(),
+  "whoAtRisk": zod.string(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']),
+  "healthSurveillanceRequired": zod.boolean(),
+  "monitoringRequired": zod.boolean(),
+  "levRequired": zod.boolean(),
+  "summary": zod.string(),
+  "unclear": zod.array(zod.string())
+})
+
+
+/**
  * @summary Update a COSHH assessment (owners, consultants and managers)
  */
 export const UpdateCoshhAssessmentParams = zod.object({

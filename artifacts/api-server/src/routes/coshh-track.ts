@@ -45,6 +45,9 @@ import {
   COSHH_DUE_SOON_DAYS,
   getCoshhDueItems,
 } from "../lib/coshhTrack";
+import { AiUnavailableError, claimAiUse, getAiStatus, settleAiUse } from "../lib/aiAllowance";
+import { ReportReadingError, UnreadableReportError, reportReadingConfigured } from "../lib/reportReading";
+import { draftCoshhAssessment, SDS_READING_MAX_BYTES, SDS_READING_MAX_FILES } from "../lib/coshhDrafting";
 import {
   findSignOffAssessment,
   getCoshhSignOffOverview,
@@ -239,6 +242,69 @@ router.get("/assessments", requireAuth, async (req, res) => {
     ))
     .orderBy(asc(coshhAssessmentsTable.task), asc(coshhAssessmentsTable.id));
   res.json(rows.map((row) => withAssessmentStatus(row, today)));
+});
+
+// ── Drafting from a safety data sheet (AI features add-on) ────────────────────
+//
+// The sheet is dropped on the New assessment form (Steuart, 2026-11-04). With
+// the AI switched on there, Claude reads it (lib/coshhDrafting.ts) and the
+// form is filled in for the person to check; nothing is saved or stored here.
+// They tick that they checked it against the sheet and save as usual
+// (draftSource "ai"). With the AI off, or without the add-on, the sheet is
+// only attached and the form is filled in by hand.
+
+/** Held against the AI allowance while a sheet is read (Claude Opus 5.5, high effort, a 12-page sheet). */
+const SDS_READING_ESTIMATE_PENCE = 30;
+
+const SdsReadBody = z.object({
+  files: z.array(z.object({
+    fileName: z.string().trim().min(1).max(255),
+    mimeType: z.string().trim().min(1).max(200),
+    data: z.string().min(1).max(Math.ceil(SDS_READING_MAX_BYTES / 3) * 4 + 4),
+  }).strict()).min(1).max(SDS_READING_MAX_FILES),
+}).strict();
+
+router.get("/sds-reading", requireAuth, assessmentWriters, async (req, res) => {
+  const clientId = requireClient(req, res);
+  if (!clientId) return;
+  res.json({ available: reportReadingConfigured(), ai: await getAiStatus(clientId) });
+});
+
+router.post("/assessments/read-sds", requireAuth, denyViewers, assessmentWriters, async (req, res) => {
+  const clientId = requireClient(req, res);
+  if (!clientId) return;
+  if (!reportReadingConfigured()) {
+    return res.status(503).json({ error: "Reading safety data sheets is not switched on yet. Fill the assessment in by hand.", code: "SDS_READING_UNAVAILABLE" });
+  }
+  const parsed = SdsReadBody.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: `Choose the safety data sheet: a PDF, photos or a Word file (up to ${SDS_READING_MAX_FILES} files, 20 MB at most)` });
+  }
+  const files = parsed.data.files.map((file) => ({ bytes: Buffer.from(file.data, "base64"), mimeType: file.mimeType, fileName: file.fileName }));
+  if (files.reduce((total, file) => total + file.bytes.length, 0) > SDS_READING_MAX_BYTES) {
+    return res.status(400).json({ error: "The safety data sheet is too large to read (20 MB at most). Save it as a smaller PDF." });
+  }
+
+  let aiUseId: number | null = null;
+  try {
+    // A file Claude cannot read is turned away before it counts towards the allowance.
+    const result = await draftCoshhAssessment({ files, today: await getAccountToday(clientId) }, async () => {
+      aiUseId = await claimAiUse({
+        clientId, userId: req.currentUser?.id ?? null, feature: "coshh_drafting",
+        estimatePence: SDS_READING_ESTIMATE_PENCE, instead: "Fill the assessment in by hand instead.",
+      });
+    });
+    if (aiUseId !== null) await settleAiUse(aiUseId, result.usage, true);
+    req.log.info({ clientId, model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens, files: files.length }, "Safety data sheet read");
+    const { usage: _usage, model: _model, inputTokens: _in, outputTokens: _out, ...draft } = result;
+    res.json(draft);
+  } catch (err) {
+    if (aiUseId !== null) await settleAiUse(aiUseId, err instanceof ReportReadingError ? err.usage ?? null : null, false);
+    if (err instanceof AiUnavailableError) return res.status(err.status).json({ error: err.message, code: err.code });
+    if (err instanceof UnreadableReportError) return res.status(400).json({ error: err.message });
+    if (!(err instanceof ReportReadingError)) req.log.error({ err }, "Safety data sheet reading failed");
+    res.status(502).json({ error: err instanceof ReportReadingError ? err.message : "ComplyTrack could not read this safety data sheet just now. Try again later, or fill the assessment in by hand." });
+  }
 });
 
 router.post("/assessments", requireAuth, denyViewers, assessmentWriters, async (req, res) => {

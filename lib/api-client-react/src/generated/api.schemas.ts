@@ -1791,6 +1791,72 @@ export interface AiStatus {
   nextLapsePercent: number;
 }
 
+export interface CoshhSdsReadingStatus {
+  /** False until the server has an Anthropic API key. */
+  available: boolean;
+  ai: AiStatus;
+}
+
+export type CoshhSdsReadRequestFilesItem = {
+  fileName: string;
+  mimeType: string;
+  /** The file, base64-encoded (20 MB at most, all files together). */
+  data: string;
+};
+
+export interface CoshhSdsReadRequest {
+  /**
+     * @minItems 1
+     * @maxItems 10
+     */
+  files: CoshhSdsReadRequestFilesItem[];
+}
+
+export type CoshhSdsDraftSignalWord = typeof CoshhSdsDraftSignalWord[keyof typeof CoshhSdsDraftSignalWord] | null;
+
+
+export const CoshhSdsDraftSignalWord = {
+  danger: 'danger',
+  warning: 'warning',
+  none: 'none',
+} as const;
+
+export type CoshhSdsDraftRiskLevel = typeof CoshhSdsDraftRiskLevel[keyof typeof CoshhSdsDraftRiskLevel];
+
+
+export const CoshhSdsDraftRiskLevel = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export interface CoshhSdsDraft {
+  productName: string;
+  supplier: string | null;
+  sdsDate: string | null;
+  hazardPictograms: string[];
+  signalWord: CoshhSdsDraftSignalWord;
+  hazardStatements: string;
+  healthEffects: string;
+  exposureLimits: string;
+  exposureRoutes: string[];
+  ppe: string[];
+  ppeDetails: string;
+  controls: string;
+  storage: string;
+  spillProcedure: string;
+  firstAid: string;
+  disposal: string;
+  task: string;
+  whoAtRisk: string;
+  riskLevel: CoshhSdsDraftRiskLevel;
+  healthSurveillanceRequired: boolean;
+  monitoringRequired: boolean;
+  levRequired: boolean;
+  summary: string;
+  unclear: string[];
+}
+
 export interface CertificateReadingStatus {
   /** False until the server has an Anthropic API key. */
   available: boolean;

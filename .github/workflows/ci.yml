@@ -300,6 +300,9 @@ jobs:
       - name: Reading certificates with Claude (stand-in API, no key)
         run: pnpm --filter @workspace/api-server run test:certificate-reading
 
+      - name: Drafting COSHH assessments from safety data sheets with Claude (stand-in API, no key)
+        run: pnpm --filter @workspace/api-server run test:coshh-sds-reading
+
       - name: Pricing AI requests (pure)
         run: pnpm --filter @workspace/api-server run test:ai-pricing
 

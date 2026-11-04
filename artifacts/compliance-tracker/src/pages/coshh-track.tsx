@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearch } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Beaker, CalendarClock, Download, FileText, Info, Pencil, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Beaker, Sparkles, CalendarClock, Download, FileText, Info, Pencil, Plus, Trash2 } from "lucide-react";
 import { AppLayout } from "@/components/layout";
 import { CoshhRegisterPanel, type CoshhSubstance } from "@/components/coshh-register-panel";
 import { Button } from "@/components/ui/button";
@@ -19,8 +19,11 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import {
   ConfirmDelete, DocumentField, SiteFilter, SiteSelect, addMonthsIso, downloadCsv, downloadRegisterDocument,
-  ensureOk, fmtDate, todayIso, useRegisterList, useRegisterSites, type DocumentValue,
+  ensureOk, fmtDate, isAttachableDocument, todayIso, uploadRegisterDocument, useRegisterList, useRegisterSites, type DocumentValue,
 } from "@/components/register-shared";
+import { aiAllowanceState } from "@/components/ai-allowance-note";
+import { CoshhSdsDrop, saveAiChoice, savedAiChoice, type SdsReadingStatus } from "@/components/coshh-sds-drop";
+import { certificateFileFor, prepareCertificateFiles, toBase64, type CertificateFile } from "@/lib/certificate-files";
 import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 import { sortByLabel } from "@/lib/sort-options";
 import { useRecordMedia } from "@/components/record-media";
@@ -141,8 +144,27 @@ type AssessmentForm = {
   storage: string; spillProcedure: string; firstAid: string; disposal: string;
   assessor: string; assessmentDate: string; reviewDue: string; reviewDueTouched: boolean;
   status: "current" | "archived"; notes: string; document: DocumentValue;
-  draftSource: string | null; checkedAgainstSds: boolean; signOffDepartments: string[];
+  draftSource: string | null; draftedAt: string | null; checkedAgainstSds: boolean; signOffDepartments: string[];
+  /** Read from a dropped safety data sheet, for the person to check. */
+  aiSummary: string | null; aiUnclear: string[]; sdsDate: string | null;
+  /** The product on the sheet, when it is not in this site's Substances list yet. */
+  newSubstance: { productName: string; supplier: string | null; hazardPictograms: string[] } | null;
+  addSubstance: boolean;
 };
+
+/** What ComplyTrack's AI read from a safety data sheet (POST /coshh-track/assessments/read-sds). */
+interface SdsDraft {
+  productName: string; supplier: string | null; sdsDate: string | null; hazardPictograms: string[];
+  signalWord: "danger" | "warning" | "none" | null; hazardStatements: string; healthEffects: string; exposureLimits: string;
+  exposureRoutes: string[]; ppe: string[]; ppeDetails: string; controls: string; storage: string; spillProcedure: string;
+  firstAid: string; disposal: string; task: string; whoAtRisk: string; riskLevel: "low" | "medium" | "high";
+  healthSurveillanceRequired: boolean; monitoringRequired: boolean; levRequired: boolean; summary: string; unclear: string[];
+}
+
+/** A dropped safety data sheet: the files read, and the one file stored (pages joined into one PDF). */
+interface DroppedSheet { files: CertificateFile[]; stored: File | null; url: string | null; read: boolean }
+
+const productKey = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 type CheckForm = {
   siteId: string; assessmentId: string; checkType: CheckType; checkDate: string; subject: string; carriedOutBy: string;
@@ -290,7 +312,8 @@ export default function CoshhTrackPage() {
       storage: "", spillProcedure: "", firstAid: "", disposal: "", assessor: user?.name ?? "",
       assessmentDate: today, reviewDue: addMonthsIso(today, 12), reviewDueTouched: false,
       status: "current", notes: "", document: { objectPath: null, fileName: null },
-      draftSource: null, checkedAgainstSds: false, signOffDepartments: [],
+      draftSource: null, draftedAt: null, checkedAgainstSds: false, signOffDepartments: [],
+      aiSummary: null, aiUnclear: [], sdsDate: null, newSubstance: null, addSubstance: false,
     });
   }
 
@@ -307,8 +330,133 @@ export default function CoshhTrackPage() {
       storage: item.storage ?? "", spillProcedure: item.spillProcedure ?? "", firstAid: item.firstAid ?? "", disposal: item.disposal ?? "",
       assessor: item.assessor ?? "", assessmentDate: item.assessmentDate, reviewDue: item.reviewDue ?? "", reviewDueTouched: true,
       status: item.status, notes: item.notes ?? "", document: { objectPath: item.documentObjectPath, fileName: item.documentFileName },
-      draftSource: item.draftSource, checkedAgainstSds: false, signOffDepartments: [...(item.signOffDepartments ?? [])],
+      draftSource: item.draftSource, draftedAt: null, checkedAgainstSds: false, signOffDepartments: [...(item.signOffDepartments ?? [])],
+      aiSummary: null, aiUnclear: [], sdsDate: null, newSubstance: null, addSubstance: false,
     });
+  }
+
+  // ── Safety data sheet dropped on the New assessment form ───────────────────
+  const creatingAssessment = assessmentForm !== null && editingAssessment === null;
+  const { data: sdsStatus, refetch: refetchSdsStatus } = useQuery<SdsReadingStatus>({
+    queryKey: ["/api/coshh-track/sds-reading", activeClientId],
+    queryFn: async () => (await ensureOk(await api("/coshh-track/sds-reading"), "Could not check the AI")).json(),
+    enabled: creatingAssessment && canAssess,
+  });
+  const [useAi, setUseAi] = useState(savedAiChoice);
+  const [sheet, setSheet] = useState<DroppedSheet | null>(null);
+  const [sheetBusy, setSheetBusy] = useState<"attaching" | "reading" | null>(null);
+  // A new form starts without a sheet; the old sheet's link is let go.
+  useEffect(() => { if (!creatingAssessment) setSheet(null); }, [creatingAssessment]);
+  useEffect(() => () => { if (sheet?.url) URL.revokeObjectURL(sheet.url); }, [sheet?.url]);
+
+  function changeUseAi(on: boolean) {
+    setUseAi(on);
+    saveAiChoice(on);
+  }
+
+  /** The form filled in from what the AI read; the site, assessor, dates and sign-off stay as they are. */
+  function applyDraft(draft: SdsDraft) {
+    setAssessmentForm((f) => {
+      if (!f) return f;
+      const key = productKey(draft.productName);
+      const match = key ? substances.find((s) => String(s.siteId) === f.siteId && s.status === "in_use"
+        && (productKey(s.productName) === key || productKey(s.productName).includes(key) || key.includes(productKey(s.productName)))) : undefined;
+      const linked = f.substanceId !== NONE ? f.substanceId : match ? String(match.id) : NONE;
+      return {
+        ...f,
+        substanceId: linked,
+        task: draft.task || f.task,
+        whoAtRisk: draft.whoAtRisk || f.whoAtRisk,
+        exposureRoutes: draft.exposureRoutes,
+        hazardStatements: draft.hazardStatements,
+        signalWord: draft.signalWord ?? NONE,
+        healthEffects: draft.healthEffects,
+        exposureLimits: draft.exposureLimits,
+        controls: draft.controls || f.controls,
+        ppe: draft.ppe,
+        ppeDetails: draft.ppeDetails,
+        riskLevel: draft.riskLevel,
+        healthSurveillanceRequired: draft.healthSurveillanceRequired,
+        monitoringRequired: draft.monitoringRequired,
+        levRequired: draft.levRequired,
+        storage: draft.storage,
+        spillProcedure: draft.spillProcedure,
+        firstAid: draft.firstAid,
+        disposal: draft.disposal,
+        draftSource: "ai",
+        draftedAt: new Date().toISOString(),
+        checkedAgainstSds: false,
+        aiSummary: draft.summary || null,
+        aiUnclear: draft.unclear,
+        sdsDate: draft.sdsDate,
+        newSubstance: linked === NONE && draft.productName
+          ? { productName: draft.productName, supplier: draft.supplier, hazardPictograms: draft.hazardPictograms }
+          : null,
+        addSubstance: linked === NONE && !!draft.productName,
+      };
+    });
+  }
+
+  async function readSheet(files: CertificateFile[]) {
+    setSheetBusy("reading");
+    try {
+      const response = await ensureOk(await api("/coshh-track/assessments/read-sds", {
+        method: "POST",
+        body: JSON.stringify({ files: await Promise.all(files.map(async (f) => ({ fileName: f.name, mimeType: f.mimeType, data: await toBase64(f.blob) }))) }),
+      }), "ComplyTrack could not read this safety data sheet");
+      applyDraft(await response.json() as SdsDraft);
+      setSheet((current) => current && { ...current, read: true });
+      // The purple box at the top of the form says what to check; no pop-up over the Save button.
+    } catch (err) {
+      toast({
+        title: "Fill the assessment in by hand",
+        description: `${err instanceof Error ? err.message : "ComplyTrack could not read this safety data sheet."} The sheet is still attached.`,
+        variant: "destructive",
+        stay: true,
+      });
+    } finally {
+      setSheetBusy(null);
+      void refetchSdsStatus();
+    }
+  }
+
+  /** A sheet dropped or chosen: attach it, then read it when the AI switch is on. */
+  async function handleSheet(chosen: File[]) {
+    if (!assessmentForm || sheetBusy) return;
+    setSheetBusy("attaching");
+    let ready: CertificateFile[] = [];
+    try {
+      const prepared = await prepareCertificateFiles(chosen);
+      ready = prepared.ready;
+      if (prepared.problems.length) {
+        toast({ title: ready.length ? "Some files were left out" : "This file can't be used", description: prepared.problems.join(" "), variant: "destructive", stay: true });
+      }
+      if (!ready.length) return;
+      let stored: File | null = null;
+      try {
+        stored = await certificateFileFor(ready, `${ready[0]!.name.replace(/\.[^.]+$/, "")}.pdf`);
+      } catch (err) {
+        toast({ title: "The sheet could not be attached", description: err instanceof Error ? err.message : undefined, variant: "destructive", stay: true });
+      }
+      if (stored && !isAttachableDocument(stored)) {
+        toast({ title: "Word files can't be attached", description: "Save the safety data sheet as a PDF to keep it with the assessment.", stay: true });
+        stored = null;
+      }
+      setSheet({ files: ready, stored, url: stored ? URL.createObjectURL(stored) : null, read: false });
+      if (stored) {
+        try {
+          const document = await uploadRegisterDocument(api, stored);
+          setAssessmentForm((f) => f && { ...f, document });
+        } catch (err) {
+          toast({ title: "The sheet could not be attached", description: err instanceof Error ? err.message : undefined, variant: "destructive", stay: true });
+        }
+      }
+    } finally {
+      setSheetBusy(null);
+    }
+    const canUseAi = !!sdsStatus?.available && aiAllowanceState(sdsStatus.ai).canUse;
+    if (useAi && canUseAi) await readSheet(ready);
+    else toast({ title: "Safety data sheet attached", description: "Fill in the assessment from the sheet." });
   }
 
   async function saveAssessment() {
@@ -324,11 +472,28 @@ export default function CoshhTrackPage() {
     const text = (value: string) => value.trim() || null;
     setSaving(true);
     try {
+      let substanceId = f.substanceId === NONE ? null : Number(f.substanceId);
+      // The product on a dropped sheet goes on the Substances list first, with the sheet as its SDS.
+      if (substanceId === null && f.newSubstance && f.addSubstance) {
+        const sds = sheet?.stored ? await uploadRegisterDocument(api, sheet.stored) : { objectPath: null, fileName: null };
+        const created = await ensureOk(await api("/registers/coshh", {
+          method: "POST",
+          body: JSON.stringify({
+            siteId: Number(f.siteId), productName: f.newSubstance.productName, supplier: f.newSubstance.supplier,
+            hazardPictograms: f.newSubstance.hazardPictograms, whereUsed: text(f.task), controls: text(f.controls),
+            assessmentDate: f.assessmentDate, reviewDue: f.reviewDue || null, objectPath: sds.objectPath, fileName: sds.fileName,
+          }),
+        }), "Could not add the product to the Substances list");
+        substanceId = Number((await created.json()).id);
+        // Linked from now on, so trying the save again doesn't add it twice.
+        setAssessmentForm((current) => current && { ...current, substanceId: String(substanceId), newSubstance: null, addSubstance: false });
+        await queryClient.invalidateQueries({ queryKey: ["/api/registers/coshh"] });
+      }
       await ensureOk(await api(editingAssessment ? `${ASSESSMENTS}/${editingAssessment.id}` : ASSESSMENTS, {
         method: editingAssessment ? "PUT" : "POST",
         body: JSON.stringify({
           siteId: Number(f.siteId),
-          substanceId: f.substanceId === NONE ? null : Number(f.substanceId),
+          substanceId,
           task: f.task, whoAtRisk: text(f.whoAtRisk), exposureRoutes: f.exposureRoutes, howOften: text(f.howOften),
           hazardStatements: text(f.hazardStatements), signalWord: f.signalWord === NONE ? null : f.signalWord,
           healthEffects: text(f.healthEffects), exposureLimits: text(f.exposureLimits), controls: text(f.controls),
@@ -338,7 +503,7 @@ export default function CoshhTrackPage() {
           assessor: text(f.assessor), assessmentDate: f.assessmentDate, reviewDue: f.reviewDue || null,
           status: f.status, notes: text(f.notes), signOffDepartments: f.signOffDepartments,
           objectPath: f.document.objectPath, fileName: f.document.fileName,
-          ...(f.draftSource === "ai" ? { draftSource: "ai", checkedAgainstSds: f.checkedAgainstSds } : {}),
+          ...(f.draftSource === "ai" ? { draftSource: "ai", checkedAgainstSds: f.checkedAgainstSds, ...(f.draftedAt ? { draftedAt: f.draftedAt } : {}) } : {}),
         }),
       }), "Could not save");
       toast({ title: editingAssessment ? "Assessment updated" : "Assessment saved" });
@@ -763,13 +928,35 @@ export default function CoshhTrackPage() {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingAssessment ? "Edit COSHH assessment" : "New COSHH assessment"}</DialogTitle>
-            <DialogDescription>Use the supplier's safety data sheet for the hazards, exposure limits, first aid and spill steps.</DialogDescription>
+            <DialogDescription>
+              {editingAssessment
+                ? "Use the supplier's safety data sheet for the hazards, exposure limits, first aid and spill steps."
+                : "Drop the supplier's safety data sheet here to start, or fill the form in from it by hand."}
+            </DialogDescription>
           </DialogHeader>
           {assessmentForm && (() => {
             const f = assessmentForm;
             const set = (patch: Partial<AssessmentForm>) => setAssessmentForm({ ...f, ...patch });
             return (
               <div className="space-y-4">
+                {!editingAssessment && (
+                  <CoshhSdsDrop status={sdsStatus} useAi={useAi} onUseAiChange={changeUseAi} busy={sheetBusy}
+                    fileName={sheet ? (sheet.stored?.name ?? sheet.files[0]?.name ?? null) : null} sheetUrl={sheet?.url ?? null}
+                    onFiles={(files) => void handleSheet(files)} onReadNow={() => sheet && void readSheet(sheet.files)} readDone={!!sheet?.read} />
+                )}
+                {f.draftSource === "ai" && (f.aiSummary || f.aiUnclear.length > 0 || f.sdsDate) && (
+                  <div className="rounded-md border border-violet-200 bg-violet-50/60 p-3 text-xs text-violet-900 space-y-1" data-testid="coshh-ai-reading">
+                    <p className="font-medium flex items-center gap-1"><Sparkles className="w-3.5 h-3.5" aria-hidden="true" /> Read from the safety data sheet{f.sdsDate ? ` (dated ${fmtDate(f.sdsDate)})` : ""}</p>
+                    {f.aiSummary && <p>{f.aiSummary}</p>}
+                    {f.aiUnclear.length > 0 && (
+                      <>
+                        <p className="font-medium flex items-center gap-1 text-amber-800"><AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" /> Check these:</p>
+                        <ul className="list-disc pl-5 text-amber-800">{f.aiUnclear.map((note, i) => <li key={i}>{note}</li>)}</ul>
+                      </>
+                    )}
+                    <p>The task, who could be harmed, the risk level and what follows are suggestions: make them fit how you use it.</p>
+                  </div>
+                )}
                 {f.draftSource === "ai" && (
                   <label className="flex items-start gap-2 rounded-md border border-violet-200 bg-violet-50 p-3 text-sm text-violet-900">
                     <Checkbox className="mt-0.5" checked={f.checkedAgainstSds} onCheckedChange={(checked) => set({ checkedAgainstSds: checked === true })} />
@@ -789,6 +976,15 @@ export default function CoshhTrackPage() {
                     </Select>
                   </div>
                 </div>
+                {f.newSubstance && f.substanceId === NONE && (
+                  <label className="flex items-start gap-2 text-sm">
+                    <Checkbox className="mt-0.5" checked={f.addSubstance} onCheckedChange={(checked) => set({ addSubstance: checked === true })} />
+                    <span>
+                      Add {f.newSubstance.productName}{f.newSubstance.supplier ? ` (${f.newSubstance.supplier})` : ""} to this site's Substances list
+                      {sheet?.stored ? ", with this safety data sheet," : ""} and link this assessment to it
+                    </span>
+                  </label>
+                )}
                 <TextField id="coshh-task" label="Task or activity *" rows={1} max={300} value={f.task} onChange={(task) => set({ task })}
                   placeholder="For example: daily kitchen cleaning with degreaser" />
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
