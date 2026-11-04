@@ -531,6 +531,34 @@ export const SetActiveDepartmentResponse = zod.object({
 
 
 /**
+ * @summary The businesses an Owner can switch between (their own first) and the one they're working in
+ */
+export const ListOwnerBusinessesResponse = zod.object({
+  "activeClientId": zod.number().nullable(),
+  "businesses": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+}))
+})
+
+
+/**
+ * @summary Choose which of their businesses an Owner of several is working in (kept for the session)
+ */
+export const SetActiveBusinessBody = zod.object({
+  "businessId": zod.number()
+})
+
+export const SetActiveBusinessResponse = zod.object({
+  "activeClientId": zod.number().nullable(),
+  "businesses": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+}))
+})
+
+
+/**
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({

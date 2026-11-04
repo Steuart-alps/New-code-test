@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { ownersOfClient } from "../lib/ownerBusinesses";
 import { db } from "@workspace/db";
 import { complianceItemsTable, contractorsTable, appSettingsTable, usersTable, sitesTable } from "@workspace/db/schema";
 import { eq, and, isNotNull, sql } from "drizzle-orm";
@@ -37,7 +38,7 @@ async function buildReminderCcList(opts: {
     const admins = await db
       .select({ email: usersTable.email })
       .from(usersTable)
-      .where(and(eq(usersTable.clientId, clientId), eq(usersTable.role, "client_admin"), eq(usersTable.active, true)));
+      .where(and(ownersOfClient(clientId), eq(usersTable.active, true)));
     for (const a of admins) list.push(a.email);
   }
 

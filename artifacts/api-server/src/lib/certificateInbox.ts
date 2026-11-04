@@ -44,6 +44,7 @@ import { docxToText, ReportReadingError, UnreadableReportError, reportReadingCon
 import { ensureUploadCapacity } from "./storageLimit";
 import { StorageFullError } from "./storageFull";
 import { MAX_RESTRICTED_UPLOAD_BYTES, validateUploadContent, type AllowedUploadType } from "./uploadValidation";
+import { ownersOfClient } from "./ownerBusinesses";
 
 /** Stands in for the upload link's token in a stored email draft (hydrated when sent). */
 export const CERTIFICATE_UPLOAD_PLACEHOLDER = "{{CERT_UPLOAD_TOKEN}}";
@@ -671,7 +672,7 @@ async function replyRecipients(clientId: number, itemId: number | null): Promise
   people.push(...parseEmailList(maintenance?.value));
   if (!people.length) {
     const owners = rowsOf<{ email: string }>(await db.execute(sql`
-      SELECT email FROM users WHERE client_id = ${clientId} AND role = 'client_admin' AND active ORDER BY id
+      SELECT email FROM users WHERE ${ownersOfClient(clientId)} AND active ORDER BY id
     `));
     people.push(...owners.map((owner) => owner.email));
   }

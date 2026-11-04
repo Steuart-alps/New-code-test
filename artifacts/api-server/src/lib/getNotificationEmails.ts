@@ -15,6 +15,7 @@
 import { db } from "@workspace/db";
 import { appSettingsTable, usersTable } from "@workspace/db/schema";
 import { and, eq, or } from "drizzle-orm";
+import { ownersOfClient } from "./ownerBusinesses";
 
 export interface NotificationRecipients {
   /** De-duplicated list of email addresses to notify. */
@@ -52,17 +53,15 @@ export async function getNotificationEmails(
   // 2. Fall back to admin (and optionally maintenance manager) user accounts.
   const whereClause = options.includeMaintenanceManagers
     ? and(
-        eq(usersTable.clientId, clientId),
         eq(usersTable.active, true),
         or(
-          eq(usersTable.role, "client_admin"),
-          eq(usersTable.isMaintenanceManager, true),
+          ownersOfClient(clientId),
+          and(eq(usersTable.clientId, clientId), eq(usersTable.isMaintenanceManager, true)),
         ),
       )
     : and(
-        eq(usersTable.clientId, clientId),
         eq(usersTable.active, true),
-        eq(usersTable.role, "client_admin"),
+        ownersOfClient(clientId),
       );
 
   const admins = await db

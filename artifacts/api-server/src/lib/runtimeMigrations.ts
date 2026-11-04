@@ -2330,6 +2330,20 @@ async function runRuntimeMigrationsOnce() {
     // ---- Frost warnings (Nov 2026) ----
     await migrateFrostWarnings();
 
+    // ---- One Owner login for several businesses (Nov 2026) ----
+    // Mirrors lib/db/src/schema/owner-businesses.ts.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "owner_businesses" (
+        "id" serial PRIMARY KEY,
+        "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "added_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "owner_businesses_user_client_uq" ON "owner_businesses" ("user_id", "client_id")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "owner_businesses_client_idx" ON "owner_businesses" ("client_id")`);
+
     // ---- Accident book addresses (Nov 2026) ----
     // Mirrors lib/db/src/schema/incidents.ts involvedAddress / reporterAddress.
     await db.execute(sql`ALTER TABLE "incidents" ADD COLUMN IF NOT EXISTS "involved_address" text`);

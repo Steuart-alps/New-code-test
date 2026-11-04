@@ -31,6 +31,8 @@ export interface User {
   departmentIds?: number[];
   /** A Viewer's staff roster entry (whose training records they see). */
   staffRosterId?: number | null;
+  /** An Owner whose login belongs to another business they also own. */
+  addedOwner?: boolean;
   /** Latest password setup link; null when none was ever sent. */
   invitation?: {
     status: "pending" | "expired" | "completed" | "revoked" | "undelivered";
@@ -220,7 +222,15 @@ export function UserDialog({
       // A new account without a password is invited by email. The account is
       // created even if that email fails, so say which happened.
       const saved = user ? null : await res.json().catch(() => null);
-      if (saved?.inviteEmail === "failed") {
+      if (saved?.addedOwner) {
+        // An existing login (an Owner of another business) was added here.
+        onSaved({
+          kind: saved.addedEmail === "failed" ? "error" : "success",
+          text: saved.addedEmail === "failed"
+            ? `${saved.name} already has a ComplyTrack login, so they were added as an Owner here and can switch between their businesses. The email telling them could not be delivered.`
+            : `${saved.name} already has a ComplyTrack login, so they were added as an Owner here. They sign in as usual and switch between their businesses at the top of the page.`,
+        });
+      } else if (saved?.inviteEmail === "failed") {
         onSaved({
           kind: "error",
           text: `${form.name}'s account was created, but the password setup email to ${form.email} could not be delivered. Check the address, then use the resend button next to their name to try again.`,
@@ -361,6 +371,11 @@ export function UserDialog({
               </p>
             </fieldset>
           )}
+          {form.role === "client_admin" && !user && (
+            <p className="text-xs text-muted-foreground" data-testid="owner-several-businesses-hint">
+              Already an Owner of another business on ComplyTrack? Use the email they sign in with. They keep one login and switch between their businesses at the top of the page.
+            </p>
+          )}
           {form.role === "client_viewer" && (
             <div className="space-y-2">
               <Label>Name on the staff roster</Label>
@@ -473,8 +488,10 @@ export default function UsersPage() {
 
   useEffect(() => { load(); }, [activeClientId]);
 
-  async function deleteUser(id: number) {
-    if (!confirm("Remove this user?")) return;
+  async function deleteUser(id: number, addedOwner = false) {
+    if (!confirm(addedOwner
+      ? "Take this Owner off this business? Their login and their own business stay as they are."
+      : "Remove this user?")) return;
     setActionMessage(null);
     const res = await apiFetch(`/users/${id}`, { method: "DELETE" });
     const data = await res.json().catch(() => null);
@@ -666,6 +683,9 @@ export default function UsersPage() {
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${ROLE_COLORS[u.role] ?? "bg-gray-100 text-gray-700"}`}>
                           {roleLabel(u.role, isConsultant)}
                         </span>
+                        {u.addedOwner && (
+                          <span className="mt-1 block text-xs text-muted-foreground" data-testid={`added-owner-${u.id}`}>Also owns another business</span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         {canAdmin && u.role !== "client_manager" ? (
@@ -754,16 +774,18 @@ export default function UsersPage() {
                               <MailX className={`w-4 h-4 ${revokingInvite === u.id ? "animate-pulse text-destructive" : "text-destructive"}`} />
                             </Button>
                           )}
-                          {!(isManager && self) && (
+                          {!(isManager && self) && !u.addedOwner && (
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleActive(u)} title={u.active ? "Deactivate" : "Activate"}>
                             {u.active ? <UserX className="w-4 h-4 text-muted-foreground" /> : <UserCheck className="w-4 h-4 text-green-600" />}
                           </Button>
                           )}
+                          {!u.addedOwner && (
                           <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Edit ${u.name}`} onClick={() => { setEditingUser(u); setDialogOpen(true); }}>
                             <Pencil className="w-4 h-4 text-muted-foreground" />
                           </Button>
-                          {!(isManager && self) && (
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => deleteUser(u.id)}>
+                          )}
+                          {!(isManager && self) && !(u.addedOwner && self) && (
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => deleteUser(u.id, u.addedOwner)} title={u.addedOwner ? "Take off this business" : "Remove"} aria-label={u.addedOwner ? `Take ${u.name} off this business` : `Remove ${u.name}`}>
                             <Trash2 className="w-4 h-4 text-destructive" />
                           </Button>
                           )}

@@ -23,6 +23,7 @@ import { sendSystemEmail, getPublicAppUrl, escapeHtml } from "./email";
 import { findLiveSubscription } from "./billing";
 import { claimEmailDelivery, emailDeliveryIdempotencyKey, markEmailDeliverySent, settleEmailDelivery } from "./emailDeliveryClaims";
 import { randomUUID } from "crypto";
+import { ownersOfClient } from "./ownerBusinesses";
 
 /**
  * When a synced subscription's access ends, in Unix seconds (the stripe.*
@@ -56,7 +57,7 @@ async function getClientRecipients(clientId: number) {
   }
   const admins = await db.execute(sql`
     SELECT id, email, name FROM users
-    WHERE client_id = ${clientId} AND active = true AND role = 'client_admin'
+    WHERE ${ownersOfClient(clientId)} AND active = true
     LIMIT 5
   `);
   return admins.rows as { id: number; email: string; name: string }[];
@@ -72,6 +73,7 @@ function billingRecipientsQuery(clientId: number) {
     WHERE u.active = true
       AND u.role IN ('client_admin', 'consultant')
       AND (u.client_id = ${clientId}
+        OR ${ownersOfClient(clientId, "u")}
         OR (u.role = 'consultant' AND EXISTS (
           SELECT 1 FROM consultant_clients cc WHERE cc.user_id = u.id AND cc.client_id = ${clientId})))
     ORDER BY u.id

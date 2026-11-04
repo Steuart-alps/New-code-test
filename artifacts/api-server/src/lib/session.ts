@@ -38,5 +38,7 @@ declare module "express-session" {
     csrfToken?: string;
     // The department a Manager with several is working in (see loadUser).
     activeDepartmentId?: number;
+    // The business an Owner of several is working in (see loadUser).
+    activeClientId?: number;
   }
 }

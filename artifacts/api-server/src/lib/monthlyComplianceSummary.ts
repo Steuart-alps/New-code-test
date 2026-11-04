@@ -15,6 +15,7 @@ import { sendEmail, escapeHtml } from "./email";
 import { logger } from "./logger";
 import { randomUUID } from "node:crypto";
 import { getUnscopedComplianceReport } from "./unscopedComplianceReport";
+import { ownersOfClient } from "./ownerBusinesses";
 
 // ─── Date helpers ────────────────────────────────────────────────────────────
 
@@ -191,7 +192,7 @@ export async function runMonthlyComplianceSummaryJob(
       if (batch.rows.length === 0 && canInitialize) {
         const adminsRes = await db.execute(sql`
           SELECT id, email FROM users
-          WHERE client_id = ${clientId} AND role = 'client_admin' AND active = true
+          WHERE ${ownersOfClient(clientId)} AND active = true
           ORDER BY id
         `);
         const admins = adminsRes.rows as { id: number; email: string }[];

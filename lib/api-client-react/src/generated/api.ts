@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  ActiveBusinessRequest,
   ActiveDepartmentRequest,
   AddPrivacyRetentionVerificationParams,
   AiAddonChange,
@@ -237,6 +238,7 @@ import type {
   OkResponse,
   OrderFireCallPointsRequest,
   OwnTrainingRecord,
+  OwnerBusinesses,
   PATAppliance,
   PATContractorVisit,
   PATContractorVisitDetail,
@@ -1712,6 +1714,154 @@ export const useSetActiveDepartment = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSetActiveDepartmentMutationOptions(options));
+    }
+
+export const getListOwnerBusinessesUrl = () => {
+
+
+
+
+  return `/api/users/me/businesses`
+}
+
+/**
+ * @summary The businesses an Owner can switch between (their own first) and the one they're working in
+ */
+export const listOwnerBusinesses = async ( options?: RequestInit): Promise<OwnerBusinesses> => {
+
+  return customFetch<OwnerBusinesses>(getListOwnerBusinessesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOwnerBusinessesQueryKey = () => {
+    return [
+    `/api/users/me/businesses`
+    ] as const;
+    }
+
+
+export const getListOwnerBusinessesQueryOptions = <TData = Awaited<ReturnType<typeof listOwnerBusinesses>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listOwnerBusinesses>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOwnerBusinessesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOwnerBusinesses>>> = ({ signal }) => listOwnerBusinesses({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOwnerBusinesses>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListOwnerBusinessesQueryResult = NonNullable<Awaited<ReturnType<typeof listOwnerBusinesses>>>
+export type ListOwnerBusinessesQueryError = ErrorType<void>
+
+
+/**
+ * @summary The businesses an Owner can switch between (their own first) and the one they're working in
+ */
+
+export function useListOwnerBusinesses<TData = Awaited<ReturnType<typeof listOwnerBusinesses>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listOwnerBusinesses>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListOwnerBusinessesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSetActiveBusinessUrl = () => {
+
+
+
+
+  return `/api/users/me/active-business`
+}
+
+/**
+ * @summary Choose which of their businesses an Owner of several is working in (kept for the session)
+ */
+export const setActiveBusiness = async (activeBusinessRequest: ActiveBusinessRequest, options?: RequestInit): Promise<OwnerBusinesses> => {
+
+  return customFetch<OwnerBusinesses>(getSetActiveBusinessUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(activeBusinessRequest)
+  }
+);}
+
+
+
+
+
+export const getSetActiveBusinessMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setActiveBusiness>>, TError,{data: BodyType<ActiveBusinessRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setActiveBusiness>>, TError,{data: BodyType<ActiveBusinessRequest>}, TContext> => {
+
+const mutationKey = ['setActiveBusiness'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setActiveBusiness>>, {data: BodyType<ActiveBusinessRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  setActiveBusiness(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetActiveBusinessMutationResult = NonNullable<Awaited<ReturnType<typeof setActiveBusiness>>>
+    export type SetActiveBusinessMutationBody = BodyType<ActiveBusinessRequest>
+    export type SetActiveBusinessMutationError = ErrorType<void>
+
+    /**
+ * @summary Choose which of their businesses an Owner of several is working in (kept for the session)
+ */
+export const useSetActiveBusiness = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setActiveBusiness>>, TError,{data: BodyType<ActiveBusinessRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setActiveBusiness>>,
+        TError,
+        {data: BodyType<ActiveBusinessRequest>},
+        TContext
+      > => {
+      return useMutation(getSetActiveBusinessMutationOptions(options));
     }
 
 export const getHealthCheckUrl = () => {

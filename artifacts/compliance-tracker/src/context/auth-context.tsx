@@ -30,6 +30,10 @@ export interface AuthUser {
   allDepartments?: boolean;
   /** A Manager's departments, main first; departmentId is the one they're working in. */
   departmentIds?: number[];
+  /** An Owner of several businesses: all of them, their own first; clientId is the one they're working in. */
+  businesses?: { id: number; name: string }[];
+  /** An Owner of several businesses: the business their login belongs to. */
+  ownBusinessId?: number | null;
   /** A Viewer's staff roster entry. */
   staffRosterId?: number | null;
   /** Named in PLATFORM_ADMIN_EMAILS: may issue ALPS discount codes. */

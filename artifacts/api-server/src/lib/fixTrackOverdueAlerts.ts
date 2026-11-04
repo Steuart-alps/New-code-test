@@ -16,6 +16,7 @@ import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl, renderEmailLayout } from "./email";
 import { sendPushToUsers } from "./pushNotifications";
 import { DEFAULT_FIX_TRACK_STALE_DAYS, parseFixTrackStaleDays } from "./fixTrackAlertSettings";
+import { ownersOfClient } from "./ownerBusinesses";
 
 function esc(s: string | null | undefined): string {
   return (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -214,9 +215,8 @@ export async function runFixTrackOverdueAlertJob(
           .select({ id: usersTable.id, email: usersTable.email })
           .from(usersTable)
           .where(and(
-            eq(usersTable.clientId, client.id),
             eq(usersTable.active, true),
-            or(eq(usersTable.role, "client_admin"), eq(usersTable.isMaintenanceManager, true)),
+            or(ownersOfClient(client.id), and(eq(usersTable.clientId, client.id), eq(usersTable.isMaintenanceManager, true))),
           ));
         const emails = [...new Set(managers.map((m) => m.email).filter(Boolean) as string[])];
         const userIds = [...new Set(managers.map((m) => m.id))];

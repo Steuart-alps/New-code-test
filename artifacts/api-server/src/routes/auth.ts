@@ -7,6 +7,7 @@ import { getUserWithClientByEmail } from "../lib/auth";
 import { verifyPassword, hashPassword } from "../lib/auth";
 import { MIN_PASSWORD_LENGTH, passwordProblem } from "../lib/passwordPolicy";
 import { getUserById } from "../lib/auth";
+import { ownerBusinessList } from "../lib/ownerBusinesses";
 import { requireAuth, isPlatformOperator, getClientId } from "../middleware/requireAuth";
 import {
   configureProductionLoginRateLimitStore,
@@ -665,12 +666,14 @@ router.get("/auth/me", async (req, res) => {
     return;
   }
 
+  // An Owner of several businesses sees the one they're working in (loadUser).
+  const workingClientId = req.currentUser.clientId ?? null;
   let client = null;
-  if (user.clientId) {
+  if (workingClientId) {
     const { db } = await import("@workspace/db");
     const { clientsTable } = await import("@workspace/db/schema");
     const { eq } = await import("drizzle-orm");
-    const rows = await db.select().from(clientsTable).where(eq(clientsTable.id, user.clientId));
+    const rows = await db.select().from(clientsTable).where(eq(clientsTable.id, workingClientId));
     client = rows[0] ?? null;
   }
 
@@ -691,9 +694,13 @@ router.get("/auth/me", async (req, res) => {
 
   const { totpSecret: _s, ...stored } = user;
   // A Manager with several departments: the one they're working in, and all of them.
-  const safeUser = req.departmentIds
+  const withDepartments = req.departmentIds
     ? { ...stored, departmentId: req.currentUser.departmentId, departmentIds: req.departmentIds }
     : stored;
+  // An Owner of several businesses: the one they're working in, and all of them.
+  const safeUser = req.ownerBusinessIds
+    ? { ...withDepartments, clientId: workingClientId, ownBusinessId: user.clientId, businesses: await ownerBusinessList(req.ownerBusinessIds) }
+    : withDepartments;
   const passkeys = await getUserPasskeys(user.id);
   const twoFactorRequired = await isTwoFactorRequired(user);
   // Only a self-registered Owner who hasn't opened the welcome link yet is
