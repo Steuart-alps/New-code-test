@@ -1,4 +1,4 @@
-name: Drag and drop photos and the laptop camera
+name: Drag and drop photos, the laptop camera and record photos
 
 # Runs only when the drag-and-drop code, its test or dependencies change, so
 # ordinary PRs spend no extra CI minutes on it. WebKit stands in for Safari.
@@ -9,8 +9,12 @@ on:
       - "artifacts/compliance-tracker/src/lib/media-upload.ts"
       - "artifacts/compliance-tracker/src/components/pending-media-picker.tsx"
       - "artifacts/compliance-tracker/src/components/camera-capture.tsx"
+      - "artifacts/compliance-tracker/src/components/record-media.tsx"
+      - "artifacts/compliance-tracker/src/components/check-photo-uploader.tsx"
       - "artifacts/compliance-tracker/tests/file-drop-browser.test.mjs"
       - "artifacts/compliance-tracker/tests/camera-capture-browser.test.mjs"
+      - "artifacts/compliance-tracker/tests/record-media-browser.test.mjs"
+      - "artifacts/compliance-tracker/tests/browser/record-media.harness.tsx"
       - "artifacts/compliance-tracker/tests/file-drop-harness.tsx"
       - "artifacts/compliance-tracker/tests/file-drop-harness.html"
       - "artifacts/compliance-tracker/package.json"
@@ -24,8 +28,12 @@ on:
       - "artifacts/compliance-tracker/src/lib/media-upload.ts"
       - "artifacts/compliance-tracker/src/components/pending-media-picker.tsx"
       - "artifacts/compliance-tracker/src/components/camera-capture.tsx"
+      - "artifacts/compliance-tracker/src/components/record-media.tsx"
+      - "artifacts/compliance-tracker/src/components/check-photo-uploader.tsx"
       - "artifacts/compliance-tracker/tests/file-drop-browser.test.mjs"
       - "artifacts/compliance-tracker/tests/camera-capture-browser.test.mjs"
+      - "artifacts/compliance-tracker/tests/record-media-browser.test.mjs"
+      - "artifacts/compliance-tracker/tests/browser/record-media.harness.tsx"
       - "artifacts/compliance-tracker/tests/file-drop-harness.tsx"
       - "artifacts/compliance-tracker/tests/file-drop-harness.html"
       - "artifacts/compliance-tracker/package.json"
@@ -73,3 +81,9 @@ jobs:
         env:
           FILE_DROP_BROWSER: ${{ matrix.browser }}
         run: pnpm --filter @workspace/compliance-tracker run test:camera-capture-browser
+
+      - name: Run record photo and video checks
+        if: ${{ !cancelled() }}
+        env:
+          FILE_DROP_BROWSER: ${{ matrix.browser }}
+        run: pnpm --filter @workspace/compliance-tracker run test:record-media-browser

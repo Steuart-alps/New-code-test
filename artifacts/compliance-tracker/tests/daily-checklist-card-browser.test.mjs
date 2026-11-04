@@ -1,8 +1,8 @@
 // Real-browser (Chromium via Playwright) checks for the DailyTrack checklist
 // card:
-//  - each checklist line is a keyboard-operable checkbox (Tab, Space, Enter)
-//    with aria-checked state;
-//  - a failed save shows the server's error, keeps the user's ticks and does
+//  - each checklist line is a keyboard-operable Pass / Fail / N/A choice;
+//  - "Pass all" at the end of the list passes only the unanswered lines;
+//  - a failed save shows the server's error, keeps the user's answers and does
 //    not report success or reload; a successful save does.
 //
 // The real card is mounted by tests/browser/daily-checklist.harness.tsx and
@@ -13,6 +13,7 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
@@ -80,7 +81,7 @@ function mockApi(page, saveResponses) {
   page.route(apiPath("/api/staff-roster"), (route) => json(route, 200, []));
   page.route(apiPath("/api/assignees"), (route) => json(route, 200, []));
   page.route(apiPath("/api/checklist-templates"), (route) => json(route, 200, {
-    items: [{ label: "Alpha check" }, { label: "Bravo check" }],
+    items: [{ label: "Alpha check" }, { label: "Bravo check" }, { label: "Charlie check" }],
   }));
   page.route(apiPath("/api/daily-track-am"), (route) => {
     if (route.request().method() !== "POST") return json(route, 404, { error: "unexpected" });
@@ -91,57 +92,100 @@ function mockApi(page, saveResponses) {
   return state;
 }
 
-const checkbox = (page, name) => page.getByRole("checkbox", { name });
-const isChecked = async (page, name) => (await checkbox(page, name).getAttribute("aria-checked")) === "true";
+/** One line's Pass / Fail / N/A buttons. */
+const answer = (page, line, option) => page.getByRole("radiogroup", { name: line }).getByRole("radio", { name: option });
+const isAnswered = async (page, line, option) => (await answer(page, line, option).getAttribute("aria-checked")) === "true";
+const passAll = (page) => page.getByTestId("button-pass-all");
 
 async function main() {
   const outDir = await buildHarness();
   const server = await serve(outDir);
   const base = `http://127.0.0.1:${server.address().port}/tests/browser/daily-checklist.html`;
-  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? "/opt/pw-browsers/chromium" });
-  const open = async (saveResponses = []) => {
-    const page = await browser.newPage();
+  // Cloud sessions have a preinstalled browser; CI uses Playwright's own.
+  const executablePath = process.env.CHROMIUM_PATH ?? ["/opt/pw-browsers/chromium"].find((p) => existsSync(p));
+  const browser = await chromium.launch({ executablePath });
+  const open = async (saveResponses = [], viewport) => {
+    const page = await browser.newPage(viewport ? { viewport } : undefined);
     page.setDefaultTimeout(5_000);
     if (process.env.DEBUG_BROWSER) page.on("console", (m) => console.log("[browser]", m.type(), m.text()));
     const state = mockApi(page, saveResponses);
+    if (process.env.DEBUG_BROWSER) page.on("pageerror", (e) => console.log("[pageerror]", e.message));
     await page.goto(base);
-    await checkbox(page, "Alpha check").waitFor();
+    await answer(page, "Alpha check", "Pass").waitFor();
     return { page, state };
   };
   try {
-    await test("checklist lines are keyboard checkboxes (Tab, Space, Enter)", async () => {
+    await test("each line is a keyboard-operable Pass / Fail / N/A choice", async () => {
       const { page } = await open();
-      assert.equal(await page.getByRole("checkbox").count(), 2);
-      assert.equal(await isChecked(page, "Alpha check"), false);
+      assert.equal(await page.getByRole("radiogroup").count(), 3);
+      assert.equal(await isAnswered(page, "Alpha check", "Pass"), false);
       await page.focus("#before");
       await page.keyboard.press("Tab");
-      assert.equal(await page.evaluate(() => document.activeElement?.textContent?.trim()), "Alpha check");
+      assert.equal(await page.evaluate(() => document.activeElement?.textContent?.trim()), "Pass");
       await page.keyboard.press("Space");
-      assert.equal(await isChecked(page, "Alpha check"), true, "Space ticks");
-      await page.keyboard.press("Space");
-      assert.equal(await isChecked(page, "Alpha check"), false, "Space unticks");
-      await checkbox(page, "Bravo check").focus();
+      assert.equal(await isAnswered(page, "Alpha check", "Pass"), true, "Space answers Pass");
+      await answer(page, "Bravo check", "N/A").focus();
       await page.keyboard.press("Enter");
-      assert.equal(await isChecked(page, "Bravo check"), true, "Enter ticks");
+      assert.equal(await isAnswered(page, "Bravo check", "N/A"), true, "Enter answers N/A");
       await page.close();
     });
 
-    await test("a failed save shows the server error and keeps the ticks", async () => {
+    await test("Pass all shows before anything is answered and passes every line", async () => {
+      const { page, state } = await open([[201, { id: 7, checklistType: "kitchen_opening", checkDate: "2026-10-12", siteId: 5, items: [] }]]);
+      assert.equal((await passAll(page).textContent()).trim(), "Pass all");
+      await passAll(page).click();
+      for (const line of ["Alpha check", "Bravo check", "Charlie check"]) {
+        assert.equal(await isAnswered(page, line, "Pass"), true, `${line} passed`);
+      }
+      assert.equal(await passAll(page).count(), 0, "hidden once every line is answered");
+      await page.getByRole("button", { name: "Submit checklist" }).click();
+      await page.getByText("Checklist submitted", { exact: true }).waitFor();
+      assert.deepEqual(state.posts[0].items.map((i) => i.result), ["pass", "pass", "pass"]);
+      assert.ok(state.posts[0].submittedAt, "sent as submitted");
+      await page.close();
+    });
+
+    await test("Pass all leaves Fail and N/A answers alone, and a fail still needs a note", async () => {
+      const { page } = await open();
+      await answer(page, "Alpha check", "Fail").click();
+      await answer(page, "Charlie check", "N/A").click();
+      assert.equal((await passAll(page).textContent()).trim(), "Pass the other 1");
+      await passAll(page).click();
+      assert.equal(await isAnswered(page, "Alpha check", "Fail"), true, "fail kept");
+      assert.equal(await isAnswered(page, "Bravo check", "Pass"), true, "unanswered line passed");
+      assert.equal(await isAnswered(page, "Charlie check", "N/A"), true, "N/A kept");
+      assert.equal(await page.getByRole("button", { name: "Submit checklist" }).isDisabled(), true, "fail without a note blocks submit");
+      await page.getByLabel("Note for Alpha check").fill("Door sticks");
+      assert.equal(await page.getByRole("button", { name: "Submit checklist" }).isDisabled(), false);
+      await page.close();
+    });
+
+    await test("Pass all sits after the last line and fits a phone screen", async () => {
+      const { page } = await open([], { width: 375, height: 740 });
+      const lastLine = await page.getByRole("radiogroup", { name: "Charlie check" }).boundingBox();
+      const button = await passAll(page).boundingBox();
+      assert.ok(button.y > lastLine.y + lastLine.height - 1, "below the last line");
+      assert.ok(button.x >= 0 && button.x + button.width <= 375, "inside the screen width");
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, "no sideways scroll");
+      await page.close();
+    });
+
+    await test("a failed save shows the server error and keeps the answers", async () => {
       const { page, state } = await open([
         [500, { error: "Database unavailable" }],
         [201, { id: 7, checklistType: "kitchen_opening", checkDate: "2026-10-12", siteId: 5, items: [] }],
       ]);
-      await checkbox(page, "Alpha check").click();
-      await checkbox(page, "Bravo check").click();
+      await answer(page, "Alpha check", "Pass").click();
+      await answer(page, "Bravo check", "Pass").click();
       await page.getByRole("button", { name: "Save draft" }).click();
       // Exact matches: Radix Toast also briefly mirrors the title and
       // description into a visually hidden live region for screen readers.
       await page.getByText("Database unavailable", { exact: true }).waitFor();
       await page.getByText("Draft not saved", { exact: true }).waitFor();
       assert.equal(await page.evaluate(() => window.savedCount), 0, "no reload after a failed save");
-      assert.equal(await isChecked(page, "Alpha check"), true, "ticks survive a failed save");
-      assert.equal(await isChecked(page, "Bravo check"), true, "ticks survive a failed save");
-      assert.deepEqual(state.posts[0].items.map((i) => i.checked), [true, true]);
+      assert.equal(await isAnswered(page, "Alpha check", "Pass"), true, "answers survive a failed save");
+      assert.equal(await isAnswered(page, "Bravo check", "Pass"), true, "answers survive a failed save");
+      assert.deepEqual(state.posts[0].items.map((i) => i.checked), [true, true, false]);
 
       await page.getByRole("button", { name: "Save draft" }).click();
       await page.getByText("Draft saved", { exact: true }).waitFor();
@@ -152,7 +196,7 @@ async function main() {
 
     await test("a conflicting submit reports the error and reloads the stored copy", async () => {
       const { page } = await open([[409, { error: "Checklist already submitted", code: "CHECKLIST_ALREADY_SUBMITTED", id: 9 }]]);
-      await checkbox(page, "Alpha check").click();
+      await passAll(page).click();
       await page.getByRole("button", { name: "Submit checklist" }).click();
       await page.getByText("Checklist already submitted", { exact: true }).waitFor();
       await page.getByText("Checklist not submitted", { exact: true }).waitFor();

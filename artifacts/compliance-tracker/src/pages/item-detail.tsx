@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ItemFormDialog } from "@/components/item-form-dialog";
 import { CertificateFormDialog } from "@/components/certificate-form-dialog";
-import { CertificateReaderButton } from "@/components/certificate-reader-dialog";
+import { CertificateReaderButton, CertificateReaderDialog } from "@/components/certificate-reader-dialog";
+import { useFileDrop } from "@/hooks/use-file-drop";
+import { cn } from "@/lib/utils";
 import { StatusBadge, PriorityBadge, ExpiryBadge, NeedsActionBadge, needsActionLabel } from "@/components/badges";
 import { CheckStatusWithCertificate } from "@/components/certificates-outstanding-card";
 import { CompleteCheckDialog } from "@/components/complete-check-dialog";
@@ -106,6 +108,15 @@ export default function ItemDetailPage() {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [certOpen, setCertOpen] = useState(false);
   const [editingCert, setEditingCert] = useState<any>(null);
+  // A certificate dragged onto the Certificates box (from a folder, or an
+  // email attachment) opens the AI reader with it, or the upload form for
+  // those who can't use the reader.
+  const [droppedForReader, setDroppedForReader] = useState<File[] | null>(null);
+  const [droppedForForm, setDroppedForForm] = useState<File | null>(null);
+  const certificateDrop = useFileDrop((files) => {
+    if (canAdmin) { setDroppedForReader(files); return; }
+    setEditingCert(null); setCertIssueDate(null); setDroppedForForm(files[0] ?? null); setCertOpen(true);
+  }, !certOpen && !droppedForReader);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [auditError, setAuditError] = useState(false);
 
@@ -313,14 +324,15 @@ export default function ItemDetailPage() {
           </Card>
 
           {/* Certificates section — now lives on the check itself */}
-          <Card className="shadow-lg border-border/50 overflow-hidden">
+          <Card {...certificateDrop.dropZoneProps} data-testid="certificates-card"
+            className={cn("shadow-lg border-border/50 overflow-hidden", certificateDrop.isDragging && "ring-2 ring-primary")}>
             <div className="p-6 bg-muted/20 border-b border-border/50 flex justify-between items-center">
               <div>
                 <h3 className="font-display text-lg font-bold flex items-center gap-2">
                   <FileText className="w-5 h-5 text-primary" /> Certificates
                 </h3>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Documentation for this compliance check — upload the certificate that proves this requirement.
+                  Documentation for this compliance check — upload the certificate that proves this requirement, or drag it here.
                 </p>
               </div>
               <div className="flex flex-wrap justify-end gap-2">
@@ -463,9 +475,14 @@ export default function ItemDetailPage() {
       </div>
 
       <ItemFormDialog isOpen={editOpen} onClose={() => setEditOpen(false)} item={item as any} />
+      {droppedForReader && (
+        <CertificateReaderDialog open onOpenChange={(open) => { if (!open) setDroppedForReader(null); }}
+          itemId={item.id} initialFiles={droppedForReader} />
+      )}
       <CertificateFormDialog
         isOpen={certOpen}
-        onClose={() => setCertOpen(false)}
+        onClose={() => { setCertOpen(false); setDroppedForForm(null); }}
+        initialFile={droppedForForm}
         itemId={id}
         suggestedName={item.title}
         defaultIssueDate={certIssueDate}

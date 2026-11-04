@@ -46,6 +46,8 @@ const createSchema = z.object({
   description: z.string().min(1).max(10000),
   involvedName: z.string().min(1).max(200),
   involvedJobTitle: z.string().max(200).nullable().optional(),
+  involvedAddress: z.string().max(500).nullable().optional(),
+  reporterAddress: z.string().max(500).nullable().optional(),
   involvedEmploymentType: z.enum(EMPLOYMENT_TYPES).default("employee"),
   injuriesSustained: z.string().max(5000).nullable().optional(),
   firstAidGiven: z.boolean().default(false),
@@ -88,16 +90,22 @@ function allowedSites(clientId: number, deptId: number) {
     ));
 }
 
+/** Northern Ireland businesses (Compliance Hub nation) report under RIDDOR (NI) 1997. */
+async function inNorthernIreland(clientId: number): Promise<boolean> {
+  const result = await db.execute(sql`SELECT nation FROM compliance_profiles WHERE client_id = ${clientId} LIMIT 1`);
+  return (result.rows as Array<{ nation: string | null }>)[0]?.nation === "northern_ireland";
+}
+
 function validateRiddorRecord(data: {
   riddorReportable?: boolean; riddorCategory?: string | null; reportedToHse?: boolean; riddorRationale?: string | null;
   hseReference?: string | null; hseReportDate?: string | null; submittedAt?: string | null;
   submissionEvidence?: string | null; hasReceipt?: boolean;
-}, requireSubmission = true) {
+}, requireSubmission = true, northernIreland = false) {
   if (!data.riddorRationale?.trim()) {
     return "Record the rationale for the RIDDOR decision";
   }
   if (data.reportedToHse && !data.riddorReportable) return "Only a reportable incident can be marked submitted to HSE";
-  if (data.riddorCategory && isReportableRiddorCategory(data.riddorCategory as any) !== !!data.riddorReportable)
+  if (data.riddorCategory && isReportableRiddorCategory(data.riddorCategory as any, northernIreland) !== !!data.riddorReportable)
     return data.riddorReportable
       ? "Over-3-day injuries are recorded, not reported: untick RIDDOR reportable or choose another category"
       : "This RIDDOR category is reportable: tick RIDDOR reportable or choose another category";
@@ -118,11 +126,12 @@ function validateRiddorRecord(data: {
 }
 
 /**
- * Injury details are health data: staff who are not managers (see
- * canReadHealthData) and viewers see the incident with injuriesSustained = null.
+ * Injury details are health data, and home addresses are personal data: staff
+ * who are not managers (see canReadHealthData) and viewers see the incident
+ * with injuriesSustained, involvedAddress and reporterAddress = null.
  */
-function redactHealthData<T extends { injuriesSustained?: string | null }>(req: Parameters<typeof canReadHealthData>[0], row: T): T {
-  return canReadHealthData(req) ? row : { ...row, injuriesSustained: null };
+function redactHealthData<T extends { injuriesSustained?: string | null; involvedAddress?: string | null; reporterAddress?: string | null }>(req: Parameters<typeof canReadHealthData>[0], row: T): T {
+  return canReadHealthData(req) ? row : { ...row, injuriesSustained: null, involvedAddress: null, reporterAddress: null };
 }
 
 async function canAccessSite(clientId: number, siteId: number | null | undefined, deptId: number | null) {
@@ -179,6 +188,11 @@ async function resolveReceipt(
     const photo = found.rows[0] as { id: number; object_path: string; caption: string | null } | undefined;
     if (!photo) {
       res.status(404).json({ error: "That attachment is not on this incident" });
+      return null;
+    }
+    // Records can hold videos too; a receipt is a photo or a PDF.
+    if (/\.(mp4|mov|webm)$/i.test(photo.object_path)) {
+      res.status(400).json({ error: "Pick a photo of the receipt, not a video" });
       return null;
     }
     const contentType = /\.png$/i.test(photo.object_path) ? "image/png"
@@ -270,7 +284,8 @@ router.get("/", requireAuth, async (req, res) => {
     .where(and(...conditions))
     .orderBy(desc(incidentsTable.incidentDate), desc(incidentsTable.id));
 
-  res.json(rows.map((row) => withRiddorDeadline(redactHealthData(req, row))));
+  const northernIreland = await inNorthernIreland(clientId);
+  res.json(rows.map((row) => withRiddorDeadline(redactHealthData(req, row), northernIreland)));
 });
 
 // GET /api/incidents/summary
@@ -321,7 +336,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (!await canAccessSite(clientId, data.siteId, getActiveDepartmentId(req)))
     return res.status(403).json({ error: "Invalid or inaccessible site" });
 
-  const riddorError = validateRiddorRecord({ ...data, hasReceipt: !!data.submissionReceipt });
+  const northernIreland = await inNorthernIreland(clientId);
+  const riddorError = validateRiddorRecord({ ...data, hasReceipt: !!data.submissionReceipt }, true, northernIreland);
   if (riddorError) return res.status(400).json({ error: riddorError });
   if (!receiptAllowed(req, res, data.submissionReceipt, data.reportedToHse)) return;
   const { riddorRationale, submittedAt, submissionEvidence, submissionReceipt, clientEntryId: _entryId, ...incidentData } = data;
@@ -330,7 +346,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const storedEntry = async () => entry && (await db.select().from(incidentsTable)
     .where(and(eq(incidentsTable.clientId, clientId), eq(incidentsTable.clientEntryId, entry.id)))
     .limit(1))[0];
-  const present = (row: typeof incidentsTable.$inferSelect) => withRiddorDeadline(redactHealthData(req, row));
+  const present = (row: typeof incidentsTable.$inferSelect) => withRiddorDeadline(redactHealthData(req, row), northernIreland);
   const prior = await storedEntry();
   if (entry && prior) return respondToStoredEntry(res, prior, actor.id, entry, present);
   const receipt = submissionReceipt ? await resolveReceipt(req, res, clientId, null, submissionReceipt) : null;
@@ -362,7 +378,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   }
   await appendAuditEvent(req, { clientId, entityType: "incident", entityId: inserted.id, action: "created", after: inserted });
 
-  res.status(201).json(withRiddorDeadline(inserted));
+  res.status(201).json(withRiddorDeadline(inserted, northernIreland));
 });
 
 // PUT /api/incidents/:id
@@ -371,6 +387,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  const northernIreland = await inNorthernIreland(clientId);
 
   const [existing] = await db.select().from(incidentsTable)
     .where(and(eq(incidentsTable.id, id), eq(incidentsTable.clientId, clientId))).limit(1);
@@ -393,7 +410,11 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   const { riddorRationale, submittedAt, submissionEvidence, submissionReceipt, ...updateData } = parsed.data;
   // Staff who can't read injury details get them back as null; saving the
   // form must not wipe what a manager recorded (adding details is allowed).
-  if (!canReadHealthData(req) && !updateData.injuriesSustained?.trim()) delete updateData.injuriesSustained;
+  if (!canReadHealthData(req)) {
+    if (!updateData.injuriesSustained?.trim()) delete updateData.injuriesSustained;
+    if (!updateData.involvedAddress?.trim()) delete updateData.involvedAddress;
+    if (!updateData.reporterAddress?.trim()) delete updateData.reporterAddress;
+  }
   const riddorChanged = ["riddorReportable", "riddorCategory", "reportedToHse", "hseReference", "hseReportDate"]
     .some(k => k in updateData && (updateData as any)[k] !== (existing as any)[k]);
   const hasRiddorRecord = riddorChanged || !!riddorRationale?.trim() || !!submittedAt || !!submissionEvidence?.trim()
@@ -404,7 +425,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   if (riddorChanged) {
     const category = updateData.riddorCategory === undefined ? existing.riddorCategory : updateData.riddorCategory;
     const reportable = updateData.riddorReportable ?? existing.riddorReportable;
-    if (category && isReportableRiddorCategory(category as any) !== reportable)
+    if (category && isReportableRiddorCategory(category as any, northernIreland) !== reportable)
       return res.status(400).json({ error: reportable
         ? "Over-3-day injuries are recorded, not reported: untick RIDDOR reportable or choose another category"
         : "This RIDDOR category is reportable: tick RIDDOR reportable or choose another category" });
@@ -425,7 +446,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
       submittedAt,
       submissionEvidence,
       hasReceipt: !!submissionReceipt,
-    }, newSubmission);
+    }, newSubmission, northernIreland);
     if (riddorError) return res.status(400).json({ error: riddorError });
   }
   const receipt = submissionReceipt ? await resolveReceipt(req, res, clientId, id, submissionReceipt) : null;
@@ -467,7 +488,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   if (!updated) await discardUnboundReceipt(clientId, receipt);
   if (!updated) return res.status(409).json({ error: "Linked corrective actions changed; reload before closing this incident" });
   await appendAuditEvent(req, { clientId, entityType: "incident", entityId: id, action: "updated", before: existing, after: updated });
-  res.json(withRiddorDeadline(redactHealthData(req, updated)));
+  res.json(withRiddorDeadline(redactHealthData(req, updated), northernIreland));
 });
 
 // DELETE /api/incidents/:id
@@ -625,6 +646,9 @@ router.get("/config", requireAuth, async (req, res) => {
       config[row.key] = row.value;
     }
   }
+  // Northern Ireland reports go to HSENI under RIDDOR (NI) 1997, not the HSE.
+  const profile = await db.execute(sql`SELECT nation FROM compliance_profiles WHERE client_id = ${clientId} LIMIT 1`);
+  config.regulator_nation = String((profile.rows as Array<{ nation: string | null }>)[0]?.nation ?? "");
   res.json(config);
 });
 

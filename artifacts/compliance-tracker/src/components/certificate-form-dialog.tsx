@@ -19,6 +19,8 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { UploadCloud, FileText, Plus, Trash2, AlertTriangle } from "lucide-react";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { useFileDrop } from "@/hooks/use-file-drop";
+import { cn } from "@/lib/utils";
 
 const formSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -80,6 +82,7 @@ export function CertificateFormDialog({
   suggestedName,
   defaultIssueDate,
   certificate = null,
+  initialFile = null,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -89,6 +92,8 @@ export function CertificateFormDialog({
   /** YYYY-MM-DD, e.g. the date a check was just marked done. */
   defaultIssueDate?: string | null;
   certificate?: Certificate | null;
+  /** A file dropped on the page that opened the form (e.g. the check's Certificates box). */
+  initialFile?: File | null;
 }) {
   const {
     createCertificate, updateCertificate,
@@ -234,6 +239,16 @@ export function CertificateFormDialog({
     }
   };
 
+  // Dropped files (including email attachments, see useFileDrop) arrive here
+  // as if picked; a drop anywhere on the open form lands in this box.
+  const showPicker = (!certificate?.fileUrl || changingFile) && !selectedFile;
+  const fileDrop = useFileDrop((files) => handleFileSelect(files[0] ?? null), isOpen && !isUploading);
+  useEffect(() => {
+    if (isOpen && initialFile) handleFileSelect(initialFile);
+    // Only when the form opens with a dropped file.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, initialFile]);
+
   const updateDefect = (index: number, patch: Partial<DefectDraft>) =>
     setDefects((all) => all.map((d, i) => (i === index ? { ...d, ...patch } : d)));
 
@@ -354,8 +369,11 @@ export function CertificateFormDialog({
 
           <div className="space-y-1.5">
             <Label>Certificate File</Label>
-            {(!certificate?.fileUrl || changingFile) && !selectedFile ? (
-              <div className="border-2 border-dashed border-border rounded-xl p-6 flex flex-col items-center justify-center text-center bg-muted/20 hover:bg-muted/50 transition-colors relative">
+            {showPicker ? (
+              <div {...fileDrop.dropZoneProps} className={cn(
+                "border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center text-center bg-muted/20 hover:bg-muted/50 transition-colors relative",
+                fileDrop.isDragging ? "border-primary bg-primary/5" : "border-border",
+              )}>
                 <input
                   type="file"
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
@@ -367,7 +385,10 @@ export function CertificateFormDialog({
                 <p className="text-xs text-muted-foreground mt-1">PDF, JPG, PNG up to 10MB</p>
               </div>
             ) : (
-              <div className="flex items-center justify-between p-4 border border-border rounded-xl bg-card">
+              <div {...fileDrop.dropZoneProps} className={cn(
+                "flex items-center justify-between p-4 border rounded-xl bg-card",
+                fileDrop.isDragging ? "border-primary bg-primary/5" : "border-border",
+              )}>
                 <div className="flex items-center gap-3">
                   <div className="bg-primary/10 p-2 rounded-lg">
                     <FileText className="w-5 h-5 text-primary" />

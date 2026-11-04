@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
+import { passwordProblem } from "../lib/passwordPolicy";
 import { usersTable, userRoleEnum, clientsTable, departmentsTable, userDepartmentsTable, staffMembersTable, passwordResetTokensTable, auditEventsTable, incidentRiddorEventsTable, feedbackReportReviewsTable } from "@workspace/db/schema";
 import { eq, and, inArray, isNull, desc, gt, sql } from "drizzle-orm";
 import { hashPassword, getUserWithClientByEmail } from "../lib/auth";
@@ -15,7 +16,7 @@ const router = Router();
 
 const CreateUserBody = z.object({
   email: z.string().email(),
-  password: z.string().min(8).optional(),
+  password: z.string().min(8).refine((value) => !passwordProblem(value), { message: "That password is too common and easy to guess. Try three random words." }).optional(),
   name: z.string().min(1),
   role: z.enum(userRoleEnum as unknown as [string, ...string[]]).default("client_viewer"),
   clientId: z.number().nullable().optional(),
@@ -238,7 +239,7 @@ async function invitationsFor(userIds: number[]): Promise<Map<number, Invitation
 
 const UpdateUserBody = z.object({
   email: z.string().email().optional(),
-  password: z.string().min(8).optional(),
+  password: z.string().min(8).refine((value) => !passwordProblem(value), { message: "That password is too common and easy to guess. Try three random words." }).optional(),
   name: z.string().min(1).optional(),
   role: z.enum(userRoleEnum as unknown as [string, ...string[]]).optional(),
   departmentId: z.number().int().positive().nullable().optional(),

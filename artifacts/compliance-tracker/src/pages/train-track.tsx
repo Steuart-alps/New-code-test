@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -285,6 +286,7 @@ export default function TrainTrackPage() {
   const [editRecord, setEditRecord]   = useState<TrainingRecord | null>(null);
   const [deleteId, setDeleteId]       = useState<number | null>(null);
   const [saving, setSaving]           = useState(false);
+  const media = useRecordMedia("training_record", { disabled: saving });
 
   // forms per type
   const [certForm,     setCertForm]     = useState(emptyCert());
@@ -424,6 +426,7 @@ export default function TrainTrackPage() {
     setCertForm({ ...emptyCert(), siteId });
     setSignoffForm({ ...emptySignoff(), siteId });
     setInternalForm({ ...emptyInternal(), siteId });
+    media.clear();
     setShowDialog(true);
   }
 
@@ -472,6 +475,7 @@ export default function TrainTrackPage() {
         signature: r.signature ?? null,
       });
     }
+    media.clear();
     setShowDialog(true);
   }
 
@@ -554,7 +558,8 @@ export default function TrainTrackPage() {
         await apiFetch(`/train-track/records/${editRecord.id}`, { method: "PATCH", body: JSON.stringify(updateBody) });
         toast({ title: "Record updated" });
       } else {
-        await apiFetch("/train-track/records", { method: "POST", body: JSON.stringify(body) });
+        const created = await apiFetch("/train-track/records", { method: "POST", body: JSON.stringify(body) });
+        await media.attach(created?.id);
         toast({ title: "Record added" });
       }
 
@@ -1382,6 +1387,8 @@ ${rows.map(r => `<tr>
                 />
               </>
             )}
+
+            {editRecord ? <CheckPhotoUploader entityType="training_record" entityId={editRecord.id} /> : media.picker}
           </div>
 
           <DialogFooter>

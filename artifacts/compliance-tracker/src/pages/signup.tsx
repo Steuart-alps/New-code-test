@@ -110,7 +110,7 @@ export default function SignupPage() {
           <div className="text-center mb-10">
             <div className="flex justify-center items-center gap-2 mb-6 opacity-70">
               <span className="text-xs font-display italic text-[#162D42]">by</span>
-              <img src={alpsLogo} alt="ALPS Consultancy" className="h-4 grayscale mix-blend-multiply" />
+              <img src={alpsLogo} alt="ALPS Consultancy" className="h-6 grayscale mix-blend-multiply" />
             </div>
             <h1 className="text-4xl font-display font-bold text-[#162D42] mb-3">Start your free trial</h1>
             <p className="text-muted-foreground text-sm font-light">
@@ -188,6 +188,7 @@ export default function SignupPage() {
                   />
                   <button
                     type="button"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-[#162D42]"
                     onClick={() => setShowPassword(!showPassword)}
                   >
@@ -253,7 +254,7 @@ export default function SignupPage() {
                 By creating an account you agree to our{" "}
                 <button type="button" onClick={() => navigate("/terms")} className="underline underline-offset-2 hover:text-foreground">Terms of Service</button>
                 {" "}and{" "}
-                <button type="button" onClick={() => navigate("/privacy")} className="underline underline-offset-2 hover:text-foreground">Privacy Policy</button>.
+                <span className="whitespace-nowrap"><button type="button" onClick={() => navigate("/privacy")} className="underline underline-offset-2 hover:text-foreground">Privacy Policy</button>.</span>
               </p>
             </form>
 

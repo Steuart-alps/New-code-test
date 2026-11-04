@@ -135,6 +135,9 @@ jobs:
       - name: Setup "What we need from you" workbooks match the import templates
         run: pnpm --filter @workspace/compliance-tracker run test:setup-info-sheets
 
+      - name: Tracks set up from a setup workbook (counts and named lists)
+        run: pnpm --filter @workspace/compliance-tracker run test:track-setup
+
       - name: Reload after a new release test
         run: pnpm --filter @workspace/compliance-tracker run test:new-release-reload
 
@@ -405,6 +408,9 @@ jobs:
 
       - name: FireTrack sleeping accommodation, per-site escape routes and night porter fire walks tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:night-fire-walks
+
+      - name: Frost warnings (afternoon forecast check, who is told, dashboard) tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:frost-warnings
 
       - name: FireTrack retired checks and in-house completion tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:fire-retired-checks

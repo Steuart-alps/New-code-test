@@ -86,7 +86,7 @@ const READ = {
   skipped: [],
 };
 
-async function open({ aiActive, viewport = { width: 1280, height: 900 } }) {
+async function open({ aiActive, viewport = { width: 1280, height: 900 }, openReader = true }) {
   const requests = [];
   const uploads = [];
   const context = await browser.newContext({ viewport, locale: "en-GB", isMobile: viewport.width < 600, hasTouch: viewport.width < 600 });
@@ -123,9 +123,13 @@ async function open({ aiActive, viewport = { width: 1280, height: 900 } }) {
     return json(route, {});
   });
   await page.goto(`${baseUrl}/tests/certificate-reader-harness.html`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "Read a certificate with AI" }).click();
-  await page.getByRole("button", { name: "Choose files" }).waitFor();
-  await page.waitForFunction(() => !document.querySelector("[role=dialog] button[disabled]"));
+  if (openReader) {
+    await page.getByRole("button", { name: "Read a certificate with AI" }).click();
+    await page.getByRole("button", { name: "Choose files" }).waitFor();
+    await page.waitForFunction(() => !document.querySelector("[role=dialog] button[disabled]"));
+  } else {
+    await page.getByTestId("certificates-box").waitFor();
+  }
   return { page, context, requests, uploads, pageErrors };
 }
 
@@ -236,6 +240,34 @@ try {
     assert.deepEqual(pageErrors, []);
     await context.close();
     console.log("ok - without the AI add-on the files are filled in by hand, one by one");
+  }
+
+  // An email attachment dragged onto a check's Certificates box: the email
+  // app hands over the attachment inside the drop's HTML, not as a file.
+  {
+    const { page, context, requests, pageErrors } = await open({ aiActive: true, openReader: false });
+    const attachment = `data:application/pdf;base64,${PDF.toString("base64")}`;
+    const taken = await page.evaluate((html) => {
+      const transfer = new DataTransfer();
+      transfer.setData("text/html", html);
+      const target = document.querySelector("[data-testid='certificates-box']");
+      let taken = false;
+      for (const type of ["dragenter", "dragover", "drop"]) {
+        const event = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer });
+        target.dispatchEvent(event);
+        if (type === "drop") taken = event.defaultPrevented;
+      }
+      return taken;
+    }, `<a href="${attachment}" download="Emergency lighting service.pdf">Emergency lighting service.pdf</a>`);
+    assert.equal(taken, true, "the box takes the email drag");
+    await page.getByText("Certificate 1 of 2").waitFor();
+    const reads = requests.filter(r => r.path === "/api/certificates/read-files");
+    assert.equal(reads.length, 1, "the dropped attachment is read by the AI straight away");
+    assert.deepEqual(reads[0].body.files.map(f => f.fileName), ["Emergency lighting service.pdf"]);
+    assert.equal(reads[0].body.itemId, 41, "filed against the check it was dropped on");
+    assert.deepEqual(pageErrors, []);
+    await context.close();
+    console.log("ok - an email attachment dropped on a check's Certificates box is read by the AI");
   }
 
   console.log("Certificate reader browser checks passed.");

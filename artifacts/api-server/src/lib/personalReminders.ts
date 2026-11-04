@@ -80,7 +80,7 @@ import {
   pruneSentEmailDeliveries,
   settleEmailDelivery,
 } from "./emailDeliveryClaims";
-import { emailButton, escapeHtml, getPublicAppUrl, renderEmailLayout, sendEmail } from "./email";
+import { EMAIL_BRAND, emailButton, escapeHtml, getPublicAppUrl, renderEmailLayout, sendEmail } from "./email";
 import { logger } from "./logger";
 import { sendPushToUsers } from "./pushNotifications";
 import { getOutstandingSafeTrackAcknowledgements, getOutstandingSafeTrackStaffReminders } from "./safeTrackAckReminders";
@@ -297,36 +297,90 @@ interface OwnerUpdate {
   activity: ActivityRow[] | null;
 }
 
-function where(item: { siteName: string | null }): string {
-  return item.siteName ? ` · ${escapeHtml(item.siteName)}` : "";
+// The look follows the other ComplyTrack emails (lib/urgentAlerts.ts, the
+// check reminder): each section is a light grey box of rows, every row a bold
+// title over a grey detail line, with a coloured label on the right.
+
+/** One row in a section's box. `title` and `detail` are HTML; callers escape. */
+interface Row {
+  title: string;
+  detail?: string;
+  /** Shown on the right: a badge() or a number. */
+  right?: string;
 }
 
+const RED: [string, string] = ["#fee2e2", "#b91c1c"];
+const AMBER: [string, string] = ["#fef3c7", "#b45309"];
+const BLUE: [string, string] = ["#dbeafe", "#1d4ed8"];
+const GREY: [string, string] = ["#e2e8f0", "#475569"];
+
+/** The coloured label beside an item, like the status badges in the check reminder email. */
+function badge(text: string, [background, colour]: [string, string]): string {
+  return `<span style="background:${background};color:${colour};padding:3px 10px;border-radius:12px;font-size:13px;font-weight:700;white-space:nowrap;">${escapeHtml(text)}</span>`;
+}
+
+/** A link inside a sentence, in the button blue. */
 function link(path: string, label: string): string {
-  return `<a href="${escapeHtml(`${getPublicAppUrl()}${path}`)}" style="color:#4f46e5;text-decoration:none;">${escapeHtml(label)}</a>`;
+  return `<a href="${escapeHtml(`${getPublicAppUrl()}${path}`)}" style="color:${EMAIL_BRAND.button};font-weight:600;text-decoration:none;">${escapeHtml(label)}</a>`;
 }
 
-function list(rows: string[]): string {
-  const shown = rows.slice(0, MAX_ROWS).map((row) =>
-    `<li style="margin:0 0 6px;">${row}</li>`).join("");
-  const more = rows.length > MAX_ROWS ? `<li style="margin:0 0 6px;color:#64748b;">and ${rows.length - MAX_ROWS} more</li>` : "";
-  return `<ul style="margin:0 0 20px;padding-left:20px;">${shown}${more}</ul>`;
+/** An item's name, linking to it. */
+function titleLink(path: string, label: string): string {
+  return `<a href="${escapeHtml(`${getPublicAppUrl()}${path}`)}" style="color:#0f172a;text-decoration:none;">${escapeHtml(label)}</a>`;
+}
+
+function details(parts: Array<string | null | undefined | false>): string {
+  return parts.filter(Boolean).join(" · ");
+}
+
+function list(rows: Row[]): string {
+  const cell = "padding:12px 14px;border-bottom:1px solid #e2e8f0;";
+  const shown = rows.slice(0, MAX_ROWS).map((row) => `<tr>
+          <td style="${cell}">
+            <div style="font-weight:700;font-size:16px;color:#0f172a;">${row.title}</div>${row.detail
+              ? `\n            <div style="font-size:14px;color:#64748b;margin-top:3px;">${row.detail}</div>` : ""}
+          </td>
+          <td style="${cell}text-align:right;white-space:nowrap;vertical-align:top;">${row.right ?? ""}</td>
+        </tr>`).join("");
+  const more = rows.length > MAX_ROWS
+    ? `<tr><td colspan="2" style="padding:12px 14px;font-size:14px;color:#64748b;">and ${rows.length - MAX_ROWS} more</td></tr>`
+    : "";
+  return `<table style="width:100%;border-collapse:collapse;background:#f8fafc;border-radius:12px;overflow:hidden;margin:0 0 24px;">${shown}${more}</table>`;
 }
 
 function heading(text: string, colour = "#0f172a"): string {
-  return `<h3 style="margin:24px 0 8px;font-size:16px;color:${colour};">${escapeHtml(text)}</h3>`;
+  return `<h3 style="margin:28px 0 10px;font-size:18px;font-weight:700;color:${colour};">${escapeHtml(text)}</h3>`;
 }
 
-function itemRow(item: DueItem, extra = ""): string {
-  return `<strong>${link(item.linkPath, item.title)}</strong> <span style="color:#64748b;">· ${escapeHtml(item.trackLabel)}${where(item)}${extra}</span>`;
+/** A grey sentence under a heading. `html` is escaped by the caller. */
+function note(html: string): string {
+  return `<p style="margin:0 0 12px;font-size:15px;color:#475569;">${html}</p>`;
 }
 
-function urgentRow(item: UrgentItem): string {
-  return `<strong>${link(item.linkPath, item.title)}</strong> <span style="color:#64748b;">· ${escapeHtml(item.detail)}${where(item)} · ${escapeHtml(formatDay(item.raisedOn))}</span>`;
+function itemRow(item: DueItem, extra: string[] = [], right?: string): Row {
+  return {
+    title: titleLink(item.linkPath, item.title),
+    detail: details([escapeHtml(item.trackLabel), item.siteName && escapeHtml(item.siteName), ...extra]),
+    right,
+  };
 }
 
-function certificateRow(visit: VisitAwaitingCertificate): string {
+function urgentRow(item: UrgentItem): Row {
+  return {
+    title: titleLink(item.linkPath, item.title),
+    detail: details([escapeHtml(item.detail), item.siteName && escapeHtml(item.siteName), escapeHtml(formatDay(item.raisedOn))]),
+    // Same labels as the same-day alert (lib/urgentAlerts.ts).
+    right: badge(item.detail.startsWith("Critical") ? "Critical" : "Urgent", RED),
+  };
+}
+
+function certificateRow(visit: VisitAwaitingCertificate, extra: string[] = []): Row {
   const who = [visit.contractorName, visit.contractorCompany].filter(Boolean).join(", ");
-  return `<strong>${link(`/items/${visit.itemId}`, visit.title)}</strong> <span style="color:#64748b;">· visited ${escapeHtml(formatDay(visit.visitDay))} by ${escapeHtml(who)}${where(visit)}</span>`;
+  return {
+    title: titleLink(`/items/${visit.itemId}`, visit.title),
+    detail: details([`visited ${escapeHtml(formatDay(visit.visitDay))} by ${escapeHtml(who)}`, visit.siteName && escapeHtml(visit.siteName), ...extra]),
+    right: badge("No certificate", AMBER),
+  };
 }
 
 function personalHtml(sections: PersonalSections, today: string): string {
@@ -337,64 +391,68 @@ function personalHtml(sections: PersonalSections, today: string): string {
   if (sections.upcoming.length) {
     const tomorrow = addCalendarDays(today, 1);
     if (sections.upcoming.every((item) => item.dueDate === tomorrow)) {
-      parts.push(heading(`Due tomorrow (${formatDay(tomorrow)})`), list(sections.upcoming.map((item) => itemRow(item))));
+      parts.push(heading(`Due tomorrow (${formatDay(tomorrow)})`), list(sections.upcoming.map((item) => itemRow(item, [], badge("Tomorrow", BLUE)))));
     } else {
       const sorted = [...sections.upcoming].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-      parts.push(heading("Coming up"), list(sorted.map((item) => itemRow(item, ` · due ${escapeHtml(dueWhen(today, item.dueDate))}`))));
+      parts.push(heading("Coming up"), list(sorted.map((item) => itemRow(item, [`due ${escapeHtml(dueWhen(today, item.dueDate))}`], badge("Due soon", BLUE)))));
     }
   }
   if (sections.nextWeek.length) {
     const sorted = [...sections.nextWeek].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
     parts.push(
       heading(`Due next week (${formatDay(addCalendarDays(today, 3))} to ${formatDay(addCalendarDays(today, 9))})`),
-      list(sorted.map((item) => itemRow(item, ` · ${escapeHtml(formatDay(item.dueDate))}`))),
+      list(sorted.map((item) => itemRow(item, [escapeHtml(formatDay(item.dueDate))], badge("Next week", GREY)))),
     );
   }
   if (sections.overdue.length) {
     parts.push(heading("Overdue", "#b45309"), list(sections.overdue.map((item) =>
-      itemRow(item, ` · was due ${escapeHtml(formatDay(item.dueDate))}`))));
+      itemRow(item, [`was due ${escapeHtml(formatDay(item.dueDate))}`], badge("Overdue", RED)))));
   }
   if (sections.expiring.length) {
     parts.push(heading("Expiring"), list(sections.expiring.map((item) =>
-      itemRow(item, ` · expires ${escapeHtml(formatDay(item.dueDate))}`))));
+      itemRow(item, [`expires ${escapeHtml(formatDay(item.dueDate))}`], badge("Expiring", AMBER)))));
   }
   if (sections.certificates.length) {
     parts.push(
       heading("Certificates outstanding"),
-      `<p style="margin:0 0 8px;color:#64748b;">The contractor has been and no certificate has been uploaded. Certificates are often held until the invoice is paid. The contractor is emailed today asking for it, with you copied in. When the certificate arrives, upload it on the check.</p>`,
-      list(sections.certificates.map(certificateRow)),
+      note("The contractor has been and no certificate has been uploaded. Certificates are often held until the invoice is paid. The contractor is emailed today asking for it, with you copied in. When the certificate arrives, upload it on the check."),
+      list(sections.certificates.map((visit) => certificateRow(visit))),
     );
   }
   if (sections.training) {
     const training = sections.training;
-    const rows = [
-      ...training.expired.map((row) => `<strong>${escapeHtml(row.title)}</strong> <span style="color:#b91c1c;">· expired ${escapeHtml(formatDay(row.expiryDate))}</span>`),
-      ...training.expiring.map((row) => `<strong>${escapeHtml(row.title)}</strong> <span style="color:#64748b;">· expires ${escapeHtml(formatDay(row.expiryDate))}</span>`),
-      ...training.coshh.map((title) => `<strong>${escapeHtml(title)}</strong> <span style="color:#64748b;">· COSHH assessment to read and sign</span>`),
+    const rows: Row[] = [
+      ...training.expired.map((row) => ({ title: escapeHtml(row.title), detail: `expired ${escapeHtml(formatDay(row.expiryDate))}`, right: badge("Expired", RED) })),
+      ...training.expiring.map((row) => ({ title: escapeHtml(row.title), detail: `expires ${escapeHtml(formatDay(row.expiryDate))}`, right: badge("Expiring", AMBER) })),
+      ...training.coshh.map((title) => ({ title: escapeHtml(title), detail: "COSHH assessment to read and sign", right: badge("To sign", BLUE) })),
       ...(training.toSign.length
-        ? [`${plural(training.toSign.length, "training record")} waiting for your signature`]
+        ? [{ title: `${plural(training.toSign.length, "training record")} waiting for your signature`, right: badge("To sign", BLUE) }]
         : []),
     ];
     parts.push(
       heading("Your training"),
       list(rows),
-      `<p style="margin:0 0 20px;color:#64748b;">${training.expired.length + training.expiring.length
+      note(`${training.expired.length + training.expiring.length
         ? "Speak to your manager to book anything expired or expiring. "
         : ""}${training.hasAccount
         ? `Sign off records and COSHH assessments in ${link("/my-training", "My training")}.`
-        : "Your manager can record your sign-off."}</p>`,
+        : "Your manager can record your sign-off."}`),
     );
   }
   if (sections.signOffs.length) {
-    parts.push(heading(`${plural(sections.signOffs.length, "document")} to read and sign`), list(sections.signOffs.map((doc) =>
-      `${escapeHtml(doc.title)} <span style="color:#64748b;">· ${escapeHtml(doc.docType)}${doc.siteName ? ` · ${escapeHtml(doc.siteName)}` : ""}</span>`)));
+    parts.push(heading(`${plural(sections.signOffs.length, "document")} to read and sign`), list(sections.signOffs.map((doc) => ({
+      title: escapeHtml(doc.title),
+      detail: details([escapeHtml(doc.docType), doc.siteName && escapeHtml(doc.siteName)]),
+      right: badge("To sign", BLUE),
+    }))));
   }
   return parts.join("");
 }
 
 function ownerUpdateHtml(update: OwnerUpdate, today: string): string {
   const parts: string[] = [];
-  const holder = (name: string | null) => ` · <em>${name ? escapeHtml(name) : "no one assigned"}</em>`;
+  const holder = (name: string | null) => name ? `with ${escapeHtml(name)}` : "<em>no one assigned</em>";
+  const count = (value: number) => `<span style="font-weight:700;font-size:16px;color:#0f172a;">${value}</span>`;
   if (update.urgent.length) {
     parts.push(heading("Needs action now", "#b91c1c"), list(update.urgent.map(urgentRow)));
   }
@@ -409,66 +467,71 @@ function ownerUpdateHtml(update: OwnerUpdate, today: string): string {
     parts.push(heading(update.period === "month" ? "Done since the last monthly update"
       : update.period === "week" ? "Done in the last 7 days" : "Done yesterday"));
     if (!byTrack.size) {
-      parts.push(`<p style="margin:0 0 20px;color:#64748b;">Nothing was recorded.</p>`);
+      parts.push(note("Nothing was recorded."));
     } else {
+      const subheading = (text: string) => `<p style="margin:0 0 6px;font-size:13px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:#64748b;">${text}</p>`;
       parts.push(
-        `<p style="margin:0 0 4px;font-weight:600;">By track</p>`,
-        list(sorted(byTrack).map(([track, count]) => `${escapeHtml(track)}: ${count}`)),
-        `<p style="margin:0 0 4px;font-weight:600;">By person</p>`,
-        list(sorted(byPerson).map(([person, count]) => `${escapeHtml(person)}: ${count}`)),
+        subheading("By track"),
+        list(sorted(byTrack).map(([track, value]) => ({ title: escapeHtml(track), right: count(value) }))),
+        subheading("By person"),
+        list(sorted(byPerson).map(([person, value]) => ({ title: escapeHtml(person), right: count(value) }))),
       );
     }
   }
   if (update.overdue.length) {
     parts.push(heading(`Overdue (${update.overdue.length})`, "#b45309"), list(update.overdue.map(({ item, holder: name }) =>
-      itemRow(item, ` · was due ${escapeHtml(formatDay(item.dueDate))}${holder(name)}`))));
+      itemRow(item, [`was due ${escapeHtml(formatDay(item.dueDate))}`, holder(name)], badge("Overdue", RED)))));
   }
   if (update.dueSoon.length) {
     parts.push(heading(update.period === "month" ? "Due before the next monthly update"
       : update.period === "week" ? "Due this week" : "Due today and tomorrow"), list(update.dueSoon.map(({ item, holder: name }) =>
-      itemRow(item, ` · ${escapeHtml(formatDay(item.dueDate))}${holder(name)}`))));
+      itemRow(item, [escapeHtml(formatDay(item.dueDate)), holder(name)], badge(item.dueDate === today ? "Today" : "Due", BLUE)))));
   }
   if (update.unassigned.length) {
     parts.push(
       heading("No one assigned"),
-      `<p style="margin:0 0 8px;color:#64748b;">Reminders for these come to you. Pick a person on the record, or set a track owner in Settings, to hand them over.</p>`,
-      list(update.unassigned.map((item) => itemRow(item, ` · ${escapeHtml(formatDay(item.dueDate))}`))),
+      note("Reminders for these come to you. Pick a person on the record, or set a track owner in Settings, to hand them over."),
+      list(update.unassigned.map((item) => itemRow(item, [escapeHtml(formatDay(item.dueDate))], badge("Unassigned", GREY)))),
     );
   }
   if (update.expiring.length) {
-    parts.push(heading("Expiring in the next 60 days"), list(update.expiring.map((item) =>
-      itemRow(item, item.dueDate < today
-        ? ` · <strong style="color:#b91c1c;">expired ${escapeHtml(formatDay(item.dueDate))}</strong>`
-        : ` · ${escapeHtml(formatDay(item.dueDate))}`))));
+    parts.push(heading("Expiring in the next 60 days"), list(update.expiring.map((item) => item.dueDate < today
+      ? itemRow(item, [`expired ${escapeHtml(formatDay(item.dueDate))}`], badge("Expired", RED))
+      : itemRow(item, [escapeHtml(formatDay(item.dueDate))], badge("Expiring", AMBER)))));
   }
   if (update.training.length) {
-    const summary = (person: StaffTraining) => [
-      person.expired.length ? `<span style="color:#b91c1c;">expired: ${escapeHtml(person.expired.map((row) => row.title).join(", "))}</span>` : "",
-      person.expiring.length ? `expiring: ${escapeHtml(person.expiring.map((row) => `${row.title} (${formatDay(row.expiryDate)})`).join(", "))}` : "",
-      person.toSign.length ? `${plural(person.toSign.length, "record")} to sign` : "",
-      person.coshh.length ? `${plural(person.coshh.length, "COSHH assessment")} to sign` : "",
-    ].filter(Boolean).join(" · ");
+    const summary = (person: StaffTraining) => details([
+      person.expired.length > 0 && `<span style="color:#b91c1c;">expired: ${escapeHtml(person.expired.map((row) => row.title).join(", "))}</span>`,
+      person.expiring.length > 0 && `expiring: ${escapeHtml(person.expiring.map((row) => `${row.title} (${formatDay(row.expiryDate)})`).join(", "))}`,
+      person.toSign.length > 0 && `${plural(person.toSign.length, "record")} to sign`,
+      person.coshh.length > 0 && `${plural(person.coshh.length, "COSHH assessment")} to sign`,
+    ]);
     const noEmail = update.training.filter((person) => !person.email).length;
     parts.push(
       heading(`TrainTrack: training outstanding (${plural(update.training.length, "person", "people")})`),
-      `<p style="margin:0 0 8px;color:#64748b;">Each person is reminded on Mondays by their staff roster email.${noEmail
+      note(`Each person is reminded on Mondays by their staff roster email.${noEmail
         ? ` ${plural(noEmail, "person has", "people have")} no email on the roster, so can't be reminded.`
-        : ""} See ${link("/train-track", "TrainTrack")}.</p>`,
-      list(update.training.map((person) => `<strong>${escapeHtml(person.name)}</strong>`
-        + `<span style="color:#64748b;">${person.siteName ? ` · ${escapeHtml(person.siteName)}` : ""}${person.email ? "" : " · no email"}</span>`
-        + ` · ${summary(person)}`)),
+        : ""} See ${link("/train-track", "TrainTrack")}.`),
+      list(update.training.map((person) => ({
+        title: escapeHtml(person.name),
+        detail: details([person.siteName && escapeHtml(person.siteName), !person.email && "no email", summary(person)]),
+        right: person.expired.length ? badge("Expired", RED) : person.expiring.length ? badge("Expiring", AMBER) : badge("To sign", BLUE),
+      }))),
     );
   }
   if (update.certificates.length) {
     // Past the chase window the contractor is no longer reminded: say so.
-    parts.push(heading("Certificates outstanding"), list(update.certificates.map((visit) => certificateRow(visit)
-      + (daysBetween(visit.visitDay, today) >= LOOK_BACK_DAYS
-        ? ` <strong style="color:#b91c1c;">· reminders to the contractor have stopped after ${LOOK_BACK_DAYS} days; please chase them directly</strong>`
-        : ""))));
+    parts.push(heading("Certificates outstanding"), list(update.certificates.map((visit) => certificateRow(visit,
+      daysBetween(visit.visitDay, today) >= LOOK_BACK_DAYS
+        ? [`<strong style="color:#b91c1c;">reminders to the contractor have stopped after ${LOOK_BACK_DAYS} days; please chase them directly</strong>`]
+        : []))));
   }
   if (update.unsigned.length) {
-    parts.push(heading("Documents still to be signed"), list(update.unsigned.map((doc) =>
-      `${escapeHtml(doc.title)} <span style="color:#64748b;">· ${escapeHtml(doc.docType)} · ${plural(doc.outstanding, "person", "people")} still to sign</span>`)));
+    parts.push(heading("Documents still to be signed"), list(update.unsigned.map((doc) => ({
+      title: escapeHtml(doc.title),
+      detail: details([escapeHtml(doc.docType), `${plural(doc.outstanding, "person", "people")} still to sign`]),
+      right: badge("To sign", BLUE),
+    }))));
   }
   if (update.contractorDrafts > 0) {
     parts.push(
@@ -762,15 +825,19 @@ export async function runPersonalRemindersForClient(
     const personal = hasReminders(recipient.sections)
       || (recipient.sections.signOffs.length > 0 && (isMonday(today) || update != null));
     if (!update && !personal) continue;
+    const headline = (text: string) =>
+      `<p style="margin:0 0 6px;font-size:19px;font-weight:700;color:#0f172a;">${text}</p>`
+      + `<p style="margin:0 0 8px;color:#475569;">Click any item to open it in ComplyTrack.</p>`;
     const greeting = `<p style="margin:0 0 16px;">Hello${recipient.name ? ` ${escapeHtml(recipient.name.split(" ")[0]!)}` : ""},</p>`;
     let subject: string;
     let body: string;
+    let label = "Your reminders";
     if (update) {
-      const label = update.period === "month" ? "Monthly update" : update.period === "week" ? "Weekly update" : "Daily update";
+      label = update.period === "month" ? "Monthly update" : update.period === "week" ? "Weekly update" : "Daily update";
       subject = `${label} for ${businessName} — ComplyTrack`;
       body = greeting
-        + `<p style="margin:0 0 8px;">Here is ${update.period === "month" ? "this month's" : update.period === "week" ? "this week's" : "today's"} update for ${escapeHtml(businessName)}.</p>`
-        + (personal ? `${heading("Yours to do", "#4f46e5")}${personalHtml(recipient.sections, today)}` : "")
+        + headline(`Here is ${update.period === "month" ? "this month's" : update.period === "week" ? "this week's" : "today's"} update for ${escapeHtml(businessName)}.`)
+        + (personal ? `${heading("Yours to do", "#1d4ed8")}${personalHtml(recipient.sections, today)}` : "")
         + ownerUpdateHtml(update, today);
     } else {
       const upcoming = recipient.sections.upcoming;
@@ -792,12 +859,12 @@ export async function runPersonalRemindersForClient(
             ? `Your training at ${businessName} — ComplyTrack`
           : `Your reminders for ${businessName} — ComplyTrack`;
       body = greeting
-        + `<p style="margin:0 0 8px;">This is what needs doing at ${escapeHtml(businessName)}.</p>`
+        + headline(`This is what needs doing at ${escapeHtml(businessName)}.`)
         + personalHtml(recipient.sections, today);
     }
     const html = renderEmailLayout({
-      subtitle: escapeHtml(update ? `${businessName} · ${formatDay(today)}` : formatDay(today)),
-      bodyHtml: `${body}<div style="margin-top:24px;">${emailButton(appUrl, "Open ComplyTrack")}</div>`,
+      subtitle: escapeHtml(`${label} · ${formatDay(today)}`),
+      bodyHtml: `${body}<div style="margin-top:28px;text-align:center;">${emailButton(appUrl, "Open ComplyTrack →")}</div>`,
       footerNote: update
         ? "Settings → Reminders and alerts sets whether this comes daily, weekly or monthly"
         : recipient.sections.training && !recipient.userId

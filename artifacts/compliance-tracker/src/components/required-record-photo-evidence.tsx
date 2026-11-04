@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, ImagePlus, Trash2 } from "lucide-react";
+import { Camera, Loader2, ImagePlus, Trash2 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
 import { useFileDrop } from "@/hooks/use-file-drop";
+import { useCameraCapture } from "@/components/camera-capture";
 import { cn } from "@/lib/utils";
 import { getApiErrorMessage } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -164,9 +165,12 @@ export function RequiredRecordPhotoEvidence({
   evidence,
 }: { evidence: ReturnType<typeof useNewRecordPhotoEvidence> }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
   // One photo at a time is verified, so a drop of several takes the first.
-  const drop = useFileDrop(files => { void evidence.addFile(files[0]); },
+  const addFirst = (files: File[]) => { if (files[0]) void evidence.addFile(files[0]); };
+  const drop = useFileDrop(addFirst,
     evidence.enabled && evidence.required && !evidence.uploading && evidence.photos.length < 10);
+  const camera = useCameraCapture(addFirst, { fileInput: () => cameraRef.current });
   if (!evidence.enabled) return null;
   if (evidence.loading) return (
     <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -198,12 +202,19 @@ export function RequiredRecordPhotoEvidence({
         </div>
       ))}
       {evidence.uploadError && <p role="alert" className="text-sm text-destructive">{evidence.uploadError}</p>}
-      <Button type="button" variant="outline"
-        disabled={evidence.uploading || evidence.photos.length >= 10}
-        onClick={() => inputRef.current?.click()}>
-        {evidence.uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ImagePlus className="mr-2 h-4 w-4" />}
-        {evidence.uploading ? "Verifying photo…" : "Add required photo"}
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="outline"
+          disabled={evidence.uploading || evidence.photos.length >= 10}
+          onClick={camera.open}>
+          <Camera className="mr-2 h-4 w-4" />Take photo
+        </Button>
+        <Button type="button" variant="outline"
+          disabled={evidence.uploading || evidence.photos.length >= 10}
+          onClick={() => inputRef.current?.click()}>
+          {evidence.uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ImagePlus className="mr-2 h-4 w-4" />}
+          {evidence.uploading ? "Verifying photo…" : "Add required photo"}
+        </Button>
+      </div>
       {/* No `capture`: phones then offer both the camera and the photo library. */}
       <input ref={inputRef} type="file" accept="image/jpeg,image/png"
         aria-label="Select required photo" className="hidden"
@@ -212,6 +223,14 @@ export function RequiredRecordPhotoEvidence({
           event.target.value = "";
           if (file) void evidence.addFile(file);
         }} />
+      <input ref={cameraRef} type="file" accept="image/jpeg,image/png" capture="environment"
+        tabIndex={-1} aria-hidden="true" className="hidden"
+        onChange={event => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) void evidence.addFile(file);
+        }} />
+      {camera.dialog}
     </fieldset>
   );
 }

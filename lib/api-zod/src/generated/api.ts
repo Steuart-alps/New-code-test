@@ -2456,6 +2456,27 @@ export const GetTodayByDepartmentResponse = zod.object({
 
 
 /**
+ * Sites the person can see whose overnight forecast (18:00 to 09:00 local) drops below 4°C, so they grit and de-ice. The forecast is checked from 15:00 for sites whose address has a UK postcode; tonight runs from midday to midday the next day.
+ * @summary Tonight's frost warnings
+ */
+export const GetFrostWarningsQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const GetFrostWarningsResponse = zod.object({
+  "nightOf": zod.date().describe('The evening tonight\'s night starts.'),
+  "belowC": zod.number().describe('Warnings are for an overnight low below this (°C).'),
+  "credit": zod.string().describe('Credit for the forecast, shown with the warning.'),
+  "warnings": zod.array(zod.object({
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "lowestC": zod.number().describe('The overnight low (°C).'),
+  "coldestAt": zod.date().nullable()
+}))
+})
+
+
+/**
  * @summary Get all app settings
  */
 export const getSettingsResponseStorageWarningThresholdBytesRegExp = new RegExp('^[0-9]+$');
@@ -6266,7 +6287,8 @@ export const GetIncidentConfigResponse = zod.object({
   "incident_departments": zod.string().optional(),
   "incident_default_reporter": zod.string().optional(),
   "incident_show_investigation": zod.string().optional(),
-  "incident_locations": zod.string().optional()
+  "incident_locations": zod.string().optional(),
+  "regulator_nation": zod.string().optional().describe('The nation in the Compliance Hub profile (england, wales, scotland, northern_ireland or multi_nation), or empty. Northern Ireland reports go to HSENI. Read only.')
 })
 
 
@@ -6284,7 +6306,8 @@ export const UpdateIncidentConfigResponse = zod.object({
   "incident_departments": zod.string().optional(),
   "incident_default_reporter": zod.string().optional(),
   "incident_show_investigation": zod.string().optional(),
-  "incident_locations": zod.string().optional()
+  "incident_locations": zod.string().optional(),
+  "regulator_nation": zod.string().optional().describe('The nation in the Compliance Hub profile (england, wales, scotland, northern_ireland or multi_nation), or empty. Northern Ireland reports go to HSENI. Read only.')
 })
 
 

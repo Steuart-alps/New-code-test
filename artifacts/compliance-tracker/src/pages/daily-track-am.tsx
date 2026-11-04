@@ -4,6 +4,7 @@ import { AppLayout } from "@/components/layout";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { ChecklistItemRow } from "@/components/checklist-item-row";
+import { PassAllButton } from "@/components/pass-all-button";
 import { checklistProgress, submitHint, withResult, itemResult, type ChecklistResult } from "@/lib/checklist-results";
 import { fetchMobileChecklistSubmission, MobileChecklistSubmissionCard, type MobileChecklistSubmission } from "@/components/mobile-checklist-submission-card";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
@@ -320,6 +321,12 @@ export function ChecklistCard({
           </div>
         )}
 
+        {!submitted && !(templateLoading && !existing) && (
+          <div className="mb-4">
+            <PassAllButton remaining={progress.remaining} total={items.length} onPassAll={passRemaining} />
+          </div>
+        )}
+
         {!submitted && (
           <div className="space-y-3 border-t pt-3">
             <div className="grid grid-cols-2 gap-3">
@@ -333,9 +340,6 @@ export function ChecklistCard({
                 </div>
               )}
             </div>
-            {progress.remaining > 0 && progress.answered > 0 && (
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={passRemaining}>Mark the {progress.remaining} remaining as Pass</Button>
-            )}
             {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => save(false)} disabled={saving} className="flex-1">
@@ -345,6 +349,7 @@ export function ChecklistCard({
                 Submit checklist
               </Button>
             </div>
+            {!existing?.id && <p className="text-xs text-muted-foreground">Save a draft to add photos or videos.</p>}
           </div>
         )}
 

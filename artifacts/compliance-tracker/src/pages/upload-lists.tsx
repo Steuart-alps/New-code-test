@@ -8,12 +8,16 @@ import { AiAllowanceNote } from "@/components/ai-allowance-note";
 import { READABLE_LIST, isPhotoOrPdf, listFileBody, useListReading } from "@/components/ai-list-reader";
 import { MachineImportDialog } from "@/pages/green-track";
 import { RosterImportDialog } from "@/components/roster-import-dialog";
+import { TrackSetupDialog } from "@/components/track-setup-dialog";
+import { AlpsAssistOffer } from "@/components/alps-assist-offer";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { getApiErrorMessage } from "@/lib/api";
 import { LIST_KINDS, WORKBOOK_TABS, availableListKinds, guessListKindFromName, guessListKindFromSheet, type ListKind } from "@/lib/list-kinds";
 import { readSpreadsheet, spreadsheetTabNames } from "@/lib/spreadsheet";
+import { TRACK_SETUP, TRACK_SETUP_TABS, planTrackSetup, type PlanGroup } from "@/lib/track-setup";
+import { QUESTIONS_TAB } from "@/lib/setup-info-sheets";
 import { cn } from "@/lib/utils";
 
 /**
@@ -32,6 +36,8 @@ interface Item {
   state: ItemState;
   /** How the kind was found, or why it wasn't. */
   note: string;
+  /** A setup workbook's track lists or counts (fridges, outlets, hot tubs…), added through TrackSetupDialog. */
+  setup?: boolean;
 }
 
 const CSV_IMPORTS: Partial<Record<ListKind, ImportCsvType>> = {
@@ -42,6 +48,12 @@ const CSV_IMPORTS: Partial<Record<ListKind, ImportCsvType>> = {
   "legionella-outlets": "legionella-outlets",
   "compliance-checks": "compliance-checks",
 };
+
+/** "KitchenTrack fridges and freezers and FireTrack call points". */
+function describeTracks(groups: PlanGroup[]): string {
+  const labels = [...new Set(groups.map(group => TRACK_SETUP[group.kind].label))];
+  return labels.length > 1 ? `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}` : labels[0];
+}
 
 /** The page body, without the app frame (also used by its browser test). */
 export function UploadLists() {
@@ -74,6 +86,25 @@ export function UploadLists() {
         // list is the tab named for it, which its import reads too.
         const tabs = await spreadsheetTabNames(file);
         const workbookKind = kinds.find(candidate => tabs.some(tab => tab.trim().toLowerCase() === WORKBOOK_TABS[candidate]?.toLowerCase()));
+        // "How many …?" answers and lists of fridges, sentinel taps, hot tubs
+        // or bikes set the tracks up too (alongside any list it has).
+        const setupTabs = tabs.filter(tab => TRACK_SETUP_TABS[tab.trim().toLowerCase()]);
+        const plan = setupTabs.length
+          ? planTrackSetup(await Promise.all(setupTabs.map(async name => ({ name, ...(await readSpreadsheet(file, { sheet: name })) }))))
+          : null;
+        const setupNote = plan?.groups.length ? `Sets up ${describeTracks(plan.groups)}` : null;
+        if (setupNote && !workbookKind) {
+          update(item.id, { setup: true, state: "ready", note: setupNote });
+          return;
+        }
+        if (setupNote) {
+          setItems(list => [...list, { id: nextId.current++, file, kind: null, state: "ready", setup: true, note: setupNote }]);
+        }
+        // A setup form with only answers to read (Compliance Checks, DocTrack…).
+        if (!workbookKind && tabs.some(tab => tab.trim().toLowerCase() === QUESTIONS_TAB.toLowerCase())) {
+          update(item.id, { state: "done", note: "Nothing here to add automatically. Send it to your ALPS consultant, or enter your answers in ComplyTrack." });
+          return;
+        }
         const sheet = await readSpreadsheet(file, workbookKind ? { sheet: WORKBOOK_TABS[workbookKind] } : {});
         const kind = workbookKind ?? guessListKindFromSheet(sheet, file.name, kinds);
         update(item.id, kind
@@ -134,6 +165,8 @@ export function UploadLists() {
   return (
     <>
       <div className="max-w-3xl space-y-4">
+        {/* Rather not do it yourself? The paid setup service comes first. */}
+        <AlpsAssistOffer />
         <p className="text-sm text-muted-foreground">
           Drop all your existing lists here at once: {kinds.map(kind => LIST_KINDS[kind].noun).join(", ")}.
           ComplyTrack works out which list each file is, then you check and import each one. Nothing is saved until you confirm it.
@@ -195,7 +228,11 @@ export function UploadLists() {
                 </div>
                 <div className="flex items-center gap-2">
                   {item.state === "done" ? (
-                    <span className="inline-flex items-center gap-1 text-sm font-medium text-emerald-700"><CheckCircle2 className="h-4 w-4" /> {item.kind ? LIST_KINDS[item.kind].label : "Imported"}</span>
+                    <span className="inline-flex items-center gap-1 text-sm font-medium text-emerald-700"><CheckCircle2 className="h-4 w-4" /> {item.setup ? "Tracks set up" : item.kind ? LIST_KINDS[item.kind].label : "Imported"}</span>
+                  ) : item.setup ? (
+                    <Button type="button" size="sm" onClick={() => setOpenId(item.id)} data-testid={`button-upload-list-setup-${item.id}`}>
+                      Check and add
+                    </Button>
                   ) : item.state !== "error" && item.state !== "sorting" && (
                     <>
                       <select aria-label={`Which list is ${item.file.name}?`} data-testid={`select-upload-list-kind-${item.id}`}
@@ -222,7 +259,11 @@ export function UploadLists() {
         )}
       </div>
 
-      {open?.kind && CSV_IMPORTS[open.kind] && (
+      {open?.setup && (
+        <TrackSetupDialog key={open.id} open file={open.file} sites={sites.data ?? []}
+          onClose={close} onDone={() => update(open.id, { state: "done", note: "Added to your tracks" })} />
+      )}
+      {!open?.setup && open?.kind && CSV_IMPORTS[open.kind] && (
         <ImportCsvDialog key={open.id} type={CSV_IMPORTS[open.kind]!} open initialFile={open.file}
           onOpenChange={value => { if (!value) close(); }} onImported={() => done(open.id)} />
       )}

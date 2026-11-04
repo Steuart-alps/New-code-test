@@ -1,6 +1,7 @@
-import { useState, useMemo, useEffect, useRef, type ReactNode } from "react";
+import { createContext, useContext, useState, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,7 @@ import { useSayItFill } from "@/lib/say-it-fill";
 import { sortByLabel } from "@/lib/sort-options";
 import { localDate } from "@/lib/voice-log";
 import { useManagedBy } from "@/components/managed-by-badge";
+import { VIDEO_PATH } from "@/lib/media-upload";
 import { takeLinkParams } from "@/lib/deep-link";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -83,24 +85,39 @@ const RIDDOR_REPORT_DAYS: Partial<Record<RiddorCategory, number>> = {
 };
 const RIDDOR_NOTIFY_NOW = new Set<RiddorCategory>(["death", "specified_injury", "non_worker_hospital", "dangerous_occurrence", "occupational_disease"]);
 
+/**
+ * Northern Ireland businesses report to HSENI under RIDDOR (Northern Ireland)
+ * 1997, which differs from Great Britain's RIDDOR 2013: injuries keeping
+ * someone off normal work for more than 3 days are still reportable.
+ */
+const NorthernIrelandContext = createContext(false);
+const useNorthernIreland = () => useContext(NorthernIrelandContext);
+const HSENI_REPORT_URL = "https://www.hseni.gov.uk/report-incident";
+const HSENI_PHONE = "0800 032 0121";
+
 /** Plain-English reporting deadline for a category and incident date. */
-function riddorDeadlineText(category: RiddorCategory, incidentDate: string): string {
+function riddorDeadlineText(category: RiddorCategory, incidentDate: string, northernIreland = false): string {
+  if (northernIreland && category === "over_3_day_record_only") return "In Northern Ireland injuries keeping someone off work for more than 3 days must be reported to HSENI, within 10 days of the incident.";
   if (category === "over_3_day_record_only") return "Record in your accident book; not reportable to the HSE.";
   if (category === "occupational_disease") return "Report without delay once you receive a written diagnosis.";
   const days = RIDDOR_REPORT_DAYS[category]!;
   const reportBy = incidentDate ? new Date(`${incidentDate.slice(0, 10)}T00:00:00Z`) : null;
   reportBy?.setUTCDate(reportBy.getUTCDate() + days);
   const by = reportBy ? ` (by ${reportBy.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })})` : "";
-  return `${RIDDOR_NOTIFY_NOW.has(category) ? "Notify the HSE without delay, and report" : "Report"} within ${days} days of the incident${by}.`;
+  const regulator = northernIreland ? "HSENI" : "the HSE";
+  return `${RIDDOR_NOTIFY_NOW.has(category) ? `Notify ${regulator} without delay, and report` : "Report"} within ${northernIreland ? 10 : days} days of the incident${by}.`;
 }
 
 // HSE's "How to make a RIDDOR report" page (online forms and phone line).
 const HSE_RIDDOR_REPORT_URL = "https://www.hse.gov.uk/riddor/report.htm";
 
 /** Link to the HSE RIDDOR reporting page, opening in a new tab. */
-function HseRiddorLink({ className, children = "Report on the HSE RIDDOR website" }: { className?: string; children?: ReactNode }) {
+function HseRiddorLink({ className, children }: { className?: string; children?: ReactNode }) {
+  const northernIreland = useNorthernIreland();
+  if (northernIreland) children = "Report to HSENI (Northern Ireland)";
+  else children ??= "Report on the HSE RIDDOR website";
   return (
-    <a href={HSE_RIDDOR_REPORT_URL} target="_blank" rel="noopener noreferrer"
+    <a href={northernIreland ? HSENI_REPORT_URL : HSE_RIDDOR_REPORT_URL} target="_blank" rel="noopener noreferrer"
       className={cn("inline-flex items-center gap-1 font-medium underline underline-offset-2", className)}
       data-testid="link-hse-riddor">
       {children} <ExternalLink className="w-3 h-3" aria-hidden="true" />
@@ -119,7 +136,7 @@ function RiddorAdviserNote({ className }: { className?: string }) {
     <div className={cn("text-xs space-y-1", className)} data-testid="riddor-adviser-note">
       <p>
         Not sure whether this needs reporting? We recommend you speak to {adviser} before
-        you report. They can help you decide and fill in the HSE form.
+        you report. They can help you decide and fill in the {useNorthernIreland() ? "HSENI" : "HSE"} form.
       </p>
       <HseRiddorLink />
     </div>
@@ -139,6 +156,8 @@ interface Incident {
   description: string;
   involvedName: string;
   involvedJobTitle: string | null;
+  involvedAddress?: string | null;
+  reporterAddress?: string | null;
   involvedEmploymentType: EmploymentType;
   injuriesSustained: string | null;
   firstAidGiven: boolean;
@@ -178,7 +197,7 @@ interface RiddorHistoryEvent {
   receiptSource: "upload" | "incident_attachment" | null;
   createdAt: string; actorName: string | null; actorEmail: string | null;
 }
-interface IncidentAttachment { id: number; caption: string | null; created_at: string; }
+interface IncidentAttachment { id: number; caption: string | null; created_at: string; object_path?: string; }
 interface IncidentAction {
   id: number; title: string; status: string; ownerName: string;
   correctiveAction: string; evidenceReference: string | null;
@@ -411,6 +430,8 @@ const emptyForm = () => ({
   description: "",
   involvedName: "",
   involvedJobTitle: "",
+  involvedAddress: "",
+  reporterAddress: "",
   involvedEmploymentType: "employee" as EmploymentType,
   injuriesSustained: "",
   firstAidGiven: false,
@@ -461,6 +482,7 @@ export default function IncidentsPage() {
   const [showDialog, setShowDialog] = useState(false);
   const [editItem, setEditItem] = useState<Incident | null>(null);
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("incident", { disabled: saving });
   const [historyIncident, setHistoryIncident] = useState<Incident | null>(null);
   const [actionDraft, setActionDraft] = useState({ title: "", ownerName: "", correctiveAction: "" });
   const [editingActionId, setEditingActionId] = useState<number | null>(null);
@@ -471,6 +493,7 @@ export default function IncidentsPage() {
   const [formSection, setFormSection] = useState<"details" | "actions">("details");
 
   const { data: incidentConfig, isFetched: incidentConfigFetched } = useGetIncidentConfig();
+  const northernIreland = incidentConfig?.regulator_nation === "northern_ireland";
   const { data: formOptions } = useFormOptions();
   const incidentTypeOptions = pickOptions(formOptions, "incident_types");
   const severityOptions: readonly string[] = SEVERITIES;
@@ -658,6 +681,7 @@ ${rows.map(r => `<tr>
     if (workingSiteId) f.siteId = String(workingSiteId);
     setForm({ ...f, ...spoken });
     setFormSection("details");
+    media.clear();
     setShowDialog(true);
   }
 
@@ -693,6 +717,8 @@ ${rows.map(r => `<tr>
       description: r.description,
       involvedName: r.involvedName,
       involvedJobTitle: r.involvedJobTitle ?? "",
+      involvedAddress: r.involvedAddress ?? "",
+      reporterAddress: r.reporterAddress ?? "",
       involvedEmploymentType: r.involvedEmploymentType,
       injuriesSustained: r.injuriesSustained ?? "",
       firstAidGiven: r.firstAidGiven,
@@ -715,6 +741,7 @@ ${rows.map(r => `<tr>
       siteId: r.siteId ? String(r.siteId) : "",
     });
     setFormSection("details");
+    media.clear();
     setShowDialog(true);
   }
 
@@ -725,7 +752,9 @@ ${rows.map(r => `<tr>
   const receiptChosen = isManager && (!!form.receiptUpload.objectPath || !!form.receiptAttachmentId);
   const { data: incidentAttachments = [] } = useQuery<IncidentAttachment[]>({
     queryKey: ["incident-attachments", editItem?.id, activeClientId],
-    queryFn: () => apiFetch(`/photos?entityType=incident&entityId=${editItem!.id}`),
+    // A receipt is a photo, so the incident's videos aren't offered.
+    queryFn: async () => ((await apiFetch(`/photos?entityType=incident&entityId=${editItem!.id}`)) as IncidentAttachment[])
+      .filter(attachment => !VIDEO_PATH.test(attachment.object_path ?? "")),
     enabled: showDialog && !!editItem && isManager && submissionChanged,
   });
 
@@ -774,6 +803,8 @@ ${rows.map(r => `<tr>
         description: form.description.trim(),
         involvedName: form.involvedName.trim(),
         involvedJobTitle: form.involvedJobTitle.trim() || null,
+        involvedAddress: form.involvedAddress.trim() || null,
+        reporterAddress: form.reporterAddress.trim() || null,
         involvedEmploymentType: form.involvedEmploymentType,
         injuriesSustained: form.injuriesSustained.trim() || null,
         firstAidGiven: form.firstAidGiven,
@@ -804,7 +835,8 @@ ${rows.map(r => `<tr>
         await apiFetch(`/incidents/${editItem.id}`, { method: "PUT", body: JSON.stringify(body) });
         toast({ title: "Record updated" });
       } else {
-        await apiFetch("/incidents", { method: "POST", body: JSON.stringify(body) });
+        const created = await apiFetch("/incidents", { method: "POST", body: JSON.stringify(body) });
+        await media.attach(created?.id);
         toast({ title: "Incident recorded" });
       }
       invalidate();
@@ -878,6 +910,7 @@ ${rows.map(r => `<tr>
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
+    <NorthernIrelandContext.Provider value={northernIreland}>
     <AppLayout title="IncidentTrack">
 
       {/* Header */}
@@ -1155,12 +1188,20 @@ ${rows.map(r => `<tr>
 
       {/* Legal footer */}
       <div className="bg-rose-50 border border-rose-200 rounded-sm p-4 text-xs text-rose-900">
-        <p className="font-semibold mb-1">RIDDOR 2013 — Reporting requirements</p>
+        <p className="font-semibold mb-1">{northernIreland ? "RIDDOR (Northern Ireland) 1997 — Reporting requirements" : "RIDDOR 2013 — Reporting requirements"}</p>
+        {northernIreland ? (
+        <p>
+          Your business is in Northern Ireland, so incidents are reported to the Health and Safety Executive for Northern Ireland (HSENI), not the HSE.
+          This includes: deaths, specified major injuries, injuries that keep someone off normal work for more than 3 days, members of the public taken to hospital, occupational diseases, and dangerous occurrences.
+          Reports must be made within 10 days; deaths and major injuries must also be notified straight away. Report online through the HSENI website or call the HSENI helpline on {HSENI_PHONE}.
+        </p>
+        ) : (
         <p>
           Under the Reporting of Injuries, Diseases and Dangerous Occurrences Regulations 2013 you must report certain workplace incidents to the HSE.
           This includes: deaths, specified injuries (fractures, amputations, loss of sight, crush injuries), over-7-day incapacitation, occupational diseases, and dangerous occurrences.
           Most reports must be submitted within 10 days (15 days for over-7-day injuries). Report online through the HSE website; deaths and specified injuries can also be reported by phone on 0345 300 9923.
         </p>
+        )}
         <RiddorAdviserNote className="mt-2" />
       </div>
 
@@ -1304,6 +1345,14 @@ ${rows.map(r => `<tr>
                     </div>
                   </div>
                   <div>
+                    <Label htmlFor="incident-involved-address">Home address</Label>
+                    <Textarea id="incident-involved-address" placeholder="Needed for the accident book. Only managers can see it once saved."
+                      value={form.involvedAddress}
+                      onChange={e => setForm(f => ({ ...f, involvedAddress: e.target.value }))}
+                      autoComplete="off" spellCheck={false}
+                      className="mt-1 rounded-sm" rows={2} />
+                  </div>
+                  <div>
                     <Label>Employment Status *</Label>
                     <Select value={form.involvedEmploymentType} onValueChange={v => setForm(f => ({ ...f, involvedEmploymentType: v as EmploymentType }))}>
                       <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
@@ -1356,6 +1405,16 @@ ${rows.map(r => `<tr>
                     onChange={e => setForm(f => ({ ...f, reportedBy: e.target.value }))}
                     className="mt-1 rounded-sm" />
                 </div>
+                <div>
+                  <Label htmlFor="incident-reporter-address">Address of the person reporting (if not the injured person)</Label>
+                  <Textarea id="incident-reporter-address" placeholder="Leave blank if the injured person reported it or a member of staff is reporting at work"
+                    value={form.reporterAddress}
+                    onChange={e => setForm(f => ({ ...f, reporterAddress: e.target.value }))}
+                    autoComplete="off" spellCheck={false}
+                    className="mt-1 rounded-sm" rows={2} />
+                </div>
+
+                {editItem ? <CheckPhotoUploader entityType="incident" entityId={editItem.id} /> : media.picker}
               </>
             )}
 
@@ -1398,14 +1457,16 @@ ${rows.map(r => `<tr>
                       onCheckedChange={v => setForm(f => ({
                         ...f, riddorReportable: !!v, reportedToHse: !!v ? f.reportedToHse : false,
                         // Drop a category that no longer matches the reportability decision.
-                        riddorCategory: f.riddorCategory && (f.riddorCategory !== "over_3_day_record_only") !== !!v ? "" : f.riddorCategory,
+                        riddorCategory: f.riddorCategory && (northernIreland || f.riddorCategory !== "over_3_day_record_only") !== !!v ? "" : f.riddorCategory,
                         hseReference: !!v ? f.hseReference : "", hseReportDate: !!v ? f.hseReportDate : "",
                       }))}
                       className="mt-0.5" />
                     <div>
                       <Label htmlFor="riddor" className="cursor-pointer">This incident is RIDDOR reportable</Label>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Deaths, specified injuries, over-7-day incapacitation, occupational diseases, dangerous occurrences
+                        {northernIreland
+                          ? "Deaths, major injuries, over-3-day incapacitation, members of the public taken to hospital, occupational diseases, dangerous occurrences (RIDDOR (NI) 1997)"
+                          : "Deaths, specified injuries, over-7-day incapacitation, occupational diseases, dangerous occurrences"}
                       </p>
                     </div>
                   </div>
@@ -1417,7 +1478,8 @@ ${rows.map(r => `<tr>
                         const riddorCategory = v === "none" ? "" : v as RiddorCategory;
                         // A category decides reportability; keep the tick box consistent with it.
                         if (!riddorCategory) return { ...f, riddorCategory };
-                        const reportable = riddorCategory !== "over_3_day_record_only";
+                        // In Northern Ireland over-3-day injuries are reportable too.
+                        const reportable = northernIreland || riddorCategory !== "over_3_day_record_only";
                         return {
                           ...f, riddorCategory, riddorReportable: reportable,
                           reportedToHse: reportable ? f.reportedToHse : false,
@@ -1429,12 +1491,12 @@ ${rows.map(r => `<tr>
                       <SelectContent>
                         <SelectItem value="none">Not categorised</SelectItem>
                         {(Object.keys(RIDDOR_CATEGORY_LABELS) as RiddorCategory[]).map(c => (
-                          <SelectItem key={c} value={c}>{RIDDOR_CATEGORY_LABELS[c]}</SelectItem>
+                          <SelectItem key={c} value={c}>{northernIreland && c === "over_3_day_record_only" ? "Over-3-day injury (reportable in Northern Ireland)" : RIDDOR_CATEGORY_LABELS[c]}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                     {form.riddorCategory && (
-                      <p className="mt-1 text-xs text-orange-800">{riddorDeadlineText(form.riddorCategory, form.incidentDate)}</p>
+                      <p className="mt-1 text-xs text-orange-800">{riddorDeadlineText(form.riddorCategory, form.incidentDate, northernIreland)}</p>
                     )}
                   </div>
                   <div>
@@ -1526,11 +1588,19 @@ ${rows.map(r => `<tr>
                       {!form.reportedToHse && (
                         <div className="flex items-start gap-2 text-xs text-orange-800 bg-orange-100 rounded-sm px-3 py-2">
                           <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                          {northernIreland ? (
+                          <span>
+                            This incident must be reported to HSENI within 10 days.{" "}
+                            <HseRiddorLink />{" "}
+                            (or call the HSENI helpline on {HSENI_PHONE}).
+                          </span>
+                          ) : (
                           <span>
                             This incident must be reported to the HSE. Most reports must be submitted within 10 days (15 days for over-7-day injuries).{" "}
                             <HseRiddorLink>Report it on the HSE website</HseRiddorLink>{" "}
                             (deaths and specified injuries can also be phoned in on 0345 300 9923).
                           </span>
+                          )}
                         </div>
                       )}
                     </>
@@ -1629,5 +1699,6 @@ ${rows.map(r => `<tr>
       </Dialog>
 
     </AppLayout>
+    </NorthernIrelandContext.Provider>
   );
 }

@@ -37,6 +37,7 @@ import { AuditLog } from "@/components/audit-log";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { Droplets, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX, Filter, Pencil, Trash2, Lock, ThermometerSun, Settings, X, XCircle, ShieldAlert, Footprints } from "lucide-react";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin, useCanManageUsers } from "@/context/auth-context";
@@ -582,6 +583,7 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
   const [notes, setNotes] = useState("");
   const [findings, setFindings] = useState<LegionellaFindings>({});
   const [busy, setBusy] = useState(false);
+  const media = useRecordMedia("legionella_check", { disabled: busy });
   const { user } = useAuth();
   const { data: config } = useGetLegionellaConfig();
   const { toast } = useToast();
@@ -619,6 +621,7 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
         findings: legionellaFindingsPayload(checkType, findings),
       }),
     });
+    if (r.ok) await media.attach(((await r.json().catch(() => null)) as { id?: number } | null)?.id);
     setBusy(false);
     if (r.ok) {
       queryClient.invalidateQueries({ queryKey: getListLegionellaChecksQueryKey() });
@@ -687,6 +690,7 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
             <Label>Notes</Label>
             <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} />
           </div>
+          {media.picker}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -1002,6 +1006,7 @@ function RecordCheckDialog({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const createCheck = useCreateLegionellaCheck();
+  const media = useRecordMedia("legionella_check", { disabled: createCheck.isPending });
   const { data: sites } = useListSites();
   const { data: config } = useGetLegionellaConfig();
   const { data: allUnits } = useLegionellaUnits();
@@ -1074,7 +1079,8 @@ function RecordCheckDialog({
     createCheck.mutate(
       { data },
       {
-        onSuccess: (response: any) => {
+        onSuccess: async (response: any) => {
+          await media.attach(response?.id);
           queryClient.invalidateQueries({ queryKey: getListLegionellaChecksQueryKey() });
           queryClient.invalidateQueries({ queryKey: getGetLegionellaStatusQueryKey() });
           toast({ title: "Check recorded", description: `Server outcome: ${response?.result ?? result}.` });
@@ -1096,7 +1102,7 @@ function RecordCheckDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={o => { setOpen(o); if (!o) media.clear(); }}>
       <DialogTrigger asChild>
         <Button className="shadow-lg shadow-primary/20">
           <Plus className="w-4 h-4 mr-2" />
@@ -1209,11 +1215,12 @@ function RecordCheckDialog({
             <Label>Notes</Label>
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
           </div>
+          {media.picker}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={createCheck.isPending}>
-            {createCheck.isPending ? "Saving..." : "Record Check"}
+          <Button variant="outline" disabled={media.attaching} onClick={() => { media.clear(); setOpen(false); }}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={createCheck.isPending || media.attaching}>
+            {media.attaching ? "Adding photos…" : createCheck.isPending ? "Saving..." : "Record Check"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1376,6 +1383,7 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
             <Label>Notes</Label>
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
           </div>
+          <CheckPhotoUploader entityType="legionella_check" entityId={check.id} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>

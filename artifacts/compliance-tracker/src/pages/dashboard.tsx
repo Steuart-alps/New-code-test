@@ -6,6 +6,7 @@ import { apiFetch } from "@/lib/api";
 import { type KitchenCheckState } from "@/lib/kitchen-dashboard-status";
 import { KitchenStatusPill } from "@/components/kitchen-status-pill";
 import { ComplianceChecksDue } from "@/components/compliance-checks-due";
+import { FrostWarningCard } from "@/components/frost-warning-card";
 import { TodayByDepartmentCard } from "@/components/today-by-department";
 import { RegisterReviewsDue } from "@/components/register-reviews-due";
 import { DashboardStartCards } from "@/components/dashboard-start-cards";
@@ -16,7 +17,7 @@ import { useCertificateInbox } from "@/components/certificate-inbox-card";
 import {
   ChevronDown, ChevronRight, ArrowRight, AlertCircle, AlertTriangle,
   CheckCircle2, Circle, MinusCircle, SlidersHorizontal,
-  MapPin, UserPlus, Mail, Settings2, MailWarning, Inbox,
+  MapPin, UserPlus, Mail, Settings2, MailWarning, Inbox, ShieldCheck,
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -315,11 +316,14 @@ function SetupChecklist({
   teamCount,
   notificationEmail,
   hasModules,
+  askTwoStep,
 }: {
   siteCount: number;
   teamCount: number;
   notificationEmail: string;
   hasModules: boolean;
+  /** An Owner without two-step sign-in: offer it as a step. */
+  askTwoStep: boolean;
 }) {
   const steps = [
     {
@@ -350,6 +354,13 @@ function SetupChecklist({
       href: "/settings#services",
       icon: Settings2,
     },
+    ...(askTwoStep ? [{
+      label: "Turn on two-step sign-in",
+      detail: "Your login holds staff injury records. A code from your phone stops anyone who guesses your password.",
+      done: false,
+      href: "/account-security",
+      icon: ShieldCheck,
+    }] : []),
   ];
   const completed = steps.filter((step) => step.done).length;
   if (completed === steps.length) return null;
@@ -722,6 +733,7 @@ export default function Dashboard() {
 
         <SayItButton siteId={siteId === "all" ? null : Number(siteId)} className="w-full sm:w-auto h-11" />
 
+        <FrostWarningCard siteId={siteId === "all" ? null : Number(siteId)} />
         <DashboardStartCards />
         <ComplianceChecksDue siteId={siteId === "all" ? null : Number(siteId)} />
         <RegisterReviewsDue siteId={siteId === "all" ? null : Number(siteId)} />
@@ -732,6 +744,7 @@ export default function Dashboard() {
             teamCount={teamCount}
             notificationEmail={notificationEmail}
             hasModules={services === "all" || (Array.isArray(services) && services.length > 0)}
+            askTwoStep={user?.role === "client_admin" && !user.totpEnabled}
           />
         )}
 
