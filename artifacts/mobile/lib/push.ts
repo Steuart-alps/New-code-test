@@ -6,8 +6,13 @@
  * - unregisterPushToken(): tells the API to forget the current device's token
  *   (called on logout).
  *
- * All functions are best-effort and swallow errors: a failure to register a
- * push token must never break login/logout.
+ * All functions are best-effort: a failure to register a push token must
+ * never break login/logout. Failures are logged with console.warn so a
+ * misconfigured build is visible in device logs.
+ *
+ * Remote push needs an EAS project id (`extra.eas.projectId` in the app
+ * config, added by `eas init` under the owner's Expo account). Without it,
+ * registration is skipped with a single warning.
  */
 
 import { Platform } from 'react-native';
@@ -27,6 +32,7 @@ Notifications.setNotificationHandler({
 });
 
 let lastRegisteredToken: string | null = null;
+let warnedMissingProjectId = false;
 
 /** Resolve the EAS/Expo project id needed for getExpoPushTokenAsync. */
 function getProjectId(): string | undefined {
@@ -63,9 +69,18 @@ export async function registerForPushNotifications(): Promise<string | null> {
     }
 
     const projectId = getProjectId();
-    const tokenResponse = await Notifications.getExpoPushTokenAsync(
-      projectId ? { projectId } : undefined,
-    );
+    if (!projectId) {
+      if (!warnedMissingProjectId) {
+        warnedMissingProjectId = true;
+        console.warn(
+          '[push] Push notifications are disabled: this build has no EAS project id '
+          + '(expo.extra.eas.projectId). Run `eas init` to link the app to an Expo '
+          + 'project, then rebuild.',
+        );
+      }
+      return null;
+    }
+    const tokenResponse = await Notifications.getExpoPushTokenAsync({ projectId });
     const token = tokenResponse.data;
     if (!token) return null;
 
@@ -75,8 +90,12 @@ export async function registerForPushNotifications(): Promise<string | null> {
     });
     lastRegisteredToken = token;
     return token;
-  } catch {
+  } catch (error) {
     // Best-effort — never let push registration break the app.
+    console.warn(
+      '[push] Could not register this device for push notifications:',
+      error instanceof Error ? error.message : error,
+    );
     return null;
   }
 }
@@ -85,11 +104,9 @@ export async function registerForPushNotifications(): Promise<string | null> {
 export async function unregisterPushToken(): Promise<void> {
   try {
     let token = lastRegisteredToken;
-    if (!token && Platform.OS !== 'web' && Device.isDevice) {
-      const projectId = getProjectId();
-      const tokenResponse = await Notifications.getExpoPushTokenAsync(
-        projectId ? { projectId } : undefined,
-      );
+    const projectId = getProjectId();
+    if (!token && projectId && Platform.OS !== 'web' && Device.isDevice) {
+      const tokenResponse = await Notifications.getExpoPushTokenAsync({ projectId });
       token = tokenResponse.data ?? null;
     }
     if (!token) return;

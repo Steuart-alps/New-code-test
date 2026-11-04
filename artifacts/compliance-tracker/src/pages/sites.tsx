@@ -15,7 +15,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Pencil, Trash2, Building2, MapPin, Phone, User, ChevronRight, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, Building2, MapPin, Phone, User, ChevronRight, Search, BedDouble } from "lucide-react";
+import { SiteFireWalkQuestions, fireWalkSummary } from "@/components/site-fire-walk-questions";
 
 const NO_DEPT = "__none__";
 
@@ -23,7 +24,13 @@ interface Department {
   id: number;
   name: string;
   clientId: number;
+  siteId?: number | null;
 }
+
+// A site can be given to one department: one that spans every site, or one
+// of its own (a department under another site never sees this one).
+const departmentsFor = (departments: Department[], siteId: number | null) =>
+  departments.filter(d => d.siteId == null || d.siteId === siteId);
 
 interface FormState {
   name: string;
@@ -32,8 +39,13 @@ interface FormState {
   phone: string;
   seedStarterChecks: boolean;
   departmentId: number | null;
+  sleepingAccommodation: boolean | null;
+  nightPorter: boolean | null;
 }
-const empty: FormState = { name: "", responsiblePerson: "", address: "", phone: "", seedStarterChecks: true, departmentId: null };
+const empty: FormState = {
+  name: "", responsiblePerson: "", address: "", phone: "", seedStarterChecks: false, departmentId: null,
+  sleepingAccommodation: null, nightPorter: null,
+};
 
 export default function SitesPage() {
   const { data: sites = [], isLoading } = useListSites();
@@ -88,6 +100,8 @@ export default function SitesPage() {
       phone: s.phone ?? "",
       seedStarterChecks: false,
       departmentId: s.departmentId ?? null,
+      sleepingAccommodation: s.sleepingAccommodation ?? null,
+      nightPorter: s.nightPorter ?? null,
     });
     setIsOpen(true);
   };
@@ -101,6 +115,8 @@ export default function SitesPage() {
       address: form.address.trim() || null,
       phone: form.phone.trim() || null,
       departmentId: form.departmentId,
+      sleepingAccommodation: form.sleepingAccommodation,
+      nightPorter: form.nightPorter,
     };
     if (editingId) {
       await updateSite.mutateAsync({ id: editingId, data: basePayload });
@@ -148,7 +164,7 @@ export default function SitesPage() {
               <div className="flex items-start justify-between gap-3 mb-3">
                 <Link href={`/sites/${site.id}`} className="flex items-center gap-3 flex-1 min-w-0 hover:text-primary transition-colors">
                   <Building2 className="w-4 h-4 flex-shrink-0 opacity-70" />
-                  <span className="font-semibold text-lg font-display truncate">{site.name}</span>
+                  <span className="font-bold text-lg font-display truncate">{site.name}</span>
                 </Link>
                 <div className="flex gap-1 flex-shrink-0">
                   <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(site)}>
@@ -180,7 +196,7 @@ export default function SitesPage() {
                         <SelectItem value={NO_DEPT} className="text-xs text-muted-foreground">
                           All departments
                         </SelectItem>
-                        {departments.map(d => (
+                        {departmentsFor(departments, site.id).map(d => (
                           <SelectItem key={d.id} value={d.id.toString()} className="text-xs">
                             {d.name}
                           </SelectItem>
@@ -202,6 +218,7 @@ export default function SitesPage() {
                 {site.address && <div className="flex items-start gap-2"><MapPin className="w-3.5 h-3.5 opacity-60 mt-0.5" /><span className="line-clamp-2">{site.address}</span></div>}
                 {site.phone && <div className="flex items-center gap-2"><Phone className="w-3.5 h-3.5 opacity-60" />{site.phone}</div>}
                 {!site.responsiblePerson && !site.address && !site.phone && <p className="italic text-xs opacity-60">No site details set yet.</p>}
+                {fireWalkSummary(site) && <div className="flex items-start gap-2 text-xs"><BedDouble className="w-3.5 h-3.5 opacity-60 mt-0.5" /><span>{fireWalkSummary(site)}</span></div>}
               </div>
 
               <Link href={`/sites/${site.id}`} className="mt-4 inline-flex items-center gap-1 text-sm text-primary hover:underline font-medium">
@@ -215,7 +232,7 @@ export default function SitesPage() {
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogContent className="sm:max-w-[480px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-display">{editingId ? "Edit Site" : "Add Site"}</DialogTitle>
+            <DialogTitle className="font-display font-bold">{editingId ? "Edit Site" : "Add Site"}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} id="sites-page-form" className="space-y-4 py-2">
             <div className="space-y-1.5">
@@ -229,13 +246,19 @@ export default function SitesPage() {
             <div className="space-y-1.5">
               <Label>Site Address</Label>
               <Textarea value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="Street, town, postcode" rows={2} />
+              <p className="text-xs text-muted-foreground">Include the postcode: it is used to warn you the afternoon before a frosty night, so you can grit and de-ice.</p>
             </div>
             <div className="space-y-1.5">
               <Label>Site Telephone</Label>
               <Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="e.g. 0161 496 1234" />
             </div>
 
-            {departments.length > 0 && (
+            <div className="rounded-md border border-border p-3">
+              <SiteFireWalkQuestions idPrefix="site-form" value={{ sleepingAccommodation: form.sleepingAccommodation, nightPorter: form.nightPorter }}
+                onChange={answers => setForm({ ...form, ...answers })} />
+            </div>
+
+            {departmentsFor(departments, editingId).length > 0 && (
               <div className="space-y-1.5">
                 <Label>Department</Label>
                 <Select
@@ -247,7 +270,7 @@ export default function SitesPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={NO_DEPT}>All departments</SelectItem>
-                    {departments.map(d => (
+                    {departmentsFor(departments, editingId).map(d => (
                       <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -264,9 +287,9 @@ export default function SitesPage() {
                   onChange={e => setForm({ ...form, seedStarterChecks: e.target.checked })}
                 />
                 <span className="text-sm">
-                  <span className="font-medium">Pre-populate with starter compliance checks</span>
+                  <span className="font-medium">Add starter compliance checks to this site</span>
                   <span className="block text-xs text-muted-foreground mt-0.5">
-                    Adds the standard Fire Safety, Electrical, Staff Training and Premises checks to this site. You can edit or remove any of them afterwards.
+                    Adds example gas, fire, electrical, lifting equipment (LOLER), legionella, asbestos, pressure system, air conditioning, insurance and waste (waste transfer note, waste carrier) checks, without due dates. Starter checks your business already has that aren't assigned to a site are moved to this site instead of copied. Set each due date from your last service and remove any that don't apply.
                   </span>
                 </span>
               </label>

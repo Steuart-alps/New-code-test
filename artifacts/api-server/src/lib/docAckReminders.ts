@@ -11,9 +11,11 @@ import { db } from "@workspace/db";
 import { clientsTable } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
-import { sendEmail, getPublicAppUrl } from "./email";
+import { docCategoryFilter } from "./docTrackScope";
+import { sendEmail, getPublicAppUrl, renderEmailLayout } from "./email";
 import { sendPushToUsers } from "./pushNotifications";
 import { getNotificationEmails } from "./getNotificationEmails";
+import { claimEmailDelivery, emailDeliveryIdempotencyKey, settleEmailDelivery } from "./emailDeliveryClaims";
 
 interface OutstandingDocSummary {
   title: string;
@@ -27,10 +29,11 @@ function esc(s: string | null | undefined): string {
   return (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-export async function getOutstandingAckSummary(clientId: number): Promise<OutstandingDocSummary[]> {
+export async function getOutstandingAckSummary(clientId: number, categories: readonly string[] | null = null): Promise<OutstandingDocSummary[]> {
   const docsResult = await db.execute(sql`
-    SELECT id, title, department FROM doc_track_documents
+    SELECT id, title, department, site_id FROM doc_track_documents
     WHERE client_id = ${clientId} AND requires_acknowledgement = true
+      ${docCategoryFilter(sql`category`, categories)}
     ORDER BY title ASC
   `);
   const docs = (docsResult.rows ?? []) as any[];
@@ -39,7 +42,7 @@ export async function getOutstandingAckSummary(clientId: number): Promise<Outsta
   const staffResult = await db.execute(sql`
     SELECT id,
       COALESCE(NULLIF(trim(name), ''), NULLIF(trim(concat_ws(' ', first_name, last_name)), '')) AS name,
-      department
+      department, site_id
     FROM staff_roster
     WHERE client_id = ${clientId} AND active = true
   `);
@@ -53,7 +56,8 @@ export async function getOutstandingAckSummary(clientId: number): Promise<Outsta
 
   return docs
     .map((d) => {
-      const relevant = d.department ? staff.filter((s) => s.department === d.department) : staff;
+      const relevant = staff.filter((s) =>
+        (!d.department || s.department === d.department) && (d.site_id == null || s.site_id === d.site_id));
       const outstanding = relevant.filter((s) => !acked.has(`${d.id}:${s.id}`));
       return {
         title: d.title as string,
@@ -82,17 +86,10 @@ function buildEmailHtml(docs: OutstandingDocSummary[], appUrl: string): string {
     )
     .join("");
 
-  return `
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"/></head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
-    <div style="background:#0f172a;padding:32px 40px;">
-      <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">🛡️ ComplyTrack</div>
-      <div style="font-size:14px;color:#94a3b8;margin-top:6px;">Document acknowledgements outstanding</div>
-    </div>
-    <div style="padding:32px 40px;">
+  return renderEmailLayout({
+    subtitle: `Document acknowledgements outstanding`,
+    footerNote: `You are receiving this as an account manager.`,
+    bodyHtml: `
       <p style="font-size:15px;color:#334155;margin:0 0 20px;">
         Some staff still haven't acknowledged required documents. Please chase the sign-offs below or record them in DocTrack.
       </p>
@@ -100,17 +97,12 @@ function buildEmailHtml(docs: OutstandingDocSummary[], appUrl: string): string {
         <tbody>${rows}</tbody>
       </table>
       <div style="margin-top:28px;text-align:center;">
-        <a href="${appUrl}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">
+        <a href="${appUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:10px;font-size:16px;font-weight:700;">
           Open ComplyTrack →
         </a>
       </div>
-    </div>
-    <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
-      ComplyTrack by ALPS Consulting · You are receiving this as an account manager.
-    </div>
-  </div>
-</body>
-</html>`;
+`,
+  });
 }
 
 export interface DocAckReminderJobResult {
@@ -147,27 +139,34 @@ export async function runDocAckReminderJob(): Promise<DocAckReminderJobResult> {
       const { emails, userIds } = await getNotificationEmails(client.id);
       if (emails.length === 0) continue;
 
-      // Claim first so concurrent job runs can't double-send; release the
-      // claim if the send fails so a later run retries.
-      const claim = await db.execute(sql`
-        INSERT INTO doc_ack_reminder_log (client_id, sent_at)
-        SELECT ${client.id}, now()
-        WHERE NOT EXISTS (
-          SELECT 1 FROM doc_ack_reminder_log
-          WHERE client_id = ${client.id} AND sent_at > now() - interval '7 days'
-        )
-        RETURNING id
-      `);
-      const claimId = ((claim as any).rows ?? [])[0]?.id;
-      if (!claimId) continue;
-
+      // Lease first so concurrent job runs can't double-send. The throttle
+      // row is written only after the provider accepted the email, so a crash
+      // mid-send is retried (same idempotency key) once the lease expires.
+      const lease = await claimEmailDelivery("doc-ack", String(client.id));
+      if (!lease) continue;
       const docCount = outstanding.length;
       const subject = `📄 ${docCount} document${docCount !== 1 ? "s" : ""} awaiting staff acknowledgement — ComplyTrack`;
+      let settled = false;
       try {
-        await sendEmail({ to: emails, subject, html: buildEmailHtml(outstanding, appUrl) });
-      } catch (sendErr) {
-        await db.execute(sql`DELETE FROM doc_ack_reminder_log WHERE id = ${claimId}`);
-        throw sendErr;
+        const again = await db.execute(sql`
+          SELECT 1 FROM doc_ack_reminder_log
+          WHERE client_id = ${client.id} AND sent_at > now() - interval '7 days'
+          LIMIT 1
+        `);
+        if (((again as any).rows ?? []).length > 0) continue;
+        await sendEmail({
+          to: emails,
+          subject,
+          html: buildEmailHtml(outstanding, appUrl),
+          idempotencyKey: emailDeliveryIdempotencyKey(lease, new Date().toISOString().slice(0, 10)),
+        });
+        await db.transaction(async (tx) => {
+          await tx.execute(sql`INSERT INTO doc_ack_reminder_log (client_id, sent_at) VALUES (${client.id}, now())`);
+          await settleEmailDelivery(lease, tx);
+        });
+        settled = true;
+      } finally {
+        if (!settled) await settleEmailDelivery(lease).catch(() => {});
       }
 
       // Push managers a matching alert (best-effort; never blocks the job).
@@ -175,7 +174,7 @@ export async function runDocAckReminderJob(): Promise<DocAckReminderJobResult> {
         title: "Document sign-offs outstanding",
         body: `${docCount} document${docCount !== 1 ? "s" : ""} awaiting staff acknowledgement.`,
         data: { route: "/(tabs)/docs" },
-      });
+      }).catch((err) => logger.warn({ err, clientId: client.id }, "Doc acknowledgement push failed"));
 
       result.clientsEmailed++;
       result.emailsSent += emails.length;

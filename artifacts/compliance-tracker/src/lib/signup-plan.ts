@@ -11,6 +11,7 @@ export const SIGNUP_SERVICE_KEYS = [
   "treetrack",
   "pattrack",
   "pesttrack",
+  "coshhtrack",
 ] as const;
 
 const signupServiceKeys = new Set<string>(SIGNUP_SERVICE_KEYS);

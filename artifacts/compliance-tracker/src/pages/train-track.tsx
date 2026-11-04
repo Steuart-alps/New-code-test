@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,12 +58,24 @@ import {
   FileText,
   Printer,
   Download,
+  Beaker,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { SignaturePad } from "@/components/signature-pad";
-import { buildTrainingMatrix, certificateStatus, normaliseStaffName, trainingMatrixToCsv } from "@/lib/training-matrix";
+import {
+  buildTrainingMatrix, certificateStatus, FIRE_DRILL_TRAINING_TYPE, fireDrillMatrixRecords, normaliseStaffName, trainingMatrixToCsv,
+  type StaffDrillAttendance,
+} from "@/lib/training-matrix";
+import { DrillAttendanceCard } from "@/components/fire-drill";
+import { getTrainingExpiry } from "@/lib/training-expiry";
+import { useLocalToday } from "@/hooks/use-local-today";
 import { trackTrainingMatrixDownload } from "@/lib/analytics";
+import { CoshhSignOffSection } from "@/components/coshh-sign-offs";
+import { DocumentSignOffSection } from "@/components/document-sign-offs";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
+import { matchSpokenItem, spokenDate, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
+import { sortByLabel, sortedEntries } from "@/lib/sort-options";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -115,6 +128,8 @@ const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   policy: "Policy",
   procedure: "Procedure",
   other: "Other",
+  haccp: "HACCP plan",
+  recipe_spec: "Recipe spec sheet",
 };
 
 const STATUS_CFG = {
@@ -126,9 +141,9 @@ const STATUS_CFG = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function getCertStatus(expiryDate: string | null): CertStatus {
+function getCertStatus(expiryDate: string | null, today = new Date()): CertStatus {
   if (!expiryDate) return "no_expiry";
-  const status = certificateStatus(expiryDate);
+  const status = certificateStatus(expiryDate, today);
   return status === "Expired" ? "expired" : status === "Expiring Soon" ? "expiring_soon" : "valid";
 }
 
@@ -137,14 +152,14 @@ function formatDate(d: string | null) {
   return new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function daysUntil(d: string | null) {
-  if (!d) return null;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  return Math.ceil((new Date(d).getTime() - today.getTime()) / 86400000);
+// Calendar days, not elapsed hours: parsing "YYYY-MM-DD" as UTC midnight put
+// every label a day out during British Summer Time.
+function daysUntil(d: string | null, today = new Date()) {
+  return getTrainingExpiry(d?.slice(0, 10), today).days;
 }
 
-function getSignoffStatus(expiryDate: string | null): "acknowledged" | "expired" {
-  return expiryDate && getCertStatus(expiryDate) === "expired" ? "expired" : "acknowledged";
+function getSignoffStatus(expiryDate: string | null, today = new Date()): "acknowledged" | "expired" {
+  return expiryDate && getCertStatus(expiryDate, today) === "expired" ? "expired" : "acknowledged";
 }
 
 // Route every request through the shared apiFetch and attach the consultant's
@@ -247,13 +262,23 @@ function ActionsCell({ onEdit, onDelete, onPrint }: { onEdit?: () => void; onDel
 export default function TrainTrackPage() {
   const canAdmin = useCanAdmin();
   const { toast } = useToast();
-  const { activeClientId, client, user } = useAuth();
+  const { activeClientId, client, user, hasService } = useAuth();
   const canMutate = user?.role !== "client_viewer";
+  // COSHH assessments to read and sign come from COSHHTrack.
+  const showCoshh = hasService("coshhtrack");
+  // Documents to read and sign come from DocTrack.
+  const showDocuments = hasService("doctrack") || hasService("safetrack");
+  const canManageSignOffs = user?.role === "client_admin" || user?.role === "consultant";
+  // Fire drill attendance comes from FireTrack.
+  const showFireDrills = hasService("firetrack") && canMutate;
+  // Expiry states, counts and ordering roll over at local midnight while open.
+  const today = useLocalToday();
   const qc = useQueryClient();
   const apiFetch = useTrainTrackApi();
 
-  const [tab, setTab]           = useState<RecordType | "audit">("certificate");
-  const [siteFilter, setSite]   = useState("all");
+  const [tab, setTab]           = useState<RecordType | "audit" | "coshh" | "documents">("certificate");
+  const [siteFilter, setSite]   = useSiteFilter("all");
+  const workingSiteId = useWorkingSiteId();
   const [search, setSearch]     = useState("");
   const [certStatus, setCertStatus] = useState<"all" | CertStatus>("all");
 
@@ -261,6 +286,7 @@ export default function TrainTrackPage() {
   const [editRecord, setEditRecord]   = useState<TrainingRecord | null>(null);
   const [deleteId, setDeleteId]       = useState<number | null>(null);
   const [saving, setSaving]           = useState(false);
+  const media = useRecordMedia("training_record", { disabled: saving });
 
   // forms per type
   const [certForm,     setCertForm]     = useState(emptyCert());
@@ -289,10 +315,17 @@ export default function TrainTrackPage() {
   // The matrix uses the active roster rather than certificate holders so it
   // exposes staff who are missing a required certificate. The endpoint omits
   // inactive staff by default.
-  const { data: activeStaff = [] } = useQuery<StaffMember[]>({
+  const { data: activeStaff = [], isFetched: staffFetched } = useQuery<StaffMember[]>({
     queryKey: ["staff-roster", activeClientId],
     queryFn: () => apiFetch("/staff-roster"),
     enabled: !!activeClientId,
+  });
+
+  // Who took part in a fire drill (FireTrack), for the matrix's "Fire drill" column.
+  const { data: drillAttendance } = useQuery<{ periodMonths: number; staff: StaffDrillAttendance[] }>({
+    queryKey: ["fire-drill-attendance", activeClientId],
+    queryFn: () => apiFetch("/fire-safety/drill-attendance"),
+    enabled: !!activeClientId && showFireDrills,
   });
 
   // Effective per-client training types. Existing records whose type has since
@@ -304,6 +337,30 @@ export default function TrainTrackPage() {
   );
   const otherTrainingEnabled = trainingTypeOptions.includes("Other");
 
+  // Say it: "Jane Smith completed fire marshal training today" opens a new
+  // certificate with the person and course matched to the lists.
+  useSayItFill(["training"], fill => {
+    const v = fill.values;
+    const said = (key: string) => (typeof v[key] === "string" ? v[key] as string : "");
+    const member = matchSpokenItem(said("staffName"), activeStaff);
+    const course = matchSpokenItem(said("trainingType"), trainingTypeOptions.filter(t => t !== "Other").map((name, id) => ({ id, name })));
+    const completedDate = spokenDate(v.date);
+    const trainingType = course?.name ?? (otherTrainingEnabled ? "Other" : "");
+    openAdd();
+    setTab("certificate");
+    setCertForm({
+      ...emptyCert(),
+      staffName: member?.name ?? said("staffName"),
+      staffRosterId: member ? String(member.id) : "",
+      trainingType,
+      customType: course ? "" : trainingType === "Other" ? said("trainingType") : "",
+      completedDate,
+      expiryDate: course ? suggestExpiry(course.name, completedDate) : "",
+      siteId: fill.siteId ? String(fill.siteId) : "",
+      notes: withSpokenNote("", fill.text),
+    });
+  }, staffFetched && !!formOptions);
+
   // split by type
   const certs     = useMemo(() => allRecords.filter(r => r.record_type === "certificate"), [allRecords]);
   const signoffs  = useMemo(() => allRecords.filter(r => r.record_type === "signoff"),     [allRecords]);
@@ -311,11 +368,11 @@ export default function TrainTrackPage() {
 
   // cert expiry counts
   const certCounts = useMemo(() => ({
-    expired:       certs.filter(r => getCertStatus(r.expiry_date) === "expired").length,
-    expiring_soon: certs.filter(r => getCertStatus(r.expiry_date) === "expiring_soon").length,
-    valid:         certs.filter(r => getCertStatus(r.expiry_date) === "valid").length,
-    no_expiry:     certs.filter(r => getCertStatus(r.expiry_date) === "no_expiry").length,
-  }), [certs]);
+    expired:       certs.filter(r => getCertStatus(r.expiry_date, today) === "expired").length,
+    expiring_soon: certs.filter(r => getCertStatus(r.expiry_date, today) === "expiring_soon").length,
+    valid:         certs.filter(r => getCertStatus(r.expiry_date, today) === "valid").length,
+    no_expiry:     certs.filter(r => getCertStatus(r.expiry_date, today) === "no_expiry").length,
+  }), [certs, today]);
 
   function applyCommonFilters(rows: TrainingRecord[]) {
     let r = rows;
@@ -335,17 +392,17 @@ export default function TrainTrackPage() {
 
   const filteredCerts     = useMemo(() => {
     let rows = applyCommonFilters(certs);
-    if (certStatus !== "all") rows = rows.filter(r => getCertStatus(r.expiry_date) === certStatus);
+    if (certStatus !== "all") rows = rows.filter(r => getCertStatus(r.expiry_date, today) === certStatus);
     // Sort urgent records to the top: expired first, then expiring soon, each by soonest expiry.
     const rank: Record<CertStatus, number> = { expired: 0, expiring_soon: 1, valid: 2, no_expiry: 3 };
     return [...rows].sort((a, b) => {
-      const ra = rank[getCertStatus(a.expiry_date)];
-      const rb = rank[getCertStatus(b.expiry_date)];
+      const ra = rank[getCertStatus(a.expiry_date, today)];
+      const rb = rank[getCertStatus(b.expiry_date, today)];
       if (ra !== rb) return ra - rb;
       if (a.expiry_date && b.expiry_date) return a.expiry_date.localeCompare(b.expiry_date);
       return 0;
     });
-  }, [certs, siteFilter, search, certStatus]);
+  }, [certs, siteFilter, search, certStatus, today]);
 
   const filteredSignoffs  = useMemo(() => applyCommonFilters(signoffs),  [signoffs,  siteFilter, search]);
   const filteredInternals = useMemo(() => applyCommonFilters(internals), [internals, siteFilter, search]);
@@ -364,9 +421,12 @@ export default function TrainTrackPage() {
 
   function openAdd() {
     setEditRecord(null);
-    setCertForm(emptyCert());
-    setSignoffForm(emptySignoff());
-    setInternalForm(emptyInternal());
+    // A new record starts on the user's working site.
+    const siteId = workingSiteId ? String(workingSiteId) : "";
+    setCertForm({ ...emptyCert(), siteId });
+    setSignoffForm({ ...emptySignoff(), siteId });
+    setInternalForm({ ...emptyInternal(), siteId });
+    media.clear();
     setShowDialog(true);
   }
 
@@ -415,6 +475,7 @@ export default function TrainTrackPage() {
         signature: r.signature ?? null,
       });
     }
+    media.clear();
     setShowDialog(true);
   }
 
@@ -497,7 +558,8 @@ export default function TrainTrackPage() {
         await apiFetch(`/train-track/records/${editRecord.id}`, { method: "PATCH", body: JSON.stringify(updateBody) });
         toast({ title: "Record updated" });
       } else {
-        await apiFetch("/train-track/records", { method: "POST", body: JSON.stringify(body) });
+        const created = await apiFetch("/train-track/records", { method: "POST", body: JSON.stringify(body) });
+        await media.attach(created?.id);
         toast({ title: "Record added" });
       }
 
@@ -589,7 +651,10 @@ ${rows.map(r => `<tr>
 
   // Training matrix CSV — rows = staff, columns = training types, cells = current status.
   function handleDownloadMatrix() {
-    const matrix = buildTrainingMatrix(certs, activeStaff, siteFilter);
+    const drillStaff = Array.isArray(drillAttendance?.staff) ? drillAttendance.staff : null;
+    const drillRecords = drillStaff ? fireDrillMatrixRecords(drillStaff, drillAttendance!.periodMonths ?? 12) : [];
+    const matrix = buildTrainingMatrix([...certs, ...drillRecords], activeStaff, siteFilter, new Date(),
+      drillStaff ? [FIRE_DRILL_TRAINING_TYPE] : []);
 
     if (matrix.rows.length === 0 || matrix.types.length === 0) {
       toast({
@@ -701,11 +766,11 @@ ${rows.map(r => `<tr>
   return (
     <AppLayout title="TrainTrack">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <p className="text-sm text-muted-foreground mt-1">
           Training certificates, document sign-offs, and internal training records
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {canMutate && (
             <FormOptionsEditor
               optionKey="traintrack_types"
@@ -721,7 +786,7 @@ ${rows.map(r => `<tr>
           >
             <Download className="w-4 h-4" /> Download Matrix
           </Button>
-          {canMutate && (
+          {canMutate && tab !== "coshh" && tab !== "documents" && (
             <Button onClick={openAdd} className="gap-2 rounded-sm">
               <Plus className="w-4 h-4" /> Add Record
             </Button>
@@ -729,8 +794,10 @@ ${rows.map(r => `<tr>
         </div>
       </div>
 
+      {showFireDrills && <DrillAttendanceCard siteId={siteFilter === "all" ? undefined : Number(siteFilter)} trackLink />}
+
       {/* Tabs */}
-      <div className="flex border-b border-border">
+      <div className="flex border-b border-border overflow-x-auto">
         {tabDef.map(({ key, label, Icon, count }) => (
           <button
             key={key}
@@ -750,9 +817,49 @@ ${rows.map(r => `<tr>
             )}>{count}</span>
           </button>
         ))}
+        {showCoshh && (
+          <button
+            type="button"
+            data-testid="tab-train-coshh"
+            onClick={() => setTab("coshh")}
+            className={cn(
+              "flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 transition-colors -mb-px",
+              tab === "coshh" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Beaker className="w-4 h-4" />
+            COSHH
+          </button>
+        )}
+        {showDocuments && (
+          <button
+            type="button"
+            data-testid="tab-train-documents"
+            onClick={() => setTab("documents")}
+            className={cn(
+              "flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 transition-colors -mb-px",
+              tab === "documents" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <FileText className="w-4 h-4" />
+            Documents
+          </button>
+        )}
         {canAdmin && <button type="button" data-testid="tab-train-audit" onClick={() => setTab("audit")} className={cn("flex items-center px-5 py-3 text-sm font-medium border-b-2 -mb-px", tab === "audit" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>Audit log</button>}
       </div>
       {canAdmin && tab === "audit" && <AuditLog module="train" />}
+      {showCoshh && tab === "coshh" && (
+        <>
+          {SiteFilter && <div className="flex flex-wrap gap-3">{SiteFilter}</div>}
+          <CoshhSignOffSection siteFilter={siteFilter} canSign={canMutate} />
+        </>
+      )}
+      {showDocuments && tab === "documents" && (
+        <>
+          {SiteFilter && <div className="flex flex-wrap gap-3">{SiteFilter}</div>}
+          <DocumentSignOffSection siteFilter={siteFilter} canManage={canManageSignOffs} />
+        </>
+      )}
 
       {/* ── CERTIFICATES TAB ── */}
       {tab === "certificate" && (
@@ -819,10 +926,10 @@ ${rows.map(r => `<tr>
               footer={`Showing ${filteredCerts.length} of ${certs.length} certificate${certs.length !== 1 ? "s" : ""}`}
             >
               {filteredCerts.map(r => {
-                const status = getCertStatus(r.expiry_date);
+                const status = getCertStatus(r.expiry_date, today);
                 const cfg = STATUS_CFG[status];
                 const Icon = cfg.icon;
-                const days = daysUntil(r.expiry_date);
+                const days = daysUntil(r.expiry_date, today);
                 return (
                   <tr key={r.id} className={cn(
                     "hover:bg-muted/20 transition-colors group",
@@ -925,7 +1032,7 @@ ${rows.map(r => `<tr>
                   </td>
                   <td className="px-4 py-3">
                     {(() => {
-                      const status = getSignoffStatus(r.expiry_date);
+                      const status = getSignoffStatus(r.expiry_date, today);
                       const expired = status === "expired";
                       return (
                         <div>
@@ -1105,7 +1212,7 @@ ${rows.map(r => `<tr>
                   })}>
                     <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
                     <SelectContent>
-                      {[...trainingTypeOptions, ...certForm.trainingType && !trainingTypeOptions.includes(certForm.trainingType) ? [certForm.trainingType] : []]
+                      {sortByLabel([...trainingTypeOptions, ...certForm.trainingType && !trainingTypeOptions.includes(certForm.trainingType) ? [certForm.trainingType] : []], t => t)
                         .map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -1125,10 +1232,10 @@ ${rows.map(r => `<tr>
                 {sites.length > 0 && (
                   <div>
                     <Label>Site</Label>
-                    <Select value={certForm.siteId} onValueChange={v => setCertForm(f => ({ ...f, siteId: v }))}>
+                    <Select value={certForm.siteId || "none"} onValueChange={v => setCertForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                       <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">No site</SelectItem>
+                        <SelectItem value="none">No site</SelectItem>
                         {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
@@ -1181,21 +1288,21 @@ ${rows.map(r => `<tr>
                 </div>
                 <div>
                   <Label>Document Type</Label>
-                  <Select value={signoffForm.documentType} onValueChange={v => setSignoffForm(f => ({ ...f, documentType: v }))}>
+                  <Select value={signoffForm.documentType || "none"} onValueChange={v => setSignoffForm(f => ({ ...f, documentType: v === "none" ? "" : v }))}>
                     <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select type (optional)" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Not specified</SelectItem>
-                      {Object.entries(DOCUMENT_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                      <SelectItem value="none">Not specified</SelectItem>
+                      {sortedEntries(DOCUMENT_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
                 {sites.length > 0 && (
                   <div>
                     <Label>Site</Label>
-                    <Select value={signoffForm.siteId} onValueChange={v => setSignoffForm(f => ({ ...f, siteId: v }))}>
+                    <Select value={signoffForm.siteId || "none"} onValueChange={v => setSignoffForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                       <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">No site</SelectItem>
+                        <SelectItem value="none">No site</SelectItem>
                         {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
@@ -1230,7 +1337,7 @@ ${rows.map(r => `<tr>
                   <Select value={internalForm.trainingType} onValueChange={v => setInternalForm(f => ({ ...f, trainingType: v, customType: "" }))}>
                     <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select or describe…" /></SelectTrigger>
                     <SelectContent>
-                      {[...trainingTypeOptions, ...internalForm.trainingType && !trainingTypeOptions.includes(internalForm.trainingType) ? [internalForm.trainingType] : []]
+                      {sortByLabel([...trainingTypeOptions, ...internalForm.trainingType && !trainingTypeOptions.includes(internalForm.trainingType) ? [internalForm.trainingType] : []], t => t)
                         .map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -1251,10 +1358,10 @@ ${rows.map(r => `<tr>
                 {sites.length > 0 && (
                   <div>
                     <Label>Site</Label>
-                    <Select value={internalForm.siteId} onValueChange={v => setInternalForm(f => ({ ...f, siteId: v }))}>
+                    <Select value={internalForm.siteId || "none"} onValueChange={v => setInternalForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                       <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">No site</SelectItem>
+                        <SelectItem value="none">No site</SelectItem>
                         {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
@@ -1280,6 +1387,8 @@ ${rows.map(r => `<tr>
                 />
               </>
             )}
+
+            {editRecord ? <CheckPhotoUploader entityType="training_record" entityId={editRecord.id} /> : media.picker}
           </div>
 
           <DialogFooter>

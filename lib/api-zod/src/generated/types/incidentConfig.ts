@@ -11,4 +11,6 @@ export interface IncidentConfig {
   incident_default_reporter?: string;
   incident_show_investigation?: string;
   incident_locations?: string;
+  /** The nation in the Compliance Hub profile (england, wales, scotland, northern_ireland or multi_nation), or empty. Northern Ireland reports go to HSENI. Read only. */
+  readonly regulator_nation?: string;
 }

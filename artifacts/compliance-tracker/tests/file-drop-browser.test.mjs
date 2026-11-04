@@ -1,0 +1,256 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { createServer } from "node:net";
+import { chromium, firefox, webkit } from "@playwright/test";
+
+// Browser regression for dragging photos onto attach boxes
+// (src/hooks/use-file-drop.ts, src/lib/media-upload.ts heicToJpeg):
+//   - a photo dropped on the box is added, as before;
+//   - a photo dropped beside the box (elsewhere on the form) goes into the
+//     only box in view instead of the browser opening the file;
+//   - with two boxes in view a stray drop is held and a message says where
+//     to drop it;
+//   - a drop that carries only a file:// link (Safari, dragging straight out
+//     of the Mac Photos app) is held and explained, never opened;
+//   - an email attachment the email app embeds in the drop (a data: or blob:
+//     address in its HTML, as Mail does) is taken as a file, on the box or
+//     beside it;
+//   - an email attachment the browser can't read (a promised file, or the
+//     email app's own address), or a webmail link, is explained, not ignored;
+//   - text and links can still be dropped into text boxes;
+//   - a HEIC photo the browser can read is turned into a JPEG;
+//   - a box that takes only spreadsheets (Import spreadsheet) gets a
+//     spreadsheet dropped anywhere on the page, but not a photo;
+//   - a message that says what to do stays open until it is closed, while a
+//     plain "Saved" closes itself (src/lib/toast-duration.ts).
+// FILE_DROP_BROWSER=chromium|firefox|webkit picks the engine.
+const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const browserName = process.env.FILE_DROP_BROWSER ?? "chromium";
+const browserType = { chromium, firefox, webkit }[browserName];
+if (!browserType) throw new Error(`Unsupported FILE_DROP_BROWSER=${browserName}; expected chromium, firefox, or webkit`);
+const freePort = async () => {
+  const server = createServer();
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  await new Promise(resolve => server.close(resolve));
+  return port;
+};
+const port = await freePort();
+const baseUrl = `http://127.0.0.1:${port}`;
+const vite = spawn("pnpm", ["exec", "vite", "--config", "vite.config.ts", "--host", "127.0.0.1"], {
+  cwd: root,
+  env: { ...process.env, PORT: String(port), BASE_PATH: "/", NODE_ENV: "test" },
+  stdio: ["ignore", "ignore", "pipe"],
+});
+let viteError = "";
+vite.stderr.on("data", chunk => { viteError += chunk.toString(); });
+let browser;
+
+async function waitForVite() {
+  for (let attempt = 0; attempt < 300; attempt++) {
+    if (vite.exitCode !== null) throw new Error(`Vite exited: ${viteError}`);
+    try { if ((await fetch(baseUrl)).ok) return; } catch { /* still starting */ }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error(`Vite did not start: ${viteError}`);
+}
+const executablePath = browserName === "chromium"
+  ? process.env.CHROMIUM_PATH ?? ["/opt/pw-browsers/chromium"].find(path => existsSync(path))
+  : undefined;
+
+// A 1x1 PNG.
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
+
+async function open(query = "", { clock = false } = {}) {
+  const page = await browser.newPage();
+  if (clock) await page.clock.install();
+  await page.goto(`${baseUrl}/tests/file-drop-harness.html${query}`, { waitUntil: "domcontentloaded" });
+  await page.getByTestId(query.includes("sheet-only") ? "sheet-button" : "media-first").waitFor();
+  return page;
+}
+
+/**
+ * Drags onto the element matching `selector` the way the operating system
+ * would: dragenter, dragover, then drop. `files` are {name, type} made from
+ * the PNG bytes; `data` adds string types such as text/uri-list. Returns
+ * whether the page took the drop (cancelled the drop event), which is what
+ * stops the browser opening the file itself.
+ */
+function drop(page, selector, { files = [], data = {} } = {}) {
+  return page.evaluate(({ selector, files, data, bytes }) => {
+    const transfer = new DataTransfer();
+    for (const file of files) transfer.items.add(new File([new Uint8Array(bytes)], file.name, { type: file.type }));
+    for (const [type, value] of Object.entries(data)) transfer.setData(type, value);
+    const target = document.querySelector(selector);
+    if (!target) throw new Error(`No element for ${selector}`);
+    let taken = false;
+    for (const type of ["dragenter", "dragover", "drop"]) {
+      const event = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer });
+      target.dispatchEvent(event);
+      if (type === "drop") taken = event.defaultPrevented;
+    }
+    return taken;
+  }, { selector, files, data, bytes: [...PNG] });
+}
+
+const filesIn = (page, name) => page.evaluate((name) => window.__files[name] ?? [], name);
+const toastText = (page) => page.locator("[data-state='open']").filter({ hasText: /./ }).allInnerTexts().then(texts => texts.join("\n"));
+
+async function test(name, run) {
+  try { await run(); console.log(`ok - ${name}`); } catch (error) { console.error(`not ok - ${name}`); throw error; }
+}
+
+try {
+  await waitForVite();
+  browser = await browserType.launch({ headless: true, executablePath });
+
+  await test("a photo dropped on the photos box is added", async () => {
+    const page = await open();
+    assert.equal(await drop(page, "[data-testid='media-first'] p", { files: [{ name: "leak.png", type: "image/png" }] }), true);
+    await page.waitForFunction(() => window.__files.first?.length === 1);
+    assert.deepEqual(await filesIn(page, "first"), [{ name: "leak.png", type: "image/png" }]);
+    await page.close();
+  });
+
+  await test("a photo dropped beside the box goes into the only box in view", async () => {
+    const page = await open();
+    assert.equal(await drop(page, "[data-testid='beside-first']", { files: [{ name: "beside.png", type: "image/png" }] }), true, "the browser must not open the file");
+    await page.waitForFunction(() => window.__files.first?.length === 1);
+    assert.deepEqual(await filesIn(page, "first"), [{ name: "beside.png", type: "image/png" }]);
+    // Anywhere on the page, too.
+    assert.equal(await drop(page, "[data-testid='page-heading']", { files: [{ name: "heading.png", type: "image/png" }] }), true);
+    await page.waitForFunction(() => window.__files.first?.length === 2);
+    await page.close();
+  });
+
+  await test("with two boxes in view a stray photo is held and the page says where to drop it", async () => {
+    const page = await open("?two", { clock: true });
+    assert.equal(await drop(page, "[data-testid='page-heading']", { files: [{ name: "stray.png", type: "image/png" }] }), true, "the browser must not open the file");
+    await page.getByText("Drop it on an upload box", { exact: true }).waitFor();
+    // The message says what to do, so it stays until it is closed.
+    await page.clock.runFor(60_000);
+    assert.equal(await page.getByText("Drop it on an upload box", { exact: true }).isVisible(), true, "an instruction stays open");
+    await page.getByRole("button", { name: "Close" }).click();
+    await page.getByText("Drop it on an upload box", { exact: true }).waitFor({ state: "detached" });
+    assert.deepEqual(await filesIn(page, "first"), []);
+    assert.deepEqual(await filesIn(page, "second"), []);
+    // Dropped on a box, it goes to that box only.
+    assert.equal(await drop(page, "[data-testid='media-second'] p", { files: [{ name: "second.png", type: "image/png" }] }), true);
+    await page.waitForFunction(() => window.__files.second?.length === 1);
+    assert.deepEqual(await filesIn(page, "first"), []);
+    await page.close();
+  });
+
+  await test("a Photos library link with no photo is held and explained, not opened", async () => {
+    const page = await open();
+    const link = "file:///Users/someone/Pictures/Photos%20Library.photoslibrary/originals/7/7F67F344.jpeg";
+    assert.equal(await drop(page, "[data-testid='beside-first']", { data: { "text/uri-list": link } }), true, "the browser must not open the file link");
+    await page.getByText("The file didn't come through", { exact: true }).waitFor();
+    assert.match(await toastText(page), /onto your desktop first/);
+    assert.deepEqual(await filesIn(page, "first"), []);
+    await page.close();
+  });
+
+  await test("an email attachment embedded in the drop is added", async () => {
+    const page = await open();
+    const inline = `data:image/png;base64,${PNG.toString("base64")}`;
+    // On the box: only HTML comes with the drag, no file.
+    assert.equal(await drop(page, "[data-testid='media-first'] p", {
+      data: { "text/html": `<a href="${inline}" download="Light fitting.png">Light fitting.png</a>` },
+    }), true);
+    await page.waitForFunction(() => window.__files.first?.length === 1);
+    // Beside the box, from a blob: address the page can read.
+    const blobUrl = await page.evaluate((bytes) => URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "image/png" })), [...PNG]);
+    assert.equal(await drop(page, "[data-testid='beside-first']", {
+      data: { "text/html": `<img src="${blobUrl}" alt="photo">`, "text/uri-list": blobUrl },
+    }), true);
+    await page.waitForFunction(() => window.__files.first?.length === 2);
+    assert.deepEqual(await filesIn(page, "first"), [
+      { name: "Light fitting.png", type: "image/png" },
+      { name: "photo.png", type: "image/png" },
+    ]);
+    await page.close();
+  });
+
+  await test("an email attachment the browser can't read is explained, not ignored", async () => {
+    const page = await open();
+    // Mail's own address for the attachment, which the page can't open.
+    assert.equal(await drop(page, "[data-testid='media-first'] p", {
+      data: { "text/html": `<img src="blob:${baseUrl}/00000000-0000-0000-0000-000000000000">`, "text/uri-list": "message:%3C1234@example.com%3E" },
+    }), true, "the box takes the drag instead of ignoring it");
+    await page.getByText("The file didn't come through", { exact: true }).waitFor();
+    assert.match(await toastText(page), /onto your desktop first/);
+    assert.deepEqual(await filesIn(page, "first"), []);
+    await page.close();
+  });
+
+  await test("a webmail attachment link says to download it first", async () => {
+    const page = await open();
+    assert.equal(await drop(page, "[data-testid='media-first'] p", {
+      data: { "text/uri-list": "https://outlook.office.com/mail/attachment/abc", "text/plain": "https://outlook.office.com/mail/attachment/abc" },
+    }), true);
+    await page.getByText("That's a link, not a file", { exact: true }).waitFor();
+    assert.match(await toastText(page), /Download the attachment first/);
+    assert.deepEqual(await filesIn(page, "first"), []);
+    await page.close();
+  });
+
+  await test("text and links can still be dropped into a text box", async () => {
+    const page = await open();
+    assert.equal(await drop(page, "input[aria-label='first title']", { data: { "text/plain": "Leaking pipe" } }), false);
+    assert.equal(await drop(page, "input[aria-label='first title']", { data: { "text/uri-list": "https://example.com/", "text/plain": "https://example.com/" } }), false);
+    await page.close();
+  });
+
+  await test("a HEIC photo the browser can read becomes a JPEG", async () => {
+    const page = await open();
+    // Image bytes the browser can decode, named and typed as HEIC (the Mac
+    // Photos app's usual format, which Safari can read).
+    assert.equal(await drop(page, "[data-testid='media-first'] p", { files: [{ name: "IMG_0001.HEIC", type: "image/heic" }] }), true);
+    await page.waitForFunction(() => window.__files.first?.length === 1);
+    assert.deepEqual(await filesIn(page, "first"), [{ name: "IMG_0001.jpg", type: "image/jpeg" }]);
+    await page.close();
+  });
+
+  await test("a plain message closes itself after long enough to read", async () => {
+    const page = await open("", { clock: true });
+    await page.getByRole("button", { name: "Show saved message" }).click();
+    const saved = page.getByText("Saved", { exact: true });
+    await saved.waitFor();
+    await page.clock.runFor(3_000);
+    assert.equal(await saved.isVisible(), true, "still up after 3 seconds");
+    await page.clock.runFor(10_000);
+    await saved.waitFor({ state: "detached" });
+    await page.close();
+  });
+
+  await test("a spreadsheet dropped anywhere goes to the Import spreadsheet button", async () => {
+    const page = await open("?sheet-only");
+    assert.equal(await drop(page, "[data-testid='page-heading']", { files: [{ name: "checks.xlsx", type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }] }), true);
+    await page.waitForFunction(() => window.__files.sheet?.length === 1);
+    assert.deepEqual(await filesIn(page, "sheet"), [{ name: "checks.xlsx", type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }]);
+    // A photo isn't a spreadsheet, so it isn't sent there.
+    assert.equal(await drop(page, "[data-testid='page-heading']", { files: [{ name: "photo.png", type: "image/png" }] }), true, "the browser must not open the file");
+    await page.getByText("Drop it on an upload box", { exact: true }).waitFor();
+    assert.equal((await filesIn(page, "sheet")).length, 1);
+    await page.close();
+  });
+
+  await test("beside a photos box and an import button, each file goes where it belongs", async () => {
+    const page = await open("?sheet");
+    assert.equal(await drop(page, "[data-testid='page-heading']", { files: [{ name: "leak.png", type: "image/png" }] }), true);
+    await page.waitForFunction(() => window.__files.first?.length === 1);
+    assert.deepEqual(await filesIn(page, "sheet"), [], "the import button doesn't take photos");
+    // Both take a spreadsheet, so the page asks where it should go.
+    assert.equal(await drop(page, "[data-testid='page-heading']", { files: [{ name: "checks.csv", type: "text/csv" }] }), true);
+    await page.getByText("Drop it on an upload box", { exact: true }).waitFor();
+    assert.deepEqual(await filesIn(page, "sheet"), []);
+    await page.close();
+  });
+
+  console.log(`File drop browser checks passed (${browserName}).`);
+} finally {
+  await browser?.close();
+  vite.kill();
+}

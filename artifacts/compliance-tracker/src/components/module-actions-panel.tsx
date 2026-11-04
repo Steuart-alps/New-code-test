@@ -5,6 +5,7 @@ import { CheckCircle2, ChevronDown, CircleDot, Loader2, Plus, Wrench } from "luc
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,7 +16,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
 import { TrackEvidencePanel } from "@/components/track-evidence-panel";
+import { ActionMedia, reportActionMediaResult, uploadActionMedia } from "@/components/action-media";
+import { PendingMediaPicker } from "@/components/pending-media-picker";
 import { cn } from "@/lib/utils";
+import { AssigneeField, assigneeFields, type AssigneeValue } from "@/components/assignee-field";
 
 type Severity = "monitor" | "action_required" | "urgent";
 type ActionStatus = "open" | "in_progress" | "resolved";
@@ -27,10 +31,13 @@ export interface TrackAction {
   status: ActionStatus;
   siteId?: number | null;
   ownerName?: string | null;
+  assigneeUserId?: number | null;
   ownerDefault?: string | null;
   dueDate?: string | null;
   remedialAction?: string | null;
   evidenceReference?: string | null;
+  /** Photos and videos attached as evidence. */
+  mediaUrls?: string[] | null;
   resolutionNotes?: string | null;
   resolvedByName?: string | null;
   resolverSignature?: string | null;
@@ -39,9 +46,11 @@ export interface TrackAction {
   sourceKind?: string | null;
   sourceRecordId?: number | null;
   fixTrackIssueId?: number | null;
-  fixTrackDisposition?: "linked" | "not_needed" | null;
+  fixTrackDisposition?: "linked" | "not_needed" | "parallel" | null;
   provenance?: "product_default" | "template" | "one_off" | null;
   templateId?: number | null;
+  draftSource?: "ai" | "manual" | null;
+  confirmedByName?: string | null;
   createdAt?: string | null;
 }
 
@@ -68,7 +77,7 @@ interface RequiredActionTemplate {
   active?: boolean;
 }
 
-const emptyDraft = { title: "", instruction: "", severity: "monitor" as Severity, siteId: "", ownerName: "", dueDate: "", templateId: "" };
+const emptyDraft = { title: "", instruction: "", severity: "monitor" as Severity, siteId: "", owner: { assigneeUserId: null, name: "" } as AssigneeValue, dueDate: "", templateId: "" };
 type ResolutionValues = { remedialAction: string; evidenceReference: string; resolutionNotes: string };
 const severityStyles: Record<Severity, string> = {
   monitor: "bg-slate-100 text-slate-700 border-slate-200",
@@ -92,6 +101,12 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
   const [showCreate, setShowCreate] = useState(false);
   const [showResolved, setShowResolved] = useState(false);
   const [draft, setDraft] = useState(emptyDraft);
+  // A new action starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
+  const newDraft = () => ({ ...emptyDraft, siteId: workingSiteId ? String(workingSiteId) : "" });
+  // Photos and videos chosen in the "Add action" form, uploaded once it is created.
+  const [draftMedia, setDraftMedia] = useState<File[]>([]);
+  const [mediaStatus, setMediaStatus] = useState<string | null>(null);
   const [resolution, setResolution] = useState<Record<string, ResolutionValues>>({});
   const [pendingSignature, setPendingSignature] = useState<{ action: TrackAction; values: ResolutionValues } | null>(null);
 
@@ -121,6 +136,12 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
   }, [activeClientId, moduleKey, toast]);
 
   useEffect(() => { void loadActions(); }, [loadActions]);
+  // Actions raised elsewhere on the page, such as by Say it.
+  useEffect(() => {
+    const refresh = () => { void loadActions(true); };
+    window.addEventListener("track-actions-changed", refresh);
+    return () => window.removeEventListener("track-actions-changed", refresh);
+  }, [loadActions]);
   useEffect(() => {
     if (moduleKey !== "kitchen") return;
     const refresh = () => { void loadActions(true); };
@@ -144,7 +165,7 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
 
   function selectTemplate(templateId: string) {
     if (templateId === "one-off") {
-      setDraft(emptyDraft);
+      setDraft(newDraft());
       return;
     }
     const template = templates.find(item => String(item.id) === templateId);
@@ -158,7 +179,7 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
       instruction: template.instruction ?? "",
       severity: template.severity ?? "action_required",
       siteId: template.siteId ? String(template.siteId) : "",
-      ownerName: template.ownerDefault ?? template.ownerName ?? template.defaultOwner ?? "",
+      owner: { assigneeUserId: null, name: template.ownerDefault ?? template.ownerName ?? template.defaultOwner ?? "" },
       dueDate,
       templateId,
     });
@@ -175,21 +196,32 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
           module: moduleKey,
           templateId: Number(draft.templateId),
           siteId: draft.siteId ? Number(draft.siteId) : null,
+          ...(draft.owner.assigneeUserId != null ? { assigneeUserId: draft.owner.assigneeUserId } : {}),
         } : {
           module: moduleKey,
           title: draft.title.trim(),
           severity: draft.severity,
           siteId: draft.siteId ? Number(draft.siteId) : null,
-          ...(draft.ownerName.trim() ? { ownerName: draft.ownerName.trim() } : {}),
+          ...(draft.owner.assigneeUserId != null
+            ? { assigneeUserId: draft.owner.assigneeUserId }
+            : draft.owner.name.trim() ? { ownerName: draft.owner.name.trim() } : {}),
           ...(draft.dueDate ? { dueDate: draft.dueDate } : {}),
           instruction: draft.instruction.trim() || null,
         }),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(errorMessage(data, "Unable to create action"));
-      setDraft(emptyDraft);
-      setShowCreate(false);
       toast({ title: "Action created" });
+      if (draftMedia.length > 0 && data?.id != null) {
+        try {
+          reportActionMediaResult(toast, await uploadActionMedia(data.id, draftMedia, setMediaStatus));
+        } finally {
+          setMediaStatus(null);
+        }
+      }
+      setDraft(emptyDraft);
+      setDraftMedia([]);
+      setShowCreate(false);
       await loadActions();
     } catch (error) {
       toast({ title: "Couldn't create action", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
@@ -247,26 +279,27 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
             </CardTitle>
             <CardDescription className="mt-1">Corrective actions raised from this module stay with its operational records.</CardDescription>
           </div>
-          {canMutate && <Button type="button" size="sm" className="rounded-sm self-start" onClick={() => setShowCreate(value => !value)}><Plus className="mr-1.5 h-4 w-4" />Add action</Button>}
+          {canMutate && <Button type="button" size="sm" className="rounded-sm self-start" onClick={() => { if (!showCreate && draft === emptyDraft) setDraft(newDraft()); setShowCreate(value => !value); }}><Plus className="mr-1.5 h-4 w-4" />Add action</Button>}
         </CardHeader>
         <CardContent className="space-y-4">
           {showCreate && canMutate && (
             <form onSubmit={createAction} className="grid gap-3 rounded-sm border bg-muted/30 p-4 sm:grid-cols-2">
                <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="action-template">Start from a required-action template <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.templateId || "one-off"} onValueChange={selectTemplate}><SelectTrigger id="action-template"><SelectValue placeholder="Create a one-off action" /></SelectTrigger><SelectContent><SelectItem value="one-off">One-off action</SelectItem>{templates.map(template => <SelectItem key={template.id} value={String(template.id)}>{template.title}</SelectItem>)}</SelectContent></Select>{draft.templateId && <p className="text-xs text-muted-foreground">The current approved template is copied into the action as an immutable snapshot. Choose one-off to customise it first.</p>}</div>
-               <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="action-title">Action title</Label><Input id="action-title" required disabled={!!draft.templateId} value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} placeholder="Describe the corrective action" /></div>
+               <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="action-title">Action title</Label><Input id="action-title" dictation required disabled={!!draft.templateId} value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} placeholder="Describe the corrective action" /></div>
                <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="action-instruction">Instruction snapshot <span className="text-muted-foreground">(optional)</span></Label><Textarea id="action-instruction" disabled={!!draft.templateId} value={draft.instruction} onChange={event => setDraft({ ...draft, instruction: event.target.value })} placeholder="What needs to be done and how" /></div>
                <div className="space-y-1.5"><Label htmlFor="action-severity">Severity</Label><Select disabled={!!draft.templateId} value={draft.severity} onValueChange={value => setDraft({ ...draft, severity: value as Severity })}><SelectTrigger id="action-severity"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="monitor">Monitor</SelectItem><SelectItem value="action_required">Action required</SelectItem><SelectItem value="urgent">Urgent</SelectItem></SelectContent></Select></div>
                <div className="space-y-1.5"><Label htmlFor="action-site">Site <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.siteId || "none"} onValueChange={value => setDraft({ ...draft, siteId: value === "none" ? "" : value, templateId: "" })}><SelectTrigger id="action-site"><SelectValue placeholder="No site" /></SelectTrigger><SelectContent><SelectItem value="none">No site</SelectItem>{sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}</SelectContent></Select></div>
-               <div className="space-y-1.5"><Label htmlFor="action-owner">Owner <span className="text-muted-foreground">(optional)</span></Label><Input id="action-owner" disabled={!!draft.templateId} value={draft.ownerName} onChange={event => setDraft({ ...draft, ownerName: event.target.value })} /></div>
+               <div className="space-y-1.5"><Label htmlFor="action-owner">Assigned to <span className="text-muted-foreground">(optional)</span></Label><AssigneeField id="action-owner" siteId={draft.siteId ? Number(draft.siteId) : null} value={draft.owner} onChange={owner => setDraft({ ...draft, owner })} /></div>
                <div className="space-y-1.5"><Label htmlFor="action-due-date">Due date <span className="text-muted-foreground">(optional)</span></Label><Input id="action-due-date" disabled={!!draft.templateId} type="date" value={draft.dueDate} onChange={event => setDraft({ ...draft, dueDate: event.target.value })} /></div>
-              <div className="flex gap-2 sm:col-span-2"><Button type="submit" disabled={submitting}>{submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create action</Button><Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button></div>
+               <div className="sm:col-span-2"><PendingMediaPicker files={draftMedia} onChange={setDraftMedia} disabled={submitting} testId="new-action-media" /></div>
+              <div className="flex flex-wrap items-center gap-2 sm:col-span-2"><Button type="submit" disabled={submitting}>{submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create action</Button><Button type="button" variant="outline" disabled={submitting} onClick={() => { setShowCreate(false); setDraftMedia([]); }}>Cancel</Button>{mediaStatus && <span className="text-xs text-muted-foreground" role="status">{mediaStatus}</span>}</div>
             </form>
           )}
 
           <div className="space-y-3" aria-live="polite">
             {loading ? <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading actions…</div> : unresolved.length === 0 ? <p className="rounded-sm border border-dashed py-4 text-center text-sm text-muted-foreground">No unresolved actions for this module.</p> : unresolved.map(action => (
               <div key={action.id}>
-                <ActionRow action={action} sites={sites} siteName={sites.find(site => site.id === action.siteId)?.name} canMutate={canMutate} submitting={submitting} resolution={resolution[String(action.id)]} onResolutionChange={value => setResolution({ ...resolution, [String(action.id)]: value })} onStart={() => updateAction(action, { status: "in_progress" })} onUpdate={patch => updateAction(action, patch)} onResolve={values => action.fixTrackIssueId ? toast({ title: "Complete this action in FixTrack", description: `Resolve FixTrack issue #${action.fixTrackIssueId} to update this module automatically.` }) : setPendingSignature({ action, values })} />
+                <ActionRow action={action} sites={sites} siteName={sites.find(site => site.id === action.siteId)?.name} canMutate={canMutate} submitting={submitting} resolution={resolution[String(action.id)]} onResolutionChange={value => setResolution({ ...resolution, [String(action.id)]: value })} onMediaChange={mediaUrls => setActions(current => current.map(item => item.id === action.id ? { ...item, mediaUrls } : item))} onStart={() => updateAction(action, { status: "in_progress" })} onUpdate={patch => updateAction(action, patch)} onResolve={values => action.fixTrackIssueId && action.fixTrackDisposition !== "parallel" ? toast({ title: "Complete this action in FixTrack", description: `Resolve FixTrack issue #${action.fixTrackIssueId} to update this module automatically.` }) : setPendingSignature({ action, values })} />
                 {moduleKey !== "green" && <FixTrackChoice action={action} canMutate={canMutate} submitting={submitting} onDecision={create => decideFixTrack(action, create)} />}
               </div>
             ))}
@@ -294,27 +327,32 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
 }
 
 function FixTrackChoice({ action, canMutate, submitting, onDecision }: { action: TrackAction; canMutate: boolean; submitting: boolean; onDecision: (create: boolean) => void }) {
-  if (action.sourceKind?.startsWith("kitchen_temperature_")) return null;
+  if (action.fixTrackIssueId && action.fixTrackDisposition === "parallel") return <div className="-mt-3 rounded-b-sm border-x border-b bg-blue-50 px-4 pb-3 pt-2 text-xs text-blue-900">Repair work is tracked as <a className="font-semibold underline" href={`/fix-track/${action.fixTrackIssueId}`}>FixTrack issue #{action.fixTrackIssueId}</a>. A manager still verifies and resolves this action here, which also resolves the issue.</div>;
   if (action.fixTrackIssueId) return <div className="-mt-3 rounded-b-sm border-x border-b bg-blue-50 px-4 pb-3 pt-2 text-xs text-blue-900">Linked to <a className="font-semibold underline" href={`/fix-track/${action.fixTrackIssueId}`}>FixTrack issue #{action.fixTrackIssueId}</a>. Resolving it will complete this action.</div>;
   if (!canMutate) return null;
-  return <div className="-mt-3 flex flex-wrap items-center gap-2 rounded-b-sm border-x border-b bg-slate-50 px-4 pb-3 pt-2 text-xs"><span>{action.fixTrackDisposition === "not_needed" ? "Kept in this track. Add it to FixTrack now?" : "Does this action require FixTrack repair or contractor work?"}</span><Button type="button" size="sm" variant="outline" className="h-7" disabled={submitting} onClick={() => onDecision(true)}>Yes, add to FixTrack</Button>{action.fixTrackDisposition !== "not_needed" && <Button type="button" size="sm" variant="ghost" className="h-7" disabled={submitting} onClick={() => onDecision(false)}>No</Button>}</div>;
+  return <div className="-mt-3 flex flex-wrap items-center gap-2 rounded-b-sm border-x border-b bg-slate-50 px-4 pb-3 pt-2 text-xs"><span>{action.fixTrackDisposition === "not_needed" ? "Kept in this track. Add it to FixTrack now?" : "Does this need a repair or a contractor?"}</span><Button type="button" size="sm" variant="outline" className="h-7" disabled={submitting} onClick={() => onDecision(true)}>Send to FixTrack</Button>{action.fixTrackDisposition !== "not_needed" && <Button type="button" size="sm" variant="ghost" className="h-7" disabled={submitting} onClick={() => onDecision(false)}>No</Button>}</div>;
 }
 
-function ActionRow({ action, sites, siteName, canMutate, submitting, resolution, onResolutionChange, onStart, onUpdate, onResolve }: { action: TrackAction; sites: Site[]; siteName?: string; canMutate: boolean; submitting: boolean; resolution?: { remedialAction: string; evidenceReference: string; resolutionNotes: string }; onResolutionChange?: (value: { remedialAction: string; evidenceReference: string; resolutionNotes: string }) => void; onStart?: () => void; onUpdate?: (patch: Record<string, unknown>) => void; onResolve?: (value: { remedialAction: string; evidenceReference: string; resolutionNotes: string }) => void }) {
+function ActionRow({ action, sites, siteName, canMutate, submitting, resolution, onResolutionChange, onMediaChange, onStart, onUpdate, onResolve }: { action: TrackAction; sites: Site[]; siteName?: string; canMutate: boolean; submitting: boolean; resolution?: { remedialAction: string; evidenceReference: string; resolutionNotes: string }; onResolutionChange?: (value: { remedialAction: string; evidenceReference: string; resolutionNotes: string }) => void; onMediaChange?: (mediaUrls: string[]) => void; onStart?: () => void; onUpdate?: (patch: Record<string, unknown>) => void; onResolve?: (value: { remedialAction: string; evidenceReference: string; resolutionNotes: string }) => void }) {
   const [resolving, setResolving] = useState(false);
   const [editing, setEditing] = useState(false);
   const [details, setDetails] = useState({
     title: action.title,
     severity: action.severity,
     siteId: action.siteId ? String(action.siteId) : "",
-    ownerName: action.ownerName ?? "",
+    owner: { assigneeUserId: action.assigneeUserId ?? null, name: action.ownerName ?? "" } as AssigneeValue,
     dueDate: action.dueDate?.slice(0, 10) ?? "",
   });
   const values = resolution ?? { remedialAction: "", evidenceReference: "", resolutionNotes: "" };
-  const canResolve = values.remedialAction.trim() && values.evidenceReference.trim() && values.resolutionNotes.trim();
+  const mediaUrls = action.mediaUrls ?? [];
+  // Attached photos or videos count as the evidence when no reference is typed.
+  const mediaEvidence = mediaUrls.length === 0 ? "" : `${mediaUrls.length} ${mediaUrls.length === 1 ? "photo or video" : "photos and videos"} attached in ComplyTrack`;
+  const canResolve = values.remedialAction.trim() && (values.evidenceReference.trim() || mediaEvidence) && values.resolutionNotes.trim();
+  const media = <div className="mt-3 border-t pt-3"><ActionMedia actionId={action.id} mediaUrls={mediaUrls} canAdd={canMutate && action.status !== "resolved" && !!onMediaChange} onChange={urls => onMediaChange?.(urls)} /></div>;
   const due = action.dueDate ? new Date(`${action.dueDate}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : null;
   const fieldId = `action-${action.id}`;
-  const provenance = action.provenance === "product_default" || action.sourceKind ? "Product default" : action.provenance === "template" || action.templateId ? "Client template" : "One-off";
+  const fromReport = !!action.sourceKind?.startsWith("inspection_report:");
+  const provenance = fromReport ? "From a report" : action.provenance === "product_default" || action.sourceKind ? "Product default" : action.provenance === "template" || action.templateId ? "Client template" : "One-off";
   const instruction = action.instructionSnapshot ?? action.instruction;
-  return <article className="rounded-sm border bg-white p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="font-medium text-[#162D42]">{action.title}</h3><Badge variant="outline" className={cn("capitalize", severityStyles[action.severity] ?? severityStyles.monitor)}>{action.severity.replace("_", " ")}</Badge><Badge variant="outline" className="capitalize">{action.status.replace("_", " ")}</Badge><Badge variant="secondary">{provenance}</Badge></div><p className="mt-1.5 text-xs text-muted-foreground">{[siteName, action.ownerName && `Owner: ${action.ownerName}`, due && `Due: ${due}`].filter(Boolean).join(" · ") || "No site, owner or due date recorded"}</p>{instruction && <p className="mt-2 rounded-sm bg-muted/50 px-2.5 py-2 text-sm text-muted-foreground"><strong className="text-foreground">Instruction snapshot:</strong> {instruction}</p>}</div>{canMutate && <div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" aria-expanded={editing} onClick={() => setEditing(value => !value)}>Edit details</Button>{action.status === "open" && <Button type="button" size="sm" variant="outline" disabled={submitting} onClick={onStart}><CircleDot className="mr-1.5 h-4 w-4" />Start action</Button>}</div>}</div>{editing && canMutate && <div className="mt-3 grid gap-3 border-t pt-3 sm:grid-cols-2"><div className="space-y-1.5 sm:col-span-2"><Label htmlFor={`${fieldId}-title`}>Action title</Label><Input id={`${fieldId}-title`} value={details.title} onChange={event => setDetails({ ...details, title: event.target.value })} /></div><div className="space-y-1.5"><Label htmlFor={`${fieldId}-severity`}>Severity</Label><Select value={details.severity} onValueChange={value => setDetails({ ...details, severity: value as Severity })}><SelectTrigger id={`${fieldId}-severity`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="monitor">Monitor</SelectItem><SelectItem value="action_required">Action required</SelectItem><SelectItem value="urgent">Urgent</SelectItem></SelectContent></Select></div><div className="space-y-1.5"><Label htmlFor={`${fieldId}-site`}>Site <span className="text-muted-foreground">(optional)</span></Label><Select value={details.siteId || "none"} onValueChange={value => setDetails({ ...details, siteId: value === "none" ? "" : value })}><SelectTrigger id={`${fieldId}-site`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">No site</SelectItem>{sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-1.5"><Label htmlFor={`${fieldId}-owner`}>Owner <span className="text-muted-foreground">(optional)</span></Label><Input id={`${fieldId}-owner`} value={details.ownerName} onChange={event => setDetails({ ...details, ownerName: event.target.value })} /></div><div className="space-y-1.5"><Label htmlFor={`${fieldId}-due`}>Due date <span className="text-muted-foreground">(optional)</span></Label><Input id={`${fieldId}-due`} type="date" value={details.dueDate} onChange={event => setDetails({ ...details, dueDate: event.target.value })} /></div><div className="flex gap-2 sm:col-span-2"><Button type="button" size="sm" disabled={submitting || !details.title.trim()} onClick={() => onUpdate?.({ title: details.title.trim(), severity: details.severity, siteId: details.siteId ? Number(details.siteId) : null, ownerName: details.ownerName.trim() || null, dueDate: details.dueDate || null })}>{submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save details</Button><Button type="button" size="sm" variant="outline" onClick={() => setEditing(false)}>Cancel</Button></div></div>}{action.status === "resolved" ? <div className="mt-3 border-t pt-3 text-sm text-muted-foreground space-y-1"><p><strong className="text-foreground">Remedial action:</strong> {action.remedialAction || "Not recorded"}</p><p><strong className="text-foreground">Evidence:</strong> {action.evidenceReference || "Not recorded"}</p><p><strong className="text-foreground">Resolution notes:</strong> {action.resolutionNotes || "Not recorded"}</p></div> : canMutate && <div className="mt-3 border-t pt-3"><Button type="button" size="sm" variant="outline" onClick={() => setResolving(value => !value)}><CheckCircle2 className="mr-1.5 h-4 w-4" />Resolve action</Button>{resolving && <div className="mt-3 grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label>Remedial action</Label><Textarea value={values.remedialAction} onChange={event => onResolutionChange?.({ ...values, remedialAction: event.target.value })} /></div><div className="space-y-1.5"><Label>Evidence reference</Label><Input value={values.evidenceReference} onChange={event => onResolutionChange?.({ ...values, evidenceReference: event.target.value })} placeholder="Photo, record or document reference" /></div><div className="space-y-1.5 sm:col-span-2"><Label>Resolution notes</Label><Textarea value={values.resolutionNotes} onChange={event => onResolutionChange?.({ ...values, resolutionNotes: event.target.value })} /></div><div><Button type="button" size="sm" disabled={submitting || !canResolve} onClick={() => onResolve?.(values)}>{submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Confirm resolution</Button></div></div>}</div>}</article>;
+  return <article className="rounded-sm border bg-white p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="font-bold text-[#162D42]">{action.title}</h3><Badge variant="outline" className={cn("capitalize", severityStyles[action.severity] ?? severityStyles.monitor)}>{action.severity.replace("_", " ")}</Badge><Badge variant="outline" className="capitalize">{action.status.replace("_", " ")}</Badge><Badge variant="secondary">{provenance}</Badge></div><p className="mt-1.5 text-xs text-muted-foreground">{[siteName, action.ownerName && `Assigned to: ${action.ownerName}`, due && `Due: ${due}`].filter(Boolean).join(" · ") || "No site, owner or due date recorded"}</p>{instruction && <p className="mt-2 whitespace-pre-line rounded-sm bg-muted/50 px-2.5 py-2 text-sm text-muted-foreground"><strong className="text-foreground">Instruction snapshot:</strong> {instruction}</p>}{fromReport && <p className="mt-1.5 text-xs text-muted-foreground"><a className="font-medium underline underline-offset-2" href={`/report-actions?report=${action.sourceRecordId}`}>See the report</a>{action.confirmedByName && <> · {action.draftSource === "ai" ? "AI-drafted, confirmed by" : "Confirmed by"} {action.confirmedByName}</>}</p>}</div>{canMutate && <div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" aria-expanded={editing} onClick={() => setEditing(value => !value)}>Edit details</Button>{action.status === "open" && <Button type="button" size="sm" variant="outline" disabled={submitting} onClick={onStart}><CircleDot className="mr-1.5 h-4 w-4" />Start action</Button>}</div>}</div>{editing && canMutate && <div className="mt-3 grid gap-3 border-t pt-3 sm:grid-cols-2"><div className="space-y-1.5 sm:col-span-2"><Label htmlFor={`${fieldId}-title`}>Action title</Label><Input id={`${fieldId}-title`} value={details.title} onChange={event => setDetails({ ...details, title: event.target.value })} /></div><div className="space-y-1.5"><Label htmlFor={`${fieldId}-severity`}>Severity</Label><Select value={details.severity} onValueChange={value => setDetails({ ...details, severity: value as Severity })}><SelectTrigger id={`${fieldId}-severity`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="monitor">Monitor</SelectItem><SelectItem value="action_required">Action required</SelectItem><SelectItem value="urgent">Urgent</SelectItem></SelectContent></Select></div><div className="space-y-1.5"><Label htmlFor={`${fieldId}-site`}>Site <span className="text-muted-foreground">(optional)</span></Label><Select value={details.siteId || "none"} onValueChange={value => setDetails({ ...details, siteId: value === "none" ? "" : value })}><SelectTrigger id={`${fieldId}-site`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">No site</SelectItem>{sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-1.5"><Label htmlFor={`${fieldId}-owner`}>Assigned to <span className="text-muted-foreground">(optional)</span></Label><AssigneeField id={`${fieldId}-owner`} siteId={details.siteId ? Number(details.siteId) : null} value={details.owner} onChange={owner => setDetails({ ...details, owner })} /></div><div className="space-y-1.5"><Label htmlFor={`${fieldId}-due`}>Due date <span className="text-muted-foreground">(optional)</span></Label><Input id={`${fieldId}-due`} type="date" value={details.dueDate} onChange={event => setDetails({ ...details, dueDate: event.target.value })} /></div><div className="flex gap-2 sm:col-span-2"><Button type="button" size="sm" disabled={submitting || !details.title.trim()} onClick={() => onUpdate?.({ title: details.title.trim(), severity: details.severity, siteId: details.siteId ? Number(details.siteId) : null, ...assigneeFields(details.owner, "ownerName"), dueDate: details.dueDate || null })}>{submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save details</Button><Button type="button" size="sm" variant="outline" onClick={() => setEditing(false)}>Cancel</Button></div></div>}{(mediaUrls.length > 0 || (canMutate && action.status !== "resolved")) && media}{action.status === "resolved" ? <div className="mt-3 border-t pt-3 text-sm text-muted-foreground space-y-1"><p><strong className="text-foreground">Remedial action:</strong> {action.remedialAction || "Not recorded"}</p><p><strong className="text-foreground">Evidence:</strong> {action.evidenceReference || "Not recorded"}</p><p><strong className="text-foreground">Resolution notes:</strong> {action.resolutionNotes || "Not recorded"}</p></div> : canMutate && <div className="mt-3 border-t pt-3"><Button type="button" size="sm" variant="outline" onClick={() => setResolving(value => !value)}><CheckCircle2 className="mr-1.5 h-4 w-4" />Resolve action</Button>{resolving && <div className="mt-3 grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label>Remedial action</Label><Textarea value={values.remedialAction} onChange={event => onResolutionChange?.({ ...values, remedialAction: event.target.value })} /></div><div className="space-y-1.5"><Label>Evidence reference{mediaEvidence && <span className="text-muted-foreground"> (optional, photos are attached)</span>}</Label><Input value={values.evidenceReference} onChange={event => onResolutionChange?.({ ...values, evidenceReference: event.target.value })} placeholder={mediaEvidence ? "Anything else, e.g. a certificate number" : "Record or document reference, or add a photo above"} /></div><div className="space-y-1.5 sm:col-span-2"><Label>Resolution notes</Label><Textarea value={values.resolutionNotes} onChange={event => onResolutionChange?.({ ...values, resolutionNotes: event.target.value })} /></div><div><Button type="button" size="sm" disabled={submitting || !canResolve} onClick={() => onResolve?.({ ...values, evidenceReference: values.evidenceReference.trim() || mediaEvidence })}>{submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Confirm resolution</Button></div></div>}</div>}</article>;
 }

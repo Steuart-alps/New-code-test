@@ -1,0 +1,62 @@
+name: Certificate reader
+
+# Checks reading several certificate files at once: one request for all of
+# them, each certificate checked and saved in turn with its pages joined into
+# one PDF, files that cannot be read named, and filling in by hand without the
+# AI add-on. Runs only when that code or its test changes, so ordinary PRs
+# spend no extra CI minutes on it.
+on:
+  pull_request:
+    paths:
+      - "artifacts/compliance-tracker/src/components/certificate-reader-dialog.tsx"
+      - "artifacts/compliance-tracker/src/lib/certificate-files.ts"
+      - "artifacts/compliance-tracker/src/hooks/use-file-drop.ts"
+      - "artifacts/compliance-tracker/tests/certificate-reader-browser.test.mjs"
+      - "artifacts/compliance-tracker/tests/certificate-reader-harness.tsx"
+      - "artifacts/compliance-tracker/tests/certificate-reader-harness.html"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/certificate-reader-browser.yml"
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/compliance-tracker/src/components/certificate-reader-dialog.tsx"
+      - "artifacts/compliance-tracker/src/lib/certificate-files.ts"
+      - "artifacts/compliance-tracker/src/hooks/use-file-drop.ts"
+      - "artifacts/compliance-tracker/tests/certificate-reader-browser.test.mjs"
+      - "artifacts/compliance-tracker/tests/certificate-reader-harness.tsx"
+      - "artifacts/compliance-tracker/tests/certificate-reader-harness.html"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/certificate-reader-browser.yml"
+  workflow_dispatch:
+
+jobs:
+  certificate-reader:
+    name: Certificate reader (Chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run certificate reader checks
+        run: pnpm --filter @workspace/compliance-tracker run test:certificate-reader-browser

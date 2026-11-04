@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import { apiFetch } from "@/lib/api";
+import { takeLinkParams } from "@/lib/deep-link";
 import {
   useListLegionellaChecks,
   getListLegionellaChecksQueryKey,
@@ -21,6 +22,7 @@ import {
   useUpdateLegionellaConfig,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useSayItSite } from "@/components/say-it-button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -34,12 +36,27 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AuditLog } from "@/components/audit-log";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
-import { Droplets, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX, Filter, Pencil, Trash2, Lock, ThermometerSun, Settings, X, XCircle, ShieldAlert } from "lucide-react";
+import { Droplets, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX, Filter, Pencil, Trash2, Lock, ThermometerSun, Settings, X, XCircle, ShieldAlert, Footprints } from "lucide-react";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { cn } from "@/lib/utils";
-import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { useAuth, useCanAdmin, useCanManageUsers } from "@/context/auth-context";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
+import { WalkRoundDialog, type WalkRoundPoint } from "@/components/walk-round-dialog";
+import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { useSiteFilterId, useWorkingSiteId } from "@/hooks/use-working-site";
+import { sortByLabel } from "@/lib/sort-options";
+import { TrackContractorChecks } from "@/components/track-contractor-checks";
+import { RecordSignedBy } from "@/components/record-signature";
+import { ImportCsvButton } from "@/components/import-csv-dialog";
+import {
+  LegionellaConditionQuestions, LegionellaFindingsSummary, legionellaFindingsComplete, legionellaFindingsPayload,
+} from "@/components/legionella-condition-questions";
+import type { LegionellaFindings } from "@workspace/api-zod/legionella-condition";
+import {
+  LegionellaUnitPicker, legionellaUnitLabel, legionellaUnitType, siteUnitsFor, useLegionellaUnits, type LegionellaUnit,
+} from "@/components/legionella-unit-picker";
 
 // HSG274 Part 2 Table 2.1
 const CHECK_TYPE_LABELS: Record<LegionellaCheckType, string> = {
@@ -78,9 +95,9 @@ const CHECK_TYPE_HINTS: Record<LegionellaCheckType, string> = {
   cold_tank_temp:        "HSG274 benchmark: cold-water storage monitoring — set controls in the written scheme.",
   cold_sentinel_temp:    "HSG274 benchmark: sentinel cold-water monitoring — set outlets and frequency in the written scheme.",
   cold_nonsent_temp:     "HSG274 benchmark: representative cold-outlet monitoring — set sampling and frequency from the risk assessment.",
-  cold_tank_inspection:  "HSG274 benchmark: inspect tank condition — use the risk-assessed written scheme.",
-  cold_tank_clean:       "HSG274 benchmark: cleaning and disinfection — arrange when justified by the system risk assessment.",
-  calorifier_inspection: "HSG274 benchmark: inspect calorifier condition — set the scope and interval with a competent person.",
+  cold_tank_inspection:  "HSG274 benchmark: inspect the tank and the water in it for sediment, slime (biofilm), debris, a loose lid or missing screens — use the risk-assessed written scheme.",
+  cold_tank_clean:       "HSG274 benchmark: cleaning and disinfection — arrange when justified by the system risk assessment. A pass here also completes the \"Clean & Disinfect Water Tanks\" task in ComplyTrack, and completing that task records it here.",
+  calorifier_inspection: "HSG274 benchmark: drain the base to check for sediment and inspect the calorifier — set the scope and interval with a competent person.",
   calorifier_clean:      "HSG274 benchmark: clean and recommission a calorifier — arrange when justified by the risk assessment.",
   shower_clean:          "HSG274 benchmark: shower-head and hose cleaning — set method and frequency in the written scheme.",
   tmv_service:           "HSG274 benchmark: service and test TMVs — set the interval with competent advice.",
@@ -93,12 +110,29 @@ const TEMPERATURE_TYPES = new Set<LegionellaCheckType>([
 ]);
 
 const TEMP_PLACEHOLDER: Partial<Record<LegionellaCheckType, string>> = {
-  calorifier_temp:    "e.g. 62.0  (target ≥60°C)",
+  calorifier_temp:    "e.g. 62.0  (flow ≥60°C, return ≥50°C)",
   hot_sentinel_temp:  "e.g. 52.0  (target ≥50°C)",
   hot_nonsent_temp:   "e.g. 51.5  (target ≥50°C)",
   cold_tank_temp:     "e.g. 16.0  (target ≤20°C)",
   cold_sentinel_temp: "e.g. 17.5  (target ≤20°C)",
   cold_nonsent_temp:  "e.g. 18.0  (target ≤20°C)",
+};
+
+// Each check type is done on different plant, so the location example matches it.
+const LOCATION_PLACEHOLDER: Record<LegionellaCheckType, string> = {
+  calorifier_temp:       "e.g. Plant room, calorifier 1",
+  hot_sentinel_temp:     "e.g. 2nd floor bathroom, hot tap (furthest from calorifier)",
+  hot_nonsent_temp:      "e.g. Ground floor male toilets, hot tap 3",
+  cold_tank_temp:        "e.g. Roof void, main cold water tank",
+  cold_sentinel_temp:    "e.g. Kitchen, cold tap (nearest the tank)",
+  cold_nonsent_temp:     "e.g. Ground floor male toilets, cold tap 3",
+  cold_tank_inspection:  "e.g. Roof void, main cold water tank",
+  cold_tank_clean:       "e.g. Roof void, main cold water tank",
+  calorifier_inspection: "e.g. Plant room, calorifier 1",
+  calorifier_clean:      "e.g. Plant room, calorifier 1",
+  shower_clean:          "e.g. Room 12 en-suite shower",
+  tmv_service:           "e.g. Accessible toilet basin TMV",
+  outlet_flush:          "e.g. Spare room 7, basin and shower",
 };
 
 function ResultBadge({ result }: { result: string }) {
@@ -200,6 +234,7 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
 
   const [defaultPerformer, setDefaultPerformer] = useState("");
   const [nonSentinelOutlets, setNonSentinelOutlets] = useState<string[]>([]);
+  const newRow = useFocusNewRow();
   const [frequencyDays, setFrequencyDays] = useState<Record<string, string>>(
     Object.fromEntries(Object.entries(DEFAULT_LEGIONELLA_FREQUENCIES).map(([key, value]) => [key, String(value)])),
   );
@@ -209,9 +244,10 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
     controlLimitsRationale: "", remedialVerificationReference: "", schemeReviewDate: "", ukNation: "",
     temperatureLimits: {},
   });
+  const [schemeFromHub, setSchemeFromHub] = useState(false);
 
   useEffect(() => {
-    if (!config || !open) return;
+    if (!config || !open) return undefined;
     setDefaultPerformer(config.water_default_performer ?? "");
     setNonSentinelOutlets(parseJsonArray<string>(config.water_non_sentinel_outlets));
     const saved = parseJsonRecord(config.water_frequency_days, DEFAULT_LEGIONELLA_FREQUENCIES);
@@ -219,7 +255,7 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
     setFrequencyDays(Object.fromEntries(Object.keys(DEFAULT_LEGIONELLA_FREQUENCIES).map(key => [key, String(savedProfile.frequencyDays?.[key] ?? saved[key] ?? DEFAULT_LEGIONELLA_FREQUENCIES[key])])));
     setProfile({
       systemInventoryReference: savedProfile.systemInventoryReference ?? "",
-      writtenControlSchemeReference: savedProfile.writtenControlSchemeReference ?? "",
+      writtenControlSchemeReference: savedProfile.writtenControlSchemeReference ?? savedProfile.writtenSchemeReference ?? "",
       riskAssessmentReference: savedProfile.riskAssessmentReference ?? "",
       riskAssessmentReviewDate: savedProfile.riskAssessmentReviewDate ?? "",
       competentPerson: savedProfile.competentPerson ?? "",
@@ -230,6 +266,23 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
       ukNation: savedProfile.ukNation ?? "",
        temperatureLimits: savedProfile.temperatureLimits ?? (config as any).effectiveTemperatureLimits ?? {},
     });
+    // The written scheme used to be recorded once in Compliance Hub. Offer
+    // that reference for a site that has none yet, so it is not lost.
+    setSchemeFromHub(false);
+    if (siteId && !(savedProfile.writtenControlSchemeReference ?? savedProfile.writtenSchemeReference ?? "").trim()) {
+      let cancelled = false;
+      apiFetch("/compliance-hub/profile")
+        .then(response => response.ok ? response.json() : null)
+        .then(hub => {
+          const reference = typeof hub?.waterWrittenSchemeReference === "string" ? hub.waterWrittenSchemeReference.trim() : "";
+          if (cancelled || !reference) return;
+          setProfile(current => current.writtenControlSchemeReference.trim() ? current : { ...current, writtenControlSchemeReference: reference });
+          setSchemeFromHub(true);
+        })
+        .catch(() => { /* only a starting point */ });
+      return () => { cancelled = true; };
+    }
+    return undefined;
   }, [config, open]);
 
   const handleSave = () => {
@@ -305,7 +358,7 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
             <p className="text-xs text-muted-foreground">
               Non-sentinel (representative) outlets checked periodically. These appear as location suggestions on checks.
             </p>
-            <div className="space-y-2">
+            <div ref={newRow.ref} className="space-y-2">
               {nonSentinelOutlets.map((o, i) => (
                 <div key={i} className="flex gap-2 items-center">
                   <Input value={o} placeholder='e.g. "Ground floor toilet — cold tap"'
@@ -317,7 +370,7 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
                   </Button>
                 </div>
               ))}
-              <Button variant="outline" size="sm" onClick={() => setNonSentinelOutlets([...nonSentinelOutlets, ""])}>
+              <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setNonSentinelOutlets([...nonSentinelOutlets, ""]); }}>
                 <Plus className="w-3.5 h-3.5 mr-1.5" /> Add outlet
               </Button>
             </div>
@@ -359,13 +412,16 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
                    <Textarea rows={key === "controlLimitsRationale" ? 3 : 1} value={profile[key]} disabled={!siteId}
                      onChange={e => setProfile(current => ({ ...current, [key]: e.target.value }))} />
                  )}
+                 {key === "writtenControlSchemeReference" && schemeFromHub && (
+                   <p className="text-xs text-muted-foreground">Brought across from Compliance Hub. Check it is right for this site, then save.</p>
+                 )}
                </div>
              ))}
              <div className="space-y-1">
                <Label>UK nation</Label>
                <Select value={profile.ukNation || "none"} disabled={!siteId} onValueChange={value => setProfile(current => ({ ...current, ukNation: value === "none" ? "" : value }))}>
                  <SelectTrigger><SelectValue placeholder="Select nation" /></SelectTrigger>
-                 <SelectContent><SelectItem value="none">Not set</SelectItem><SelectItem value="england">England</SelectItem><SelectItem value="scotland">Scotland</SelectItem><SelectItem value="wales">Wales</SelectItem><SelectItem value="northern_ireland">Northern Ireland</SelectItem></SelectContent>
+                 <SelectContent><SelectItem value="none">Not set</SelectItem><SelectItem value="england">England</SelectItem><SelectItem value="northern_ireland">Northern Ireland</SelectItem><SelectItem value="scotland">Scotland</SelectItem><SelectItem value="wales">Wales</SelectItem></SelectContent>
                </Select>
              </div>
            </TabsContent>
@@ -388,10 +444,12 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
 type OutletStatus = {
   id: number;
   name: string;
-  type: "hot" | "cold" | "calorifier";
+  type: OutletType;
   location: string | null;
   siteId: number | null;
   sortOrder: number;
+  /** "month" for sentinel outlets; "week" (the last 7 days) for little-used outlets. */
+  period?: "week" | "month";
   testedThisMonth: boolean;
   checkTypeForOutlet: LegionellaCheckType;
   lastCheck: {
@@ -404,25 +462,38 @@ type OutletStatus = {
   } | null;
 };
 
-const OUTLET_TYPE_LABEL: Record<string, string> = { hot: "Hot", cold: "Cold", calorifier: "Calorifier" };
+type OutletType = "hot" | "cold" | "calorifier" | "tmv" | "little_used";
+const OUTLET_TYPE_LABEL: Record<string, string> = { hot: "Hot", cold: "Cold", calorifier: "Calorifier", tmv: "TMV", little_used: "Little used" };
+// TMV outlets (vulnerable users) are checked against a maximum, not the hot
+// minimum: HSG274 Part 2 / HTM 04-01. The server applies the same limit.
+const TMV_OUTLET_MAX_C = 44;
+
 const OUTLET_TYPE_CLS: Record<string, string> = {
   hot:        "bg-orange-100 text-orange-700 border-orange-200",
   cold:       "bg-sky-100 text-sky-700 border-sky-200",
   calorifier: "bg-amber-100 text-amber-700 border-amber-200",
+  tmv:        "bg-violet-100 text-violet-700 border-violet-200",
+  little_used: "bg-slate-100 text-slate-700 border-slate-200",
 };
 
 // ── Add Outlet Dialog ─────────────────────────────────────────────────────────
 
-function AddOutletDialog({ open, onClose, onSuccess }: {
+function AddOutletDialog({ open, onClose, onSuccess, siteId }: {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  /** The page's selected site; the outlet belongs to it. Without one, the dialog asks. */
+  siteId?: number;
 }) {
   const [name, setName] = useState("");
-  const [type, setType] = useState<"hot" | "cold" | "calorifier">("hot");
+  const [type, setType] = useState<OutletType>("hot");
   const [location, setLocation] = useState("");
+  // Without a page site, a new outlet starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
+  const [outletSite, setOutletSite] = useState<number | undefined>(siteId ?? workingSiteId ?? undefined);
   const [busy, setBusy] = useState(false);
   const { toast } = useToast();
+  const { data: sites } = useListSites();
 
   const handleSave = async () => {
     if (!name.trim()) return;
@@ -430,7 +501,7 @@ function AddOutletDialog({ open, onClose, onSuccess }: {
     const r = await apiFetch("/legionella/outlets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim(), type, location: location.trim() || null }),
+      body: JSON.stringify({ name: name.trim(), type, location: location.trim() || null, siteId: siteId ?? outletSite ?? null }),
     });
     setBusy(false);
     if (r.ok) {
@@ -446,7 +517,7 @@ function AddOutletDialog({ open, onClose, onSuccess }: {
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle className="font-display">Add Sentinel Outlet</DialogTitle>
+          <DialogTitle className="font-display font-bold">Add Outlet</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
@@ -459,9 +530,11 @@ function AddOutletDialog({ open, onClose, onSuccess }: {
             <Select value={type} onValueChange={v => setType(v as any)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="hot">Hot water</SelectItem>
-                <SelectItem value="cold">Cold water</SelectItem>
                 <SelectItem value="calorifier">Calorifier</SelectItem>
+                <SelectItem value="cold">Cold water</SelectItem>
+                <SelectItem value="hot">Hot water</SelectItem>
+                <SelectItem value="little_used">Little-used outlet (weekly flush)</SelectItem>
+                <SelectItem value="tmv">TMV / thermostatic mixing valve outlet</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -470,6 +543,18 @@ function AddOutletDialog({ open, onClose, onSuccess }: {
             <Input value={location} onChange={e => setLocation(e.target.value)}
               placeholder="e.g. Male toilets, ground floor" />
           </div>
+          {siteId == null && (sites?.length ?? 0) > 0 && (
+            <div className="space-y-1.5">
+              <Label>Site</Label>
+              <Select value={outletSite ? String(outletSite) : "none"} onValueChange={v => setOutletSite(v === "none" ? undefined : Number(v))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No specific site</SelectItem>
+                  {sites?.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -496,7 +581,9 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
   const [performedBy, setPerformedBy] = useState("");
   const [staffRosterId, setStaffRosterId] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
+  const [findings, setFindings] = useState<LegionellaFindings>({});
   const [busy, setBusy] = useState(false);
+  const media = useRecordMedia("legionella_check", { disabled: busy });
   const { user } = useAuth();
   const { data: config } = useGetLegionellaConfig();
   const { toast } = useToast();
@@ -508,9 +595,15 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
   }, [config, user]);
 
   const isTemperature = TEMPERATURE_TYPES.has(checkType);
+  const isTmv = outlet.type === "tmv";
+  const tmvTooHot = isTmv && temperature !== "" && parseFloat(temperature) > TMV_OUTLET_MAX_C;
   const locationStr = outlet.name + (outlet.location ? ` — ${outlet.location}` : "");
 
   const handleSubmit = async () => {
+    if (!legionellaFindingsComplete(checkType, findings)) {
+      toast({ title: "Answer every \"What did you find?\" question", variant: "destructive" });
+      return;
+    }
     setBusy(true);
     const r = await apiFetch("/legionella", {
       method: "POST",
@@ -525,8 +618,10 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
         notes: notes || undefined,
         siteId: outlet.siteId ?? undefined,
         outletId: outlet.id,
+        findings: legionellaFindingsPayload(checkType, findings),
       }),
     });
+    if (r.ok) await media.attach(((await r.json().catch(() => null)) as { id?: number } | null)?.id);
     setBusy(false);
     if (r.ok) {
       queryClient.invalidateQueries({ queryKey: getListLegionellaChecksQueryKey() });
@@ -543,18 +638,25 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
     <Dialog open onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-display">Log Sentinel Test</DialogTitle>
+          <DialogTitle className="font-display font-bold">{checkType === "outlet_flush" ? "Log Weekly Flush" : "Log Sentinel Test"}</DialogTitle>
           <p className="text-sm text-muted-foreground">{locationStr}</p>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="rounded-md bg-muted/50 px-3 py-2 space-y-0.5">
             <p className="text-sm font-medium">{CHECK_TYPE_LABELS[checkType]}</p>
-            <p className="text-xs text-muted-foreground italic">{CHECK_TYPE_HINTS[checkType]}</p>
+            <p className="text-xs text-muted-foreground italic">
+              {isTmv ? `TMV outlet: blended water must not exceed ${TMV_OUTLET_MAX_C}°C (HSG274 Part 2 / HTM 04-01)` : CHECK_TYPE_HINTS[checkType]}
+            </p>
           </div>
           <div className="space-y-1.5">
             <Label>Date</Label>
             <Input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} />
           </div>
+          <LegionellaConditionQuestions
+            checkType={checkType}
+            findings={findings}
+            onChange={(next, needsAction) => { setFindings(next); if (needsAction) setResult("fail"); }}
+          />
           <div className="space-y-1.5">
             <Label>Check result</Label>
             <Select value={result} onValueChange={v => setResult(v as any)}>
@@ -573,9 +675,12 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
                 <ThermometerSun className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input type="number" step="0.1" value={temperature}
                   onChange={e => setTemperature(e.target.value)}
-                  placeholder={TEMP_PLACEHOLDER[checkType] ?? "°C"}
+                  placeholder={isTmv ? `≤ ${TMV_OUTLET_MAX_C}°C` : TEMP_PLACEHOLDER[checkType] ?? "°C"}
                   className="pl-9" />
               </div>
+              {tmvTooHot && (
+                <p className="text-xs text-red-700">Above {TMV_OUTLET_MAX_C}°C: scald risk. This will be recorded as a fail and open an action.</p>
+              )}
             </div>
           )}
           <div className="space-y-1.5">
@@ -585,6 +690,7 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
             <Label>Notes</Label>
             <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} />
           </div>
+          {media.picker}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -599,12 +705,18 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
 
 // ── Sentinel Outlets Panel ─────────────────────────────────────────────────────
 
-function SentinelOutletsPanel({ canAdmin }: { canAdmin: boolean }) {
+/** `openOutletId`: an outlet whose scanned QR label asked for a reading. */
+function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: boolean; siteId?: number; openOutletId?: number }) {
   const [outlets, setOutlets] = useState<OutletStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [logOutlet, setLogOutlet] = useState<OutletStatus | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [walkRoundOpen, setWalkRoundOpen] = useState(false);
+  const [walkSite, setWalkSite] = useState<number | undefined>(undefined);
+  const workingSiteId = useWorkingSiteId();
+  const { data: sites } = useListSites();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const refresh = async () => {
     setLoading(true);
@@ -618,6 +730,35 @@ function SentinelOutletsPanel({ canAdmin }: { canAdmin: boolean }) {
   };
 
   useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    if (!openOutletId || loading) return;
+    const outlet = outlets.find(o => o.id === openOutletId);
+    if (outlet) setLogOutlet(outlet);
+  }, [openOutletId, loading]);
+
+  // A walk round adds the outlets in the order spoken, after those listed.
+  // "Hot and cold" at one basin becomes a hot and a cold outlet.
+  const saveWalkRound = async (points: WalkRoundPoint[]): Promise<string | null> => {
+    let sortOrder = Math.max(0, ...outlets.map(o => Number(o.sortOrder) || 0)) + 1;
+    let saved = 0;
+    for (const point of points) {
+      for (const type of point.types) {
+        const r = await apiFetch("/legionella/outlets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: point.name, type, location: point.location || null, siteId: siteId ?? walkSite ?? null, sortOrder: sortOrder++ }),
+        });
+        if (!r.ok) {
+          await refresh();
+          return `${point.name} could not be saved${saved ? ` (${saved} saved before it)` : ""}. Remove the saved ones from this list and try again.`;
+        }
+        saved++;
+      }
+    }
+    toast({ title: "Outlets added", description: `${saved} from your walk round, in the order you walked.` });
+    await refresh();
+    return null;
+  };
 
   const handleDelete = async (id: number) => {
     if (!confirm("Remove this outlet? This won't delete historical test records.")) return;
@@ -643,8 +784,8 @@ function SentinelOutletsPanel({ canAdmin }: { canAdmin: boolean }) {
       <CardHeader className="border-b border-border/50 pb-4">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <CardTitle className="font-display text-base flex items-center gap-2">
-              Sentinel Outlets
+            <CardTitle className="font-display font-bold text-base flex items-center gap-2">
+              Sentinel and little-used outlets
               {total > 0 && (
                 <span className={cn(
                   "text-xs px-2 py-0.5 rounded-full font-semibold border",
@@ -652,17 +793,31 @@ function SentinelOutletsPanel({ canAdmin }: { canAdmin: boolean }) {
                     ? "bg-emerald-100 text-emerald-700 border-emerald-200"
                     : "bg-amber-100 text-amber-700 border-amber-200"
                 )}>
-                  {done}/{total} tested — {monthName}
+                  {done}/{total} done — {monthName}
                 </span>
               )}
             </CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">Monitoring points and frequency should match this site's risk assessment and written scheme.</p>
           </div>
-          {canAdmin && (
-            <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
-              <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Outlet
-            </Button>
-          )}
+          <div className="flex flex-wrap justify-end gap-2">
+            {/* Outlets, tanks and calorifiers from the business's own list or risk assessment. */}
+            <ImportCsvButton
+              type="legionella-outlets"
+              siteId={siteId ?? workingSiteId ?? null}
+              label="Upload a list"
+              onImported={() => { refresh(); queryClient.invalidateQueries({ queryKey: ["equipment"] }); }}
+            />
+            {canAdmin && (
+              <>
+                <Button variant="outline" size="sm" onClick={() => { setWalkSite(workingSiteId ?? undefined); setWalkRoundOpen(true); }} data-testid="button-walk-round-outlets">
+                  <Footprints className="w-3.5 h-3.5 mr-1.5" /> Walk round and speak
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
+                  <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Outlet
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="p-4">
@@ -673,7 +828,7 @@ function SentinelOutletsPanel({ canAdmin }: { canAdmin: boolean }) {
         ) : total === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             <Droplets className="w-10 h-10 mx-auto mb-3 opacity-20" />
-            <p className="text-sm">No sentinel outlets defined yet.</p>
+            <p className="text-sm">No outlets listed yet.</p>
             {canAdmin && (
               <Button variant="link" size="sm" className="mt-1 h-auto p-0 text-primary"
                 onClick={() => setAddOpen(true)}>
@@ -726,7 +881,7 @@ function SentinelOutletsPanel({ canAdmin }: { canAdmin: boolean }) {
                         "font-medium",
                         outlet.lastCheck?.result === "pass" ? "text-emerald-700" : "text-red-700"
                       )}>
-                          {outlet.lastCheck?.result === "pass" ? "Passed" : "Failed"}
+                          {outlet.lastCheck?.result === "pass" ? (outlet.period === "week" ? "Flushed" : "Passed") : "Failed"}
                         {outlet.lastCheck?.temperature && ` (${outlet.lastCheck.temperature}°C)`}
                         {outlet.lastCheck?.checkDate && ` — ${format(new Date(outlet.lastCheck.checkDate), "dd MMM")}`}
                       </span>
@@ -734,7 +889,7 @@ function SentinelOutletsPanel({ canAdmin }: { canAdmin: boolean }) {
                   ) : (
                     <>
                       <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                      <span className="text-amber-700 font-medium">Not tested this month</span>
+                      <span className="text-amber-700 font-medium">{outlet.period === "week" ? "Not flushed in the last 7 days" : "Not tested this month"}</span>
                     </>
                   )}
                 </div>
@@ -745,7 +900,7 @@ function SentinelOutletsPanel({ canAdmin }: { canAdmin: boolean }) {
                   className="w-full"
                   onClick={() => setLogOutlet(outlet)}>
                   <Plus className="w-3 h-3 mr-1.5" />
-                  {outlet.testedThisMonth ? "Log another" : "Log Test"}
+                  {outlet.testedThisMonth ? "Log another" : outlet.period === "week" ? "Log Flush" : "Log Test"}
                 </Button>
               </div>
             ))}
@@ -761,8 +916,32 @@ function SentinelOutletsPanel({ canAdmin }: { canAdmin: boolean }) {
         />
       )}
 
+      {canAdmin && (
+        <WalkRoundDialog open={walkRoundOpen} onClose={() => setWalkRoundOpen(false)} kind="outlet"
+          title="Walk round and speak: water outlets" prefix="Outlet "
+          examples={[
+            "Outlet 1, ground floor ladies toilet basin, sentinel, hot and cold",
+            "Outlet 2, plant room hose, little used",
+            "Outlet 3, assisted bathroom, TMV",
+          ]}
+          existingNames={outlets.map(o => o.name)}
+          before={siteId == null && (sites?.length ?? 0) > 0 ? (
+            <div className="space-y-1.5">
+              <Label>Site</Label>
+              <Select value={walkSite ? String(walkSite) : "none"} onValueChange={v => setWalkSite(v === "none" ? undefined : Number(v))}>
+                <SelectTrigger data-testid="walk-round-site"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No specific site</SelectItem>
+                  {sites?.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : undefined}
+          onSave={saveWalkRound} />
+      )}
       {canAdmin && addOpen && (
         <AddOutletDialog
+          siteId={siteId}
           open={addOpen}
           onClose={() => setAddOpen(false)}
           onSuccess={() => { setAddOpen(false); refresh(); }}
@@ -779,11 +958,14 @@ function RecordCheckDialog({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   defaultCheckType,
+  preset,
 }: {
   siteId?: number;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   defaultCheckType?: LegionellaCheckType;
+  /** A water tank or calorifier from a scanned QR label: the check is recorded against it. */
+  preset?: { equipmentId: number; name: string; siteId?: number; location?: string };
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
@@ -805,13 +987,54 @@ function RecordCheckDialog({
   const [performedBy, setPerformedBy] = useState(user?.name ?? "");
   const [staffRosterId, setStaffRosterId] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
+  const [findings, setFindings] = useState<LegionellaFindings>({});
   const [selectedSite, setSelectedSite] = useState<number | undefined>(siteId);
+  const [equipment, setEquipment] = useState<{ id: number; name: string } | null>(null);
+  const workingSiteId = useWorkingSiteId();
+  // Each check type asks its own condition questions.
+  useEffect(() => { setFindings({}); }, [checkType]);
+
+  useEffect(() => {
+    if (!open) return;
+    // A new check starts on the page's site, else the user's working site.
+    if (!preset) { setEquipment(null); setSelectedSite(siteId ?? workingSiteId ?? undefined); return; }
+    setEquipment({ id: preset.equipmentId, name: preset.name });
+    setSelectedSite(preset.siteId);
+    setLocation(preset.location ?? preset.name);
+  }, [open, preset]);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const createCheck = useCreateLegionellaCheck();
+  const media = useRecordMedia("legionella_check", { disabled: createCheck.isPending });
   const { data: sites } = useListSites();
   const { data: config } = useGetLegionellaConfig();
+  const { data: allUnits } = useLegionellaUnits();
+  const siteUnits = siteUnitsFor(allUnits, checkType, selectedSite);
+  const siteUnitIds = siteUnits.map(u => u.id).join(",");
+  // The location a picked tank filled in, cleared again when the tank is dropped.
+  const unitLocation = useRef<string | null>(null);
+  const pickUnit = (unit: LegionellaUnit | null) => {
+    setEquipment(unit ? { id: unit.id, name: unit.name } : null);
+    if (unit) {
+      unitLocation.current = unit.location ?? unit.name;
+      setLocation(unitLocation.current);
+    } else {
+      const filled = unitLocation.current;
+      unitLocation.current = null;
+      setLocation(current => (filled !== null && current === filled ? "" : current));
+    }
+  };
+  // A tank from another site or of the wrong kind is dropped; a site with
+  // only one tank (or calorifier) has it chosen already.
+  useEffect(() => {
+    if (!open || !allUnits) return;
+    // A tank the list doesn't show (outside the user's view) is kept unless the
+    // check type no longer takes a tank.
+    const known = allUnits.some(u => u.id === equipment?.id);
+    if (equipment && (!legionellaUnitType(checkType) || (known && !siteUnits.some(u => u.id === equipment.id)))) pickUnit(null);
+    else if (!equipment && !preset && siteUnits.length === 1) pickUnit(siteUnits[0]);
+  }, [open, allUnits, siteUnitIds, equipment?.id]);
 
   // Pre-fill from template
   useEffect(() => {
@@ -832,6 +1055,14 @@ function RecordCheckDialog({
       toast({ title: "Temperature reading is required", variant: "destructive" });
       return;
     }
+    if (!legionellaFindingsComplete(checkType, findings)) {
+      toast({ title: "Answer every \"What did you find?\" question", variant: "destructive" });
+      return;
+    }
+    if (siteUnits.length > 1 && !equipment) {
+      toast({ title: legionellaUnitType(checkType) === "calorifier" ? "Choose which calorifier" : "Choose which tank", variant: "destructive" });
+      return;
+    }
     const data: CreateLegionellaCheckRequest & { staffRosterId?: number | null } = {
       checkType,
       checkDate,
@@ -841,20 +1072,26 @@ function RecordCheckDialog({
       location: location || undefined,
       performedBy: performedBy || null, staffRosterId: staffRosterId,
       notes: notes || undefined,
+      equipmentId: equipment?.id ?? null,
+      findings: legionellaFindingsPayload(checkType, findings),
     };
 
     createCheck.mutate(
       { data },
       {
-        onSuccess: (response: any) => {
+        onSuccess: async (response: any) => {
+          await media.attach(response?.id);
           queryClient.invalidateQueries({ queryKey: getListLegionellaChecksQueryKey() });
           queryClient.invalidateQueries({ queryKey: getGetLegionellaStatusQueryKey() });
           toast({ title: "Check recorded", description: `Server outcome: ${response?.result ?? result}.` });
           setOpen(false);
+          setEquipment(null);
           setTemperature("");
           setLocation("");
           setPerformedBy(user?.name ?? "");
           setNotes("");
+          setFindings({});
+          setResult("pass");
           setCheckDate(format(new Date(), "yyyy-MM-dd"));
         },
         onError: (error: any) => {
@@ -865,7 +1102,7 @@ function RecordCheckDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={o => { setOpen(o); if (!o) media.clear(); }}>
       <DialogTrigger asChild>
         <Button className="shadow-lg shadow-primary/20">
           <Plus className="w-4 h-4 mr-2" />
@@ -874,7 +1111,7 @@ function RecordCheckDialog({
       </DialogTrigger>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-display">Record Legionella Check</DialogTitle>
+          <DialogTitle className="font-display font-bold">Record Legionella Check</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-4">
           <div className="space-y-1.5">
@@ -884,7 +1121,7 @@ function RecordCheckDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {(Object.keys(CHECK_TYPE_LABELS) as LegionellaCheckType[]).map((key) => (
+                {sortByLabel(Object.keys(CHECK_TYPE_LABELS) as LegionellaCheckType[], t => CHECK_TYPE_LABELS[t]).map((key) => (
                   <SelectItem key={key} value={key}>{CHECK_TYPE_LABELS[key]}</SelectItem>
                 ))}
               </SelectContent>
@@ -896,6 +1133,12 @@ function RecordCheckDialog({
             <Label>Date</Label>
             <Input type="date" value={checkDate} onChange={(e) => setCheckDate(e.target.value)} />
           </div>
+
+          <LegionellaConditionQuestions
+            checkType={checkType}
+            findings={findings}
+            onChange={(next, needsAction) => { setFindings(next); if (needsAction) setResult("fail"); }}
+          />
 
           <div className="space-y-1.5">
             <Label>Check result</Label>
@@ -937,7 +1180,7 @@ function RecordCheckDialog({
               <Label>Site (optional)</Label>
               <Select
                 value={selectedSite ? String(selectedSite) : "none"}
-                onValueChange={(v) => setSelectedSite(v === "none" ? undefined : Number(v))}
+                onValueChange={(v) => { setSelectedSite(v === "none" ? undefined : Number(v)); setEquipment(null); }}
               >
                 <SelectTrigger><SelectValue placeholder="All sites" /></SelectTrigger>
                 <SelectContent>
@@ -950,9 +1193,18 @@ function RecordCheckDialog({
             </div>
           )}
 
+          {equipment && !siteUnits.some(u => u.id === equipment.id) ? (
+            <div className="flex items-center justify-between gap-2 rounded-sm border bg-muted/40 px-3 py-2 text-sm">
+              <span>Recording for <span className="font-medium">{equipment.name}</span></span>
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => pickUnit(null)}>Not this item</Button>
+            </div>
+          ) : (
+            <LegionellaUnitPicker checkType={checkType} siteId={selectedSite} units={siteUnits} value={equipment?.id ?? null} onChange={pickUnit} />
+          )}
+
           <div className="space-y-1.5">
-            <Label>Location / Outlet</Label>
-            <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Ground floor male toilets, tap 3" />
+            <Label>Location</Label>
+            <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder={LOCATION_PLACEHOLDER[checkType]} />
           </div>
 
           <div className="space-y-1.5">
@@ -963,11 +1215,12 @@ function RecordCheckDialog({
             <Label>Notes</Label>
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
           </div>
+          {media.picker}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={createCheck.isPending}>
-            {createCheck.isPending ? "Saving..." : "Record Check"}
+          <Button variant="outline" disabled={media.attaching} onClick={() => { media.clear(); setOpen(false); }}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={createCheck.isPending || media.attaching}>
+            {media.attaching ? "Adding photos…" : createCheck.isPending ? "Saving..." : "Record Check"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -985,7 +1238,12 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
   const [performedBy, setPerformedBy] = useState(check.performedBy || "");
   const [staffRosterId, setStaffRosterId] = useState<number | null>((check as any).staffRosterId ?? null);
   const [notes, setNotes] = useState(check.notes || "");
+  const [findings, setFindings] = useState<LegionellaFindings>(check.findings ?? {});
+  const [findingsChanged, setFindingsChanged] = useState(false);
   const [selectedSite, setSelectedSite] = useState<number | undefined>(check.siteId || undefined);
+  const [equipmentId, setEquipmentId] = useState<number | null>(check.equipmentId ?? null);
+  const { data: allUnits } = useLegionellaUnits();
+  const siteUnits = siteUnitsFor(allUnits, check.checkType, selectedSite);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -995,6 +1253,14 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
   const isTemperatureCheck = TEMPERATURE_TYPES.has(check.checkType as LegionellaCheckType);
 
   const handleSubmit = async () => {
+    // Records saved before the questions existed can be left unanswered.
+    if (findingsChanged && !legionellaFindingsComplete(check.checkType, findings)) {
+      toast({ title: "Answer every \"What did you find?\" question", variant: "destructive" });
+      return;
+    }
+    // A tank from the old site cannot follow the check to a new one.
+    const unit = allUnits?.find(u => u.id === equipmentId);
+    const nextEquipmentId = unit && (unit.siteId ?? undefined) !== selectedSite ? null : equipmentId;
     updateCheck.mutate(
       {
         id: check.id,
@@ -1002,10 +1268,13 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
           checkDate,
           ...(resultChanged ? { result } : {}),
           temperature: isTemperatureCheck && temperature ? parseFloat(String(temperature)) : undefined,
-          siteId: selectedSite,
-          location: location || undefined,
+          // null (not undefined) so clearing a field on edit actually clears it
+          siteId: selectedSite ?? null,
+          location: location || null,
           performedBy: performedBy || null, staffRosterId: staffRosterId,
-          notes: notes || undefined,
+          notes: notes || null,
+          ...(findingsChanged ? { findings: legionellaFindingsPayload(check.checkType, findings) } : {}),
+          ...(nextEquipmentId !== (check.equipmentId ?? null) ? { equipmentId: nextEquipmentId } : {}),
         } as any,
       },
       {
@@ -1029,13 +1298,23 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
       </DialogTrigger>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-display">Edit Check</DialogTitle>
+          <DialogTitle className="font-display font-bold">Edit Check</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-4">
           <div className="space-y-1.5">
             <Label>Date</Label>
             <Input type="date" value={checkDate} onChange={(e) => setCheckDate(e.target.value)} />
           </div>
+
+          <LegionellaConditionQuestions
+            checkType={check.checkType}
+            findings={findings}
+            onChange={(next, needsAction) => {
+              setFindings(next);
+              setFindingsChanged(true);
+              if (needsAction) { setResult("fail"); setResultChanged(true); }
+            }}
+          />
 
           <div className="space-y-1.5">
             <Label>Check result</Label>
@@ -1082,9 +1361,18 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
             </div>
           )}
 
+          <LegionellaUnitPicker
+            checkType={check.checkType}
+            siteId={selectedSite}
+            units={siteUnits}
+            value={equipmentId}
+            onChange={unit => { setEquipmentId(unit?.id ?? null); if (unit) setLocation(unit.location ?? unit.name); }}
+          />
+
           <div className="space-y-1.5">
-            <Label>Location / Outlet</Label>
-            <Input value={location} onChange={(e) => setLocation(e.target.value)} />
+            <Label>Location</Label>
+            <Input value={location} onChange={(e) => setLocation(e.target.value)}
+              placeholder={LOCATION_PLACEHOLDER[check.checkType as LegionellaCheckType]} />
           </div>
 
           <div className="space-y-1.5">
@@ -1095,6 +1383,7 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
             <Label>Notes</Label>
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
           </div>
+          <CheckPhotoUploader entityType="legionella_check" entityId={check.id} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
@@ -1110,12 +1399,40 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
 export default function LegionellaPage() {
   const { hasService } = useAuth();
   const canAdmin = useCanAdmin();
+  const canManageOutlets = useCanManageUsers();
   const hasLegionellatrack = hasService("legionellatrack");
 
   const [filterType, setFilterType] = useState<LegionellaCheckType | "">("");
-  const [filterSite, setFilterSite] = useState<number | undefined>(undefined);
+  const [filterSite, setFilterSite] = useSiteFilterId();
+  useSayItSite(filterSite);
   const [recordOpen, setRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<LegionellaCheckType | undefined>(undefined);
+  const [scanOutletId, setScanOutletId] = useState<number>();
+  const [scanEquipment, setScanEquipment] = useState<{ equipmentId: number; name: string; siteId?: number; location?: string }>();
+
+  // A scanned QR label: an outlet opens its reading, a tank or calorifier
+  // opens the check its button named.
+  useEffect(() => {
+    const link = takeLinkParams(["outlet", "equipment", "open"] as const);
+    if (!link) return;
+    const outletId = Number(link.outlet);
+    if (Number.isSafeInteger(outletId) && outletId > 0) { setScanOutletId(outletId); return; }
+    const equipmentId = Number(link.equipment);
+    const checkType = link.open as LegionellaCheckType | undefined;
+    if (!Number.isSafeInteger(equipmentId) || equipmentId < 1 || !checkType || !(checkType in CHECK_TYPE_LABELS)) return;
+    void (async () => {
+      const res = await apiFetch("/equipment");
+      const items = res.ok ? await res.json() as Array<{ id: number; name: string; siteId: number | null; location: string | null }> : [];
+      const item = items.find(i => i.id === equipmentId);
+      if (!item) return;
+      setScanEquipment({
+        equipmentId, name: item.name, siteId: item.siteId ?? undefined,
+        location: item.location ? `${item.name} · ${item.location}` : item.name,
+      });
+      setQuickCheckType(checkType);
+      setRecordOpen(true);
+    })();
+  }, []);
 
   const { data: status, isLoading: statusLoading, error: statusError } = useGetLegionellaStatus(
     { siteId: filterSite },
@@ -1123,6 +1440,8 @@ export default function LegionellaPage() {
   );
   const serverLocked = (statusError as any)?.status === 403;
 
+  const { data: legionellaUnits } = useLegionellaUnits();
+  const unitById = new Map((legionellaUnits ?? []).map(unit => [unit.id, unit]));
   const { data: checks, isLoading: checksLoading } = useListLegionellaChecks(
     { checkType: filterType || undefined, siteId: filterSite },
     { query: { enabled: hasLegionellatrack, queryKey: getListLegionellaChecksQueryKey({ checkType: filterType || undefined, siteId: filterSite }) } }
@@ -1160,7 +1479,7 @@ export default function LegionellaPage() {
                 <Lock className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h2 className="text-2xl font-display font-medium text-foreground mb-2">LegionellaTrack</h2>
+                <h2 className="text-2xl font-display font-bold text-foreground mb-2">LegionellaTrack</h2>
                 <p className="text-muted-foreground mb-1">
                   Digital Legionella water safety logbook — record a site-specific written scheme, monitoring and actions.
                 </p>
@@ -1204,9 +1523,9 @@ export default function LegionellaPage() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {canAdmin && <LegionellaConfigDialog siteId={filterSite} />}
-            <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={setRecordOpen} defaultCheckType={quickCheckType} />
+            <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={value => { setRecordOpen(value); if (!value) setScanEquipment(undefined); }} defaultCheckType={quickCheckType} preset={scanEquipment} />
           </div>
         </div>
 
@@ -1225,6 +1544,8 @@ export default function LegionellaPage() {
             queryClient.invalidateQueries({ queryKey: getGetLegionellaStatusQueryKey({ siteId: filterSite }) });
             queryClient.invalidateQueries({ queryKey: getGetLegionellaConfigQueryKey() });
           }} />
+        <TrackContractorChecks module="legionella" siteId={filterSite} />
+
         {/* Status Overview */}
         {filterSite && (statusLoading ? (
           <Card>
@@ -1294,7 +1615,8 @@ export default function LegionellaPage() {
         ))}
 
         {/* Sentinel Outlets — per-outlet monthly tracking */}
-        <SentinelOutletsPanel canAdmin={canAdmin} />
+        {/* Managers name their sites' outlets too, as the outlet routes allow. */}
+        <SentinelOutletsPanel canAdmin={canManageOutlets} siteId={filterSite} openOutletId={scanOutletId} />
 
         {(overdueStatuses.length > 0 || dueSoonStatuses.length > 0) && (
           <div className="space-y-3">
@@ -1326,7 +1648,7 @@ export default function LegionellaPage() {
           <CardHeader className="border-b border-border/50 pb-4">
             <div className="flex items-center gap-2">
               <Filter className="w-4 h-4 text-muted-foreground" />
-              <CardTitle className="text-base font-display">Filter History</CardTitle>
+              <CardTitle className="text-base font-display font-bold">Filter History</CardTitle>
             </div>
           </CardHeader>
           <CardContent className="p-4">
@@ -1340,7 +1662,7 @@ export default function LegionellaPage() {
                   <SelectTrigger><SelectValue placeholder="All types" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All types</SelectItem>
-                    {(Object.keys(CHECK_TYPE_LABELS) as LegionellaCheckType[]).map((key) => (
+                    {sortByLabel(Object.keys(CHECK_TYPE_LABELS) as LegionellaCheckType[], t => CHECK_TYPE_LABELS[t]).map((key) => (
                       <SelectItem key={key} value={key}>{CHECK_TYPE_LABELS[key]}</SelectItem>
                     ))}
                   </SelectContent>
@@ -1371,7 +1693,7 @@ export default function LegionellaPage() {
         {/* Check History */}
         <Card>
           <CardHeader className="border-b border-border/50 pb-4">
-            <CardTitle className="font-display">Check History</CardTitle>
+            <CardTitle className="font-display font-bold">Check History</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             {checksLoading ? (
@@ -1387,6 +1709,7 @@ export default function LegionellaPage() {
               <div className="divide-y divide-border">
                 {checks.map((check) => {
                   const site = sites?.find((s) => s.id === check.siteId);
+                  const unit = check.equipmentId != null ? unitById.get(check.equipmentId) : undefined;
                   return (
                     <div key={check.id} className="p-4 hover:bg-muted/20 transition-colors">
                       <div className="flex items-start justify-between gap-4">
@@ -1403,6 +1726,9 @@ export default function LegionellaPage() {
                             {site && (
                               <Badge variant="outline" className="text-xs">{site.name}</Badge>
                             )}
+                            {unit && (
+                              <Badge variant="outline" className="text-xs bg-slate-50" data-testid="legionella-check-unit">{unit.name}</Badge>
+                            )}
                           </div>
                           <div className="text-xs text-muted-foreground space-y-0.5">
                             <div>
@@ -1415,10 +1741,12 @@ export default function LegionellaPage() {
                             {check.performedBy && (
                               <div><span className="font-medium">Performed by:</span> {check.performedBy}</div>
                             )}
+                            <LegionellaFindingsSummary checkType={check.checkType} findings={check.findings} />
                             {check.notes && (
                               <div><span className="font-medium">Notes:</span> {check.notes}</div>
                             )}
                           </div>
+                          <RecordSignedBy recordType="legionella_check" recordId={check.id} />
                           <CheckPhotoUploader entityType="legionella_check" entityId={check.id} compact />
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">

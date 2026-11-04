@@ -1,6 +1,6 @@
 import { db } from "@workspace/db";
-import { departmentsTable, usersTable } from "@workspace/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { departmentsTable, userDepartmentsTable, usersTable } from "@workspace/db/schema";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { createHash, randomUUID } from "node:crypto";
 import { escapeHtml, getPublicAppUrl, sendEmail } from "./email";
 import { getNotificationEmails } from "./getNotificationEmails";
@@ -14,16 +14,46 @@ export interface ReminderAction {
   owner_name: string | null;
   due_date: string | null;
   severity: "monitor" | "action_required" | "urgent";
+  site_id?: number | null;
   site_department_id?: number | null;
 }
 
 export interface TrackSummaryManager {
   id: number;
   email: string;
+  name?: string;
   departmentId?: number | null;
   role?: string;
   isDepartmentManager?: boolean;
   isMaintenanceManager?: boolean;
+  /** A Manager's extra departments (beyond departmentId). */
+  extraDepartmentIds?: number[];
+  /** A Manager who covers every department. */
+  allDepartments?: boolean;
+  /** Department id -> site, for departments that sit under a site. */
+  departmentSiteIds?: Record<number, number>;
+}
+
+/** Whether a summary recipient covers a department (Managers may cover several, or all). */
+function managerCovers(manager: TrackSummaryManager, departmentId: number): boolean {
+  if (manager.role === "client_manager" && manager.allDepartments) return true;
+  return manager.departmentId === departmentId
+    || (manager.role === "client_manager" && (manager.extraDepartmentIds ?? []).includes(departmentId));
+}
+
+/**
+ * Whether a summary recipient sees an action's site: one of their departments
+ * covers it when the site is shared or that department's, and the department
+ * does not sit under another site.
+ */
+function managerCoversSite(manager: TrackSummaryManager, siteId: number | null, siteDepartmentId: number | null): boolean {
+  if (manager.role === "client_manager" && manager.allDepartments) return true;
+  const departmentIds = [manager.departmentId ?? null, ...(manager.role === "client_manager" ? manager.extraDepartmentIds ?? [] : [])];
+  return departmentIds.some((departmentId) => {
+    if (siteDepartmentId != null && departmentId !== siteDepartmentId) return false;
+    const departmentSite = departmentId == null ? undefined : manager.departmentSiteIds?.[departmentId];
+    return departmentSite == null || departmentSite === siteId;
+  });
 }
 
 export interface TrackSummaryRecipient {
@@ -49,6 +79,8 @@ export interface TrackActionReminderResult {
 export interface TrackActionReminderDependencies {
   send?: typeof sendEmail;
   sendPush?: typeof sendPushToUsers;
+  /** Optional internal batch scope; omitted by the production scheduler. */
+  clientIds?: readonly number[];
 }
 
 function formatDate(value: string | null): string {
@@ -80,6 +112,8 @@ const moduleRoutes: Record<string, string> = {
   swim: "/swim-track",
   incident: "/incidents",
   room: "/room-track",
+  coshh: "/coshh-track",
+  audit: "/report-actions",
 };
 
 const moduleLabels: Record<string, string> = {
@@ -103,6 +137,8 @@ const moduleLabels: Record<string, string> = {
   swim: "SwimTrack",
   incident: "IncidentTrack",
   room: "RoomTrack",
+  coshh: "COSHHTrack",
+  audit: "Report actions",
 };
 
 const moduleServices: Record<string, ServiceKey[]> = {
@@ -114,6 +150,7 @@ const moduleServices: Record<string, ServiceKey[]> = {
   safe: ["safetrack"], train: ["traintrack"], hot_tub: ["hottubtrack"],
   tree: ["treetrack"], bike: ["biketrack"], green: ["greentrack"],
   swim: ["aquatrack", "swimtrack"], incident: ["incidenttrack"], room: ["roomtrack"],
+  coshh: ["coshhtrack"], audit: ["core"],
 };
 
 // Applied only when an account has not explicitly set recipients for a track.
@@ -139,6 +176,8 @@ const defaultDepartments: Record<string, RegExp> = {
   swim: /leisure|pool/i,
   incident: /safety|operations/i,
   room: /housekeeping|maintenance/i,
+  coshh: /safety|housekeeping|cleaning|maintenance|facilit/i,
+  audit: /safety|operations|maintenance|facilit/i,
 };
 
 export function effectiveTrackRouting(
@@ -158,6 +197,47 @@ export function effectiveTrackRouting(
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+/** One manager who receives a track, and why. */
+export interface TrackModuleAssignee {
+  manager: TrackSummaryManager;
+  /** Picked by name for this track. */
+  named: boolean;
+  /** A Manager, or a designated manager, of one of the track's departments. */
+  viaDepartment: boolean;
+}
+
+/** Whether a recipient receives department matches: Managers, and staff or Owners flagged as a department or maintenance manager. */
+function receivesDepartmentMatches(manager: TrackSummaryManager): boolean {
+  return manager.role === "client_manager" || !!manager.isDepartmentManager || !!manager.isMaintenanceManager;
+}
+
+/**
+ * The managers (besides senior management) who receive one track's summary.
+ * Named assignments come first, then department managers. Ids that do not
+ * resolve to an eligible manager are skipped. The daily job and the settings
+ * preview both read recipients from here.
+ */
+export function resolveTrackModuleManagers(
+  assignment: { managerIds: number[]; departmentIds: number[] } | undefined,
+  configuredManagers: TrackSummaryManager[],
+): TrackModuleAssignee[] {
+  const { managerIds, departmentIds } = assignment ?? { managerIds: [], departmentIds: [] };
+  const managersById = new Map(configuredManagers.map((manager) => [manager.id, manager]));
+  const assignees = new Map<number, TrackModuleAssignee>();
+  for (const id of managerIds) {
+    const manager = managersById.get(id);
+    if (manager) assignees.set(id, { manager, named: true, viaDepartment: false });
+  }
+  for (const manager of configuredManagers) {
+    if (departmentIds.some((departmentId) => managerCovers(manager, departmentId)) && receivesDepartmentMatches(manager)) {
+      const existing = assignees.get(manager.id);
+      if (existing) existing.viaDepartment = true;
+      else assignees.set(manager.id, { manager, named: false, viaDepartment: true });
+    }
+  }
+  return [...assignees.values()];
 }
 
 /** Pure recipient grouping used by the job and focused routing tests. */
@@ -188,28 +268,18 @@ export function buildTrackSummaryRecipients(
     if (group) group.userIds.add(user.id);
   }
 
-  const managersById = new Map(configuredManagers.map((manager) => [manager.id, manager]));
   for (const module of modules) {
-    const assignment = routing[module] ?? { managerIds: [], departmentIds: [] };
-    const assignedIds = new Set(assignment.managerIds);
-    for (const manager of configuredManagers) {
-      if (manager.departmentId != null && assignment.departmentIds.includes(manager.departmentId) &&
-          (manager.isDepartmentManager || manager.isMaintenanceManager)) {
-        assignedIds.add(manager.id);
-      }
-    }
-    for (const managerId of assignedIds) {
-      const manager = managersById.get(managerId);
-      if (!manager) continue;
+    for (const { manager } of resolveTrackModuleManagers(routing[module], configuredManagers)) {
       const group = ensureGroup(manager.email);
       group.userIds.add(manager.id);
       group.modules.add(module);
       for (const action of actions) {
         if (action.module !== module) continue;
         // Staff see unassigned sites and their own department's sites, never
-        // another department's action. Admins retain their normal global view.
-        if (manager.role !== "client_admin" && action.site_department_id != null &&
-            action.site_department_id !== manager.departmentId) continue;
+        // another department's action, and only their department's own site
+        // when it sits under one. Admins retain their normal global view.
+        if (manager.role !== "client_admin" && (action.site_department_id != null || action.site_id != null) &&
+            !managerCoversSite(manager, action.site_id ?? null, action.site_department_id ?? null)) continue;
         group.actions.add(action);
       }
     }
@@ -245,6 +315,209 @@ export function parseTrackSummaryRouting(value: unknown): TrackSummaryRouting {
   } catch {
     return {};
   }
+}
+
+/** The tracks an account's plan includes, in digest order. */
+export function enabledTrackSummaryModules(services: Awaited<ReturnType<typeof getEntitledServices>>): string[] {
+  return Object.keys(moduleRoutes).filter((module) =>
+    moduleServices[module]?.some((key) => isEntitled(services, key)));
+}
+
+/** Everything the routing needs for one client, loaded from that client's rows only. */
+export interface TrackSummaryRoutingContext {
+  modules: string[];
+  seniorEmails: string[];
+  seniorSource: "notification_email" | "users";
+  seniorUsers: TrackSummaryManager[];
+  configuredManagers: TrackSummaryManager[];
+  departments: Array<{ id: number; name: string }>;
+  /** The saved per-track choices; a track absent here uses automatic matching. */
+  routing: TrackSummaryRouting;
+  effectiveRouting: TrackSummaryRouting;
+}
+
+export async function loadTrackSummaryStoredRouting(clientId: number): Promise<TrackSummaryRouting> {
+  const routingResult = await db.execute(sql`
+    SELECT value FROM app_settings
+    WHERE client_id = ${clientId} AND key = 'trackSummaryRouting'
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `);
+  return parseTrackSummaryRouting(((routingResult as any).rows ?? [])[0]?.value);
+}
+
+/**
+ * Loads the recipients' inputs for one client. `routing` replaces the saved
+ * choices, so Settings can preview unsaved edits through the same path the
+ * daily job sends with.
+ */
+export async function loadTrackSummaryRoutingContext(
+  clientId: number,
+  options: { routing?: TrackSummaryRouting } = {},
+): Promise<TrackSummaryRoutingContext> {
+  const modules = enabledTrackSummaryModules(await getEntitledServices(clientId));
+  const { emails: seniorEmails, userIds: seniorUserIds, source: seniorSource } = await getNotificationEmails(clientId);
+  const routing = options.routing ?? await loadTrackSummaryStoredRouting(clientId);
+  const departments = await db.select({ id: departmentsTable.id, name: departmentsTable.name, siteId: departmentsTable.siteId })
+    .from(departmentsTable).where(eq(departmentsTable.clientId, clientId));
+  const departmentSiteIds = Object.fromEntries(departments
+    .filter((department) => department.siteId != null)
+    .map((department) => [department.id, department.siteId!]));
+  const users = await db
+    .select({
+      id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role,
+      departmentId: usersTable.departmentId,
+      isDepartmentManager: usersTable.isDepartmentManager,
+      isMaintenanceManager: usersTable.isMaintenanceManager,
+      allDepartments: usersTable.allDepartments,
+    })
+    .from(usersTable)
+    .where(and(eq(usersTable.clientId, clientId), eq(usersTable.active, true)));
+  const extras = users.length
+    ? await db.select().from(userDepartmentsTable).where(inArray(userDepartmentsTable.userId, users.map((user) => user.id)))
+    : [];
+  const seniorUsers = users
+    .filter((user) => seniorUserIds.includes(user.id))
+    .map(({ id, email, name }) => ({ id, email, name }));
+  const configuredManagers = users
+    .filter((user) => user.role === "client_admin" || user.role === "client_manager" || user.role === "client_staff")
+    .map(({ id, email, name, departmentId, role, isDepartmentManager, isMaintenanceManager, allDepartments }) => ({
+      id, email, name, departmentId, role, isDepartmentManager, isMaintenanceManager, allDepartments,
+      extraDepartmentIds: extras.filter((extra) => extra.userId === id).map((extra) => extra.departmentId),
+      departmentSiteIds,
+    }));
+  return {
+    modules,
+    seniorEmails,
+    seniorSource,
+    seniorUsers,
+    configuredManagers,
+    departments: departments.map(({ id, name }) => ({ id, name })),
+    routing,
+    effectiveRouting: effectiveTrackRouting(routing, departments, modules),
+  };
+}
+
+export interface TrackSummaryPreviewPerson {
+  userId: number | null;
+  name: string | null;
+  email: string;
+  /** The person's department, or "All departments" for a Manager who covers every one. */
+  departmentName: string | null;
+}
+
+export interface TrackSummaryPreviewTrack {
+  module: string;
+  label: string;
+  /** False when the account's plan does not include the track; nothing is sent for it. */
+  enabled: boolean;
+  /** "automatic": departments matched by name. "custom": the admin's saved or draft choices. */
+  mode: "automatic" | "custom";
+  /** Matched or chosen departments and their managers (empty = no eligible manager). */
+  departments: Array<{ id: number; name: string; managers: TrackSummaryPreviewPerson[] }>;
+  /** Managers picked by name who will receive the track. */
+  namedManagers: TrackSummaryPreviewPerson[];
+  /** Named picks that no longer match an active Owner, Manager or staff account; they are skipped. */
+  unavailableNamedCount: number;
+  /** True when no department or named manager receives it, so only senior management does. */
+  seniorOnly: boolean;
+  /** The exact addresses the daily job would email for this track, de-duplicated. */
+  recipients: Array<TrackSummaryPreviewPerson & { via: Array<"senior" | "named" | "department"> }>;
+}
+
+export interface TrackSummaryPreview {
+  senior: { source: "notification_email" | "users"; recipients: TrackSummaryPreviewPerson[] };
+  tracks: TrackSummaryPreviewTrack[];
+}
+
+/**
+ * Describes who receives each track. The recipient list is taken from
+ * buildTrackSummaryRecipients and resolveTrackModuleManagers, the functions
+ * the daily job sends with, so the preview cannot name someone the job would
+ * not email (or miss someone it would).
+ */
+export function buildTrackSummaryPreview(context: TrackSummaryRoutingContext): TrackSummaryPreview {
+  const departmentName = new Map(context.departments.map((department) => [department.id, department.name]));
+  const person = (manager: TrackSummaryManager): TrackSummaryPreviewPerson => {
+    const names = manager.role === "client_manager" && manager.allDepartments
+      ? ["All departments"]
+      : [manager.departmentId, ...(manager.role === "client_manager" ? manager.extraDepartmentIds ?? [] : [])]
+        .filter((id): id is number => id != null && departmentName.has(id))
+        .map((id) => departmentName.get(id)!);
+    return {
+      userId: manager.id,
+      name: manager.name ?? null,
+      email: manager.email,
+      departmentName: names.length ? [...new Set(names)].join(", ") : null,
+    };
+  };
+  const usersByEmail = new Map<string, TrackSummaryManager>();
+  for (const user of [...context.configuredManagers, ...context.seniorUsers]) {
+    usersByEmail.set(normalizeEmail(user.email), { ...usersByEmail.get(normalizeEmail(user.email)), ...user });
+  }
+  const seniorPerson = (email: string): TrackSummaryPreviewPerson => {
+    const user = usersByEmail.get(normalizeEmail(email));
+    return user ? person(user) : { userId: null, name: null, email: email.trim(), departmentName: null };
+  };
+  const seniorKeys = new Set(context.seniorEmails.filter(Boolean).map(normalizeEmail));
+
+  const sending = buildTrackSummaryRecipients(
+    [], context.seniorEmails, context.seniorUsers, context.configuredManagers,
+    context.effectiveRouting, context.modules,
+  );
+
+  const tracks = Object.keys(moduleRoutes).map((module): TrackSummaryPreviewTrack => {
+    const enabled = context.modules.includes(module);
+    const assignment = context.effectiveRouting[module]
+      ?? effectiveTrackRouting(context.routing, context.departments, [module])[module];
+    const assignees = resolveTrackModuleManagers(assignment, context.configuredManagers);
+    const eligibleIds = new Set(context.configuredManagers.map((manager) => manager.id));
+    const departments = assignment.departmentIds
+      .filter((id) => departmentName.has(id))
+      .map((id) => ({
+        id,
+        name: departmentName.get(id)!,
+        managers: assignees
+          .filter((assignee) => assignee.viaDepartment && managerCovers(assignee.manager, id))
+          .map((assignee) => person(assignee.manager)),
+      }));
+    const viaByEmail = new Map<string, Set<"senior" | "named" | "department">>();
+    const addVia = (email: string, via: "senior" | "named" | "department") => {
+      const key = normalizeEmail(email);
+      if (!viaByEmail.has(key)) viaByEmail.set(key, new Set());
+      viaByEmail.get(key)!.add(via);
+    };
+    for (const assignee of assignees) {
+      if (assignee.named) addVia(assignee.manager.email, "named");
+      if (assignee.viaDepartment) addVia(assignee.manager.email, "department");
+    }
+    seniorKeys.forEach((key) => addVia(key, "senior"));
+    const recipients = enabled
+      ? sending
+        .filter((recipient) => recipient.modules.includes(module))
+        .map((recipient) => ({
+          ...seniorPerson(recipient.email),
+          email: recipient.email,
+          via: [...(viaByEmail.get(normalizeEmail(recipient.email)) ?? [])],
+        }))
+      : [];
+    return {
+      module,
+      label: moduleLabels[module] ?? module,
+      enabled,
+      mode: Object.hasOwn(context.routing, module) ? "custom" : "automatic",
+      departments,
+      namedManagers: assignees.filter((assignee) => assignee.named).map((assignee) => person(assignee.manager)),
+      unavailableNamedCount: assignment.managerIds.filter((id) => !eligibleIds.has(id)).length,
+      seniorOnly: assignees.length === 0,
+      recipients,
+    };
+  });
+
+  return {
+    senior: { source: context.seniorSource, recipients: context.seniorEmails.filter(Boolean).map(seniorPerson) },
+    tracks,
+  };
 }
 
 /** Resolve the destination for an action module, retaining a safe dashboard fallback. */
@@ -337,18 +610,20 @@ export async function runTrackActionReminderJob(
   const send = deps.send ?? sendEmail;
   const sendPush = deps.sendPush ?? sendPushToUsers;
   const result: TrackActionReminderResult = { clientsChecked: 0, clientsEmailed: 0, emailsSent: 0, errors: 0 };
-  const clients = await db.execute(sql`SELECT id FROM clients WHERE active = true`);
+  if (deps.clientIds?.length === 0) return result;
+  const clients = await db.execute(deps.clientIds === undefined
+    ? sql`SELECT id FROM clients WHERE active = true`
+    : sql`SELECT id FROM clients WHERE active = true AND id IN (${sql.join(deps.clientIds.map((id) => sql`${id}`), sql`, `)})`);
 
   for (const client of ((clients as any).rows ?? []) as Array<{ id: number }>) {
     result.clientsChecked++;
     try {
-      const services = await getEntitledServices(client.id);
-      const modules = Object.keys(moduleRoutes).filter((module) =>
-        moduleServices[module]?.some((key) => isEntitled(services, key)));
+      const context = await loadTrackSummaryRoutingContext(client.id);
+      const { modules } = context;
       if (modules.length === 0) continue;
       const actionsResult = await db.execute(sql`
         SELECT a.module, a.title, a.owner_name, a.due_date, a.severity,
-               s.department_id AS site_department_id
+               a.site_id, s.department_id AS site_department_id
         FROM track_actions a
         LEFT JOIN sites s ON s.id = a.site_id AND s.client_id = a.client_id
         WHERE a.client_id = ${client.id}
@@ -365,39 +640,12 @@ export async function runTrackActionReminderJob(
       const actions = (((actionsResult as any).rows ?? []) as ReminderAction[])
         .filter((action) => modules.includes(action.module));
 
-      const { emails: seniorEmails, userIds: seniorUserIds } = await getNotificationEmails(client.id);
-      const routingResult = await db.execute(sql`
-        SELECT value FROM app_settings
-        WHERE client_id = ${client.id} AND key = 'trackSummaryRouting'
-        ORDER BY updated_at DESC
-        LIMIT 1
-      `);
-      const routing = parseTrackSummaryRouting(((routingResult as any).rows ?? [])[0]?.value);
-      const departments = await db.select({ id: departmentsTable.id, name: departmentsTable.name })
-        .from(departmentsTable).where(eq(departmentsTable.clientId, client.id));
-      const effectiveRouting = effectiveTrackRouting(routing, departments, modules);
-      const users = await db
-        .select({
-          id: usersTable.id, email: usersTable.email, role: usersTable.role,
-          departmentId: usersTable.departmentId,
-          isDepartmentManager: usersTable.isDepartmentManager,
-          isMaintenanceManager: usersTable.isMaintenanceManager,
-        })
-        .from(usersTable)
-        .where(and(eq(usersTable.clientId, client.id), eq(usersTable.active, true)));
-      const seniorUsers = users
-        .filter((user) => seniorUserIds.includes(user.id))
-        .map(({ id, email }) => ({ id, email }));
-      const configuredManagers = users
-        .filter((user) => user.role === "client_admin" || user.role === "client_staff")
-        .map(({ id, email, departmentId, role, isDepartmentManager, isMaintenanceManager }) =>
-          ({ id, email, departmentId, role, isDepartmentManager, isMaintenanceManager }));
       const recipients = buildTrackSummaryRecipients(
         actions,
-        seniorEmails,
-        seniorUsers,
-        configuredManagers,
-        effectiveRouting,
+        context.seniorEmails,
+        context.seniorUsers,
+        context.configuredManagers,
+        context.effectiveRouting,
         modules,
       );
       if (recipients.length === 0) continue;

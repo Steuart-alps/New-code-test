@@ -5,7 +5,10 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { CreateFireSafetyCheckRequestNightStaff } from './createFireSafetyCheckRequestNightStaff';
 import type { CreateFireSafetyCheckRequestResult } from './createFireSafetyCheckRequestResult';
+import type { CreateFireSafetyCheckRequestSoundLevelMethod } from './createFireSafetyCheckRequestSoundLevelMethod';
+import type { CreateFireSafetyCheckRequestWalkTime } from './createFireSafetyCheckRequestWalkTime';
 import type { FireCheckType } from './fireCheckType';
 
 export interface CreateFireSafetyCheckRequest {
@@ -16,4 +19,34 @@ export interface CreateFireSafetyCheckRequest {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Weekly alarm tests. A call point from the site's list. */
+  callPointId?: number | null;
+  /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
+  callPoint?: string | null;
+  /** Fire drills. Whether night staff took part. */
+  nightStaff?: CreateFireSafetyCheckRequestNightStaff;
+  /**
+     * Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
+     * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
+     */
+  drillTime?: string | null;
+  /**
+     * Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.
+     * @minimum 1
+     * @maximum 86400
+     */
+  evacuationSeconds?: number | null;
+  /**
+     * Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.
+     * @maxItems 2000
+     */
+  staffPresentIds?: number[];
+  /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
+  soundLevelDb?: number | null;
+  /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
+  soundLevelMethod?: CreateFireSafetyCheckRequestSoundLevelMethod;
+  /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
+  soundLevelBedhead?: boolean | null;
+  /** Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on. */
+  walkTime?: CreateFireSafetyCheckRequestWalkTime;
 }

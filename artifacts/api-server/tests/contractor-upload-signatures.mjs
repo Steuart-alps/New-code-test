@@ -3,7 +3,7 @@
 // callers must only accept a detected PDF/JPEG/PNG structure.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { build } from "esbuild";
 import sharp from "sharp";
 
@@ -110,6 +110,13 @@ try {
   check("AVIF container detected", detectUploadType(realAvif), "image/avif");
   const normalizedAvif = await validateUploadContent(realAvif, new Set(["image/avif"]));
   check("AVIF normalized to JPEG", normalizedAvif.contentType, "image/jpeg");
+  // A real HEVC-coded HEIC (tests/fixtures/fix-track-media/photo.heic). The
+  // image library has no HEVC decoder, so it is refused with a plain reason.
+  const iphoneHeic = await readFile(path.join(dir, "fixtures", "fix-track-media", "photo.heic"));
+  check("HEVC HEIC container detected", detectUploadType(iphoneHeic), "image/heic");
+  let heicError = null;
+  try { await validateUploadContent(iphoneHeic, new Set(["image/heic"])); } catch (error) { heicError = error.message; }
+  check("HEVC HEIC refused with a reason", heicError, "HEIC photos can't be read. Save the photo as JPEG and upload it again.");
   check("normalized AVIF remains a valid JPEG", detectUploadType(normalizedAvif.normalizedBytes), "image/jpeg");
 
   function minimalPdf(pageExtras = "") {

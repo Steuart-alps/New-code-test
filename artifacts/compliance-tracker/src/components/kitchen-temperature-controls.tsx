@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useGetFoodSafetyConfig, useListSites, parseKitchenTemperatureRules, kitchenTemperatureRulesSchema, temperatureRangeLabel, type KitchenTemperatureRules } from "@workspace/api-client-react";
+import { useGetFoodSafetyConfig, useListSites, parseKitchenTemperatureRules, kitchenTemperatureRulesSchema, temperatureRangeLabel, isFoodJurisdiction, kitchenTemperatureGuidance, kitchenTemperatureGuidanceRules, type FoodJurisdiction, type KitchenTemperatureRules } from "@workspace/api-client-react";
 import { useAuth } from "@/context/auth-context";
 import { apiFetch } from "@/lib/api";
-import { ModuleActionsPanel } from "./module-actions-panel";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { FoodJurisdictionOptions, KitchenGuidanceNote } from "./kitchen-temperature-guidance";
+import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 
 type RangeKey = "fridge" | "freezer" | "chilledDelivery" | "frozenDelivery" | "cooking" | "cooling" | "reheating" | "hotHolding" | "sousVide";
 const labels: Record<RangeKey, string> = {
@@ -27,7 +28,8 @@ function ItemRules({ kind, rules, disabled, onChange }: {
   const { key, unit, section } = holdFields[kind];
   const items = rules.items[kind] as Array<{ item: string; min: number | null } & Record<string, unknown>>;
   const set = (next: typeof items) => onChange({ ...rules, items: { ...rules.items, [kind]: next } });
-  return <fieldset className="space-y-2 rounded-sm border p-3">
+  const newRow = useFocusNewRow<HTMLFieldSetElement>();
+  return <fieldset ref={newRow.ref} className="space-y-2 rounded-sm border p-3">
     <legend className="px-1 text-sm font-medium">{section}: item rules</legend>
     <p className="text-xs text-muted-foreground">An item listed here uses its own minimum and hold time instead of the {section.toLowerCase()} values above. Leave a field blank for no numeric control.</p>
     {items.length === 0 && <p className="text-xs text-muted-foreground">No item rules.</p>}
@@ -42,7 +44,7 @@ function ItemRules({ kind, rules, disabled, onChange }: {
         onClick={() => set(items.filter((_, i) => i !== index))}>Remove</Button>
     </div>)}
     {!disabled && <Button type="button" variant="outline" size="sm"
-      onClick={() => set([...items, { item: "", min: rules[kind].min, [key]: (kind === "cooking" ? rules.cookingHoldSeconds : rules.sousVideHoldMinutes) }])}>Add item rule</Button>}
+      onClick={() => { newRow.expect(); set([...items, { item: "", min: rules[kind].min, [key]: (kind === "cooking" ? rules.cookingHoldSeconds : rules.sousVideHoldMinutes) }]); }}>Add item rule</Button>}
   </fieldset>;
 }
 export function KitchenTemperatureControls() {
@@ -58,12 +60,20 @@ export function KitchenTemperatureControls() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  // The scope's saved country, and the one picked here (saved with the rules).
+  const savedCountry: FoodJurisdiction = isFoodJurisdiction(config?.food_jurisdiction) ? config.food_jurisdiction : "england_wales";
+  const [country, setCountry] = useState<FoodJurisdiction>(savedCountry);
   useEffect(() => { setSiteId(null); setRules(null); setDirty(false); }, [activeClientId]);
   useEffect(() => {
     if (!config || dirty) return;
+    setCountry(savedCountry);
     try { setRules(parseKitchenTemperatureRules(config.food_temperature_rules)); setError(""); }
     catch { setRules(null); setError("Saved numeric rules could not be read. Ask an administrator to correct the configuration."); }
-  }, [config, dirty]);
+  }, [config, dirty, savedCountry]);
+  const applyGuidance = (next: FoodJurisdiction) => {
+    setCountry(next); setDirty(true); setError("");
+    setRules(current => ({ ...kitchenTemperatureGuidanceRules(next), items: current?.items ?? { cooking: [], sousVide: [] } }));
+  };
   async function save(inherit = false) {
     if (!rules) return;
     const valid = kitchenTemperatureRulesSchema.safeParse(rules);
@@ -73,9 +83,11 @@ export function KitchenTemperatureControls() {
       const params = new URLSearchParams();
       if (siteId !== null) params.set("siteId", String(siteId));
       if (activeClientId !== null) params.set("clientId", String(activeClientId));
-      const response = await apiFetch(`/food-safety/config?${params}`, {
-        method: "PUT", body: JSON.stringify({ food_temperature_rules: inherit ? null : JSON.stringify(valid.data) }),
-      });
+      // The country is only written when it changed, so saving rules for a
+      // site does not pin it to the organisation's country.
+      const body: Record<string, string | null> = { food_temperature_rules: inherit ? null : JSON.stringify(valid.data) };
+      if (!inherit && country !== savedCountry) body.food_jurisdiction = country;
+      const response = await apiFetch(`/food-safety/config?${params}`, { method: "PUT", body: JSON.stringify(body) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Rules could not be saved");
       setDirty(false);
@@ -96,6 +108,19 @@ export function KitchenTemperatureControls() {
         </select>
       </label>
       {isLoading ? <p>Loading rules…</p> : isError ? <p role="alert">Rules could not be loaded. Refresh to retry.</p> : rules && <div className="mt-3 space-y-3">
+        <div className="space-y-2">
+          <label className="block text-sm font-medium">Country guidance
+            <select className="mx-2 rounded border p-2" aria-label="Country guidance" value={country} disabled={!manager || saving}
+              onChange={e => applyGuidance(e.target.value as FoodJurisdiction)}>
+              <FoodJurisdictionOptions />
+            </select>
+          </label>
+          {manager && <p className="text-xs text-muted-foreground">Choosing a country fills in its recommended limits as a starting point. Change any value to suit your food-safety plan, then save.</p>}
+          <KitchenGuidanceNote jurisdiction={country} />
+          {manager && <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => applyGuidance(country)}>
+            {country === "other" ? "Reset to starting values" : `Reset to ${kitchenTemperatureGuidance(country).name} values`}
+          </Button>}
+        </div>
         <div className="grid grid-cols-3 gap-2 text-xs font-medium"><span>Check</span><span>Minimum °C</span><span>Maximum °C</span></div>
         {Object.entries(labels).map(([key, label]) => {
           const ruleKey = key as keyof typeof labels;
@@ -126,6 +151,6 @@ export function KitchenTemperatureControls() {
       {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
     </details>
     <p className="text-sm text-muted-foreground">Failed readings remain historical evidence. A manager assigns the corrective action and verifies its evidence with a final signature; this does not change the original reading to a pass.</p>
-    <ModuleActionsPanel moduleKey="kitchen" />
+    {/* Module actions render once, from the app layout, on every kitchen page. */}
   </div>;
 }

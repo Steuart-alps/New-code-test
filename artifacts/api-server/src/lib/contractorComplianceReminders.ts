@@ -15,18 +15,22 @@
  * reminder was raised against (e.g. "insurance:2025-03-01" or "dbs:2022-01-01"),
  * so a renewed insurance/DBS date produces a new milestone and re-alerts, while
   * the same milestone is never re-sent. DBS/PVG and certificate expiry dates
-  * have separate :60 and :30 claims. Rows are claimed BEFORE sending so
- * concurrent runs can't double-send; the claim is released if the send fails.
+  * have separate :60 and :30 claims. Each client's manager alert is claimed
+ * with an expiring delivery lease so concurrent runs can't double-send, and
+ * the log rows are written only after the provider accepted the email.
  */
 
 import { db } from "@workspace/db";
 import { appSettingsTable, clientsTable } from "@workspace/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
-import { sendEmail, getPublicAppUrl, escapeHtml } from "./email";
+import { sendEmail, getPublicAppUrl, escapeHtml, renderEmailLayout } from "./email";
 import { getNotificationEmails } from "./getNotificationEmails";
 import { sendPushToUsers } from "./pushNotifications";
 import { digestBearerToken, newBearerToken, encryptTokenPayload } from "./bearerTokens";
+import { claimEmailDelivery, emailDeliveryIdempotencyKey, settleEmailDelivery } from "./emailDeliveryClaims";
+import { PORTAL_REMINDER_LINK_DAYS } from "./contractorPortalDrafts";
+import { createHash } from "crypto";
 
 /** Insurance is flagged when it expires within this many days (or has expired). */
 export const DEFAULT_CONTRACTOR_COMPLIANCE_LEAD_DAYS = 30;
@@ -251,17 +255,10 @@ export function buildManagerEmailHtml(alerts: ContractorComplianceAlert[], appUr
     )
     .join("");
 
-  return `
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"/></head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
-    <div style="background:#0f172a;padding:32px 40px;">
-      <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">🛡️ ComplyTrack</div>
-      <div style="font-size:14px;color:#94a3b8;margin-top:6px;">Contractor compliance expiring</div>
-    </div>
-    <div style="padding:32px 40px;">
+  return renderEmailLayout({
+    subtitle: `Contractor compliance expiring`,
+    footerNote: `You are receiving this as an account manager.`,
+    bodyHtml: `
       <p style="font-size:15px;color:#334155;margin:0 0 20px;">
          ${alerts.length} contractor compliance item${alerts.length !== 1 ? "s need" : " needs"} attention — an insurance policy, DBS/PVG check or certificate needs review. Please chase renewals or update the records in ComplyTrack.
       </p>
@@ -269,17 +266,12 @@ export function buildManagerEmailHtml(alerts: ContractorComplianceAlert[], appUr
         <tbody>${rows}</tbody>
       </table>
       <div style="margin-top:28px;text-align:center;">
-        <a href="${appUrl}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">
+        <a href="${appUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:10px;font-size:16px;font-weight:700;">
           Open ComplyTrack →
         </a>
       </div>
-    </div>
-    <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
-      ComplyTrack by ALPS Consulting · You are receiving this as an account manager.
-    </div>
-  </div>
-</body>
-</html>`;
+`,
+  });
 }
 
 /** Contractor-facing email: includes their expiring items + a link to the self-service portal. */
@@ -303,7 +295,7 @@ export function buildContractorEmailHtml(
           Use your personalised link to update your insurance renewal date, DBS details, and upload
           certificate documents directly — no email needed.
         </p>
-        <a href="${esc(portalUrl)}" style="display:inline-block;background:#166534;color:#ffffff;text-decoration:none;padding:10px 22px;border-radius:8px;font-size:14px;font-weight:600;">
+        <a href="${esc(portalUrl)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:10px 22px;border-radius:8px;font-size:14px;font-weight:600;">
           Update my details →
         </a>
         <p style="font-size:11px;color:#4ade80;margin:10px 0 0;">Link valid for 90 days · No account needed</p>
@@ -314,17 +306,10 @@ export function buildContractorEmailHtml(
         earliest convenience so they can update their records.
       </p>`;
 
-  return `
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"/></head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
-    <div style="background:#0f172a;padding:32px 40px;">
-      <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">🛡️ ComplyTrack</div>
-      <div style="font-size:14px;color:#94a3b8;margin-top:6px;">Compliance renewal reminder</div>
-    </div>
-    <div style="padding:32px 40px;">
+  return renderEmailLayout({
+    subtitle: `Compliance renewal reminder`,
+    footerNote: `Sent on behalf of ${esc(clientName)}.`,
+    bodyHtml: `
       <p style="font-size:15px;color:#334155;margin:0 0 16px;">Dear ${esc(contractorName)},</p>
       <p style="font-size:15px;color:#334155;margin:0 0 16px;">
         Our records held by <strong>${esc(clientName)}</strong> show that the following item${alerts.length !== 1 ? "s are" : " is"} due for renewal soon:
@@ -334,13 +319,8 @@ export function buildContractorEmailHtml(
       <p style="font-size:14px;color:#64748b;margin:0;">
         If you have already renewed, you can update the date directly via your portal link above.
       </p>
-    </div>
-    <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
-      ComplyTrack by ALPS Consulting · Sent on behalf of ${esc(clientName)}.
-    </div>
-  </div>
-</body>
-</html>`;
+`,
+  });
 }
 
 /**
@@ -530,7 +510,7 @@ async function queuePortalReminders(clientId: number, clientName: string, now: D
           INSERT INTO contractor_portal_reminder_tokens
             (portal_token_id, issuance_hash, token_hash, expires_at)
           VALUES (${canonical.id},${canonical.token_hash},${digestBearerToken(token)},
-            ${new Date(now.getTime() + 90 * 86_400_000)})
+            ${new Date(now.getTime() + PORTAL_REMINDER_LINK_DAYS * 86_400_000)})
         `);
       } else {
         // A first scheduler issuance remains compatible with manager issuance.
@@ -539,7 +519,7 @@ async function queuePortalReminders(clientId: number, clientName: string, now: D
         await tx.execute(sql`
         INSERT INTO contractor_portal_tokens (client_id,contractor_id,token,token_hash,expires_at)
         VALUES (${clientId},${contractorId},NULL,${digestBearerToken(token)},
-          ${new Date(now.getTime() + 90 * 86_400_000)})
+          ${new Date(now.getTime() + PORTAL_REMINDER_LINK_DAYS * 86_400_000)})
       `);
       }
     });
@@ -561,6 +541,11 @@ export async function runContractorComplianceReminderJob(
   send: EmailSender = sendEmail,
   sendPush: PushSender = sendPushToUsers,
   now: Date = new Date(),
+  /**
+   * false: only queue the contractors' own portal reminders. The managers'
+   * digest is replaced by the personal reminders (lib/personalReminders.ts).
+   */
+  options: { managerAlerts?: boolean } = {},
 ): Promise<ContractorComplianceJobResult> {
   const result: ContractorComplianceJobResult = {
     clientsChecked: 0,
@@ -587,28 +572,24 @@ export async function runContractorComplianceReminderJob(
         result.errors++;
         logger.error({ err: portalErr, clientId: client.id }, "Contractor portal reminder queue failed");
       }
+      if (options.managerAlerts === false) continue;
       const leadDays = await getClientContractorComplianceLeadDays(client.id);
       const candidates = await getContractorComplianceAlerts(client.id, now, leadDays);
       if (candidates.length === 0) continue;
 
-      // Claim each (contractor, milestone) first so we never re-send the same
-      // reminder, and so concurrent runs can't double-send. Only the newly
-      // claimed alerts are then emailed/pushed.
-      const claimed: ContractorComplianceAlert[] = [];
-      // Any failure after the first successful claim (a later claim insert, the
-      // manager lookup, or the email send) must release every claimed row —
-      // otherwise the unique dedupe rows would permanently suppress the alert.
-      let sent = false;
+      // Lease the client's manager alert, then keep only alerts no earlier
+      // run has logged. Log rows are written only after the provider accepted
+      // the email; a crash in between leaves the lease to expire and the retry
+      // reuses the same provider idempotency key.
+      const lease = await claimEmailDelivery("contractor-compliance", String(client.id));
+      if (!lease) continue; // another worker is sending for this client
+      let settled = false;
       try {
-        for (const alert of candidates) {
-          const claim = await db.execute(sql`
-            INSERT INTO contractor_compliance_reminder_log (client_id, contractor_id, milestone, sent_at)
-            VALUES (${client.id}, ${alert.contractorId}, ${alert.milestone}, now())
-            ON CONFLICT (client_id, contractor_id, milestone) DO NOTHING
-            RETURNING id
-          `);
-          if (((claim as any).rows ?? []).length > 0) claimed.push(alert);
-        }
+        const logged = await db.execute(sql`
+          SELECT contractor_id, milestone FROM contractor_compliance_reminder_log WHERE client_id = ${client.id}
+        `);
+        const seen = new Set(((logged as any).rows ?? []).map((row: any) => `${row.contractor_id}|${row.milestone}`));
+        const claimed = candidates.filter((alert) => !seen.has(`${alert.contractorId}|${alert.milestone}`));
         if (claimed.length === 0) continue;
         result.remindersClaimed += claimed.length;
 
@@ -616,22 +597,40 @@ export async function runContractorComplianceReminderJob(
         const { emails, userIds } = await getNotificationEmails(client.id, { includeMaintenanceManagers: true });
 
         if (emails.length === 0) {
-          // No one to notify — release the claims so a later run (once managers
-          // exist) can re-send.
-          await releaseClaims(client.id, claimed);
+          // No one to notify — nothing is logged, so a later run (once
+          // managers exist) sends it.
           continue;
         }
 
         const subject = `⚠️ ${claimed.length} contractor compliance item${claimed.length !== 1 ? "s" : ""} need attention — ComplyTrack`;
-        await send({ to: emails, subject, html: buildManagerEmailHtml(claimed, appUrl) });
-        sent = true;
+        const alertSet = createHash("sha256")
+          .update(claimed.map((alert) => `${alert.contractorId}|${alert.milestone}`).sort().join(","))
+          .digest("hex").slice(0, 16);
+        await send({
+          to: emails,
+          subject,
+          html: buildManagerEmailHtml(claimed, appUrl),
+          idempotencyKey: emailDeliveryIdempotencyKey(lease, `${alertSet}:${now.toISOString().slice(0, 10)}`),
+        });
+
+        await db.transaction(async (tx) => {
+          for (const alert of claimed) {
+            await tx.execute(sql`
+              INSERT INTO contractor_compliance_reminder_log (client_id, contractor_id, milestone, sent_at)
+              VALUES (${client.id}, ${alert.contractorId}, ${alert.milestone}, now())
+              ON CONFLICT (client_id, contractor_id, milestone) DO NOTHING
+            `);
+          }
+          await settleEmailDelivery(lease, tx);
+        });
+        settled = true;
 
         // Push managers a matching alert (best-effort; never blocks the job).
-        await sendPush(userIds, {
+        await Promise.resolve(sendPush(userIds, {
           title: "Contractor compliance expiring",
           body: `${claimed.length} contractor compliance item${claimed.length !== 1 ? "s" : ""} need attention.`,
           data: { route: "/contractors" },
-        });
+        })).catch((err) => logger.warn({ err, clientId: client.id }, "Contractor compliance push failed"));
 
         result.clientsAlerted++;
         result.emailsSent += emails.length;
@@ -639,18 +638,8 @@ export async function runContractorComplianceReminderJob(
           { clientId: client.id, alerts: claimed.length, emails: emails.length },
           "Manager alerts sent and contractor reminders queued for approval",
         );
-      } catch (innerErr) {
-        if (!sent && claimed.length > 0) {
-          try {
-            await releaseClaims(client.id, claimed);
-          } catch (releaseErr) {
-            logger.error(
-              { err: releaseErr, clientId: client.id },
-              "Failed to release contractor compliance claims — these milestones may be suppressed",
-            );
-          }
-        }
-        throw innerErr;
+      } finally {
+        if (!settled) await settleEmailDelivery(lease).catch(() => {});
       }
     } catch (err) {
       result.errors++;
@@ -661,12 +650,3 @@ export async function runContractorComplianceReminderJob(
   return result;
 }
 
-/** Release previously-claimed reminder rows so a later run retries. */
-async function releaseClaims(clientId: number, alerts: ContractorComplianceAlert[]): Promise<void> {
-  for (const a of alerts) {
-    await db.execute(sql`
-      DELETE FROM contractor_compliance_reminder_log
-      WHERE client_id = ${clientId} AND contractor_id = ${a.contractorId} AND milestone = ${a.milestone}
-    `);
-  }
-}

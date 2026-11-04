@@ -16,6 +16,8 @@ Do not send the original temperature corrective action to FixTrack unless the li
 
 Unconfigured numeric reheating defaults follow the effective client/site jurisdiction. Explicit numeric rules are authoritative and are not parsed from legacy descriptive text.
 
+Country guidance (2026-10-16): `KITCHEN_TEMPERATURE_GUIDANCE` in lib/api-zod/src/kitchen-temperature.ts holds a preset (rules + diary labels + source + notes) per `food_jurisdiction`: the three UK nations plus ireland, australia, new_zealand, canada, united_states, other. Unsaved rules AND unsaved cooking/cooling/hot-holding labels follow the effective jurisdiction; UK presets equal the old defaults exactly. Non-UK presets are `reviewed: false` and the UI labels them a starting point until a qualified person in that country checks them. The rule model has one cooling stage, so two-stage cooling (AU/NZ/CA/US) is approximated by the final temperature and total time; °F is only in US label text. Tests: api-zod test:kitchen-temperature-guidance, api-server config-endpoints `testCountryGuidance`, web test:kitchen-country-guidance-browser.
+
 **Why:** England/Wales and Scotland have different existing defaults. Automatically persisting a default during a staff write would make it appear to be an administrator's deliberate numeric override.
 
 **How to apply:** Materialize fallback rules for reads and assessment without saving an implicit override; save explicit rules only through configuration.

@@ -42,7 +42,7 @@ function statusLabel(status: ComplianceItem["status"]) {
   return {
     pending: "Pending",
     in_progress: "In Progress",
-    completed: "Compliant",
+    completed: "Completed",
     overdue: "Overdue — Action Required",
   }[status];
 }
@@ -253,7 +253,7 @@ export function SafetySummaryPage({ title, categoryKeyword, emptyMessage }: Safe
                     : "text-emerald-700"
                 }`}
               >
-                {items.length} total checks · {completed.length} compliant · {overdue.length} overdue · {inProgress.length} in progress
+                {items.length} total checks · {completed.length} completed · {overdue.length} overdue · {inProgress.length} in progress
               </p>
             </div>
           </div>
@@ -264,7 +264,7 @@ export function SafetySummaryPage({ title, categoryKeyword, emptyMessage }: Safe
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <SummaryCard label="Overdue" count={overdue.length} variant="danger" />
             <SummaryCard label="In Progress" count={inProgress.length} variant="warning" />
-            <SummaryCard label="Compliant" count={completed.length} variant="success" />
+            <SummaryCard label="Completed" count={completed.length} variant="success" />
             <SummaryCard label="Pending" count={pending.length} variant="neutral" />
           </div>
         )}
@@ -282,12 +282,12 @@ export function SafetySummaryPage({ title, categoryKeyword, emptyMessage }: Safe
           </div>
         )}
 
-        {/* Compliant items */}
+        {/* Completed items */}
         {!loading && completed.length > 0 && (
           <div className="bg-card border border-border rounded-xl overflow-hidden">
             <div className="px-5 py-3.5 border-b border-border flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-              <span className="font-medium text-sm">Compliant ({completed.length})</span>
+              <span className="font-medium text-sm">Completed ({completed.length})</span>
             </div>
             <div className="divide-y divide-border">
               {completed.map(item => <ItemRow key={item.id} item={item} />)}

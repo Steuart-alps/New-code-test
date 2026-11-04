@@ -1,18 +1,21 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sitesTable } from "@workspace/db/schema";
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { requireAuth, getActiveDepartmentId, getClientId, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
+import { kitchenWeeklyResult } from "@workspace/api-zod/kitchen-weekly";
 
 const router = Router();
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-function computedWeeklyResult(checks: Record<string, "yes" | "no" | "na">): "pass" | "fail" {
-  return Object.values(checks).some((value) => value === "no") ? "fail" : "pass";
-}
+// Not every "no" is a failure ("Have any complaints been received?"): the
+// shared rule says which answer needs attention for each question.
+const computedWeeklyResult = kitchenWeeklyResult;
 
 const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(
   (value) => new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value,
@@ -36,7 +39,7 @@ async function resolveSiteId(req: any, res: any, clientId: number, raw: unknown)
   const [site] = await db.select({ id: sitesTable.id }).from(sitesTable).where(and(
     eq(sitesTable.id, siteId),
     eq(sitesTable.clientId, clientId),
-    ...(departmentId != null ? [or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId))] : []),
+    ...(departmentId != null ? [sitesTableVisibleTo(departmentId)] : []),
   )).limit(1);
   if (!site) {
     res.status(403).json({ error: "Site not accessible" });
@@ -143,7 +146,7 @@ router.post("/weekly", requireAuth, denyViewers, async (req, res) => {
   const existing = await fetchWeekly(clientId, weekCommencing, resolvedSiteId);
   if (existing) return res.status(409).json({ error: "Record already exists for this week", id: existing.id });
 
-  const userId = (req.session as any).userId ?? null;
+  const userId = req.currentUser?.id ?? null;
   const checksJson = JSON.stringify(checks ?? {});
   const deviationsJson = JSON.stringify(deviations ?? []);
   const additionalJson = JSON.stringify(additional ?? {});
@@ -184,7 +187,7 @@ router.put("/weekly/:id", requireAuth, denyViewers, async (req, res) => {
   const existing = await fetchWeeklyById(id, clientId);
   if (!existing) return res.status(404).json({ error: "Not found" });
 
-  const parsed = weeklyBody.partial().safeParse(req.body);
+  const parsed = partialUpdate(weeklyBody).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
   const { checks, deviations, additional, managerSignature, submittedAt, siteId } = parsed.data;
@@ -288,7 +291,7 @@ router.post("/probe", requireAuth, denyViewers, async (req, res) => {
   if (checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   const existing = await fetchProbe(clientId, checkDate, resolvedSiteId);
   if (existing) return res.status(409).json({ error: "Record already exists for this date", id: existing.id });
-  const userId = (req.session as any).userId ?? null;
+  const userId = req.currentUser?.id ?? null;
   const probesJson = JSON.stringify(probes ?? []);
 
   try {
@@ -326,7 +329,7 @@ router.put("/probe/:id", requireAuth, denyViewers, async (req, res) => {
   const existing = await fetchProbeById(id, clientId);
   if (!existing) return res.status(404).json({ error: "Not found" });
 
-  const parsed = probeBody.partial().safeParse(req.body);
+  const parsed = partialUpdate(probeBody).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
   const { probes, overallResult, checkedBy, checkedByRosterId, signature, notes, submittedAt, siteId } = parsed.data;

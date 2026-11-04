@@ -22,9 +22,11 @@ export function containsInjection(value: string): boolean {
   // Javascript: protocol in URLs (href=javascript:…)
   if (/javascript\s*:/i.test(lower)) return true;
   // Common XSS payloads
-  if (/on\w+\s*=|<script|<iframe|<img\b.*\bsrc\s*=|<svg\b.*\bon/.test(lower)) return true;
-  // SQL injection signals (only in name context — very specific patterns)
-  if (/'\s*(or|and)\s+'?\s*[0-9']/i.test(lower)) return true;
+  if (/\bon\w+\s*=|<script|<iframe|<img\b.*\bsrc\s*=|<svg\b.*\bon/.test(lower)) return true;
+  // SQL injection signals (only in name context — very specific patterns).
+  // A quote-break tautology needs the "=" (' or 1=1, ' or '1'='1), so prose
+  // such as "Engineers' and 2 apprentices" is not caught.
+  if (/'\s*(or|and)\s+'?\s*[0-9']\w*'?\s*=/i.test(lower)) return true;
   if (/;\s*drop\s+table|;\s*delete\s+from|;\s*insert\s+into|union\s+select/i.test(lower)) return true;
   return false;
 }

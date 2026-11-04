@@ -30,4 +30,12 @@ export interface FeedbackReport {
   revision: number;
   /** @nullable */
   submitterName: string | null;
+  /** @nullable */
+  clientName: string | null;
+  hasScreenshot: boolean;
+  /**
+     * Web build (commit) the report was sent from
+     * @nullable
+     */
+  appVersion: string | null;
 }

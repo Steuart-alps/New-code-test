@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { requireAuth, getClientId, denyViewers, requireClientAdmin, getActiveDepartmentId } from "../middleware/requireAuth";
 import { patTestHistoryAccess } from "../lib/patLegacyHistoryScope";
+import { visibleSiteIdsSql } from "../lib/departmentSites";
 import { requireAnyService, requireService } from "../lib/services";
 import {
   AllowedUploadType,
@@ -13,9 +14,11 @@ import {
   ObjectStorageService,
   ObjectNotFoundError,
   ObjectOwnershipError,
+  UploadTooLargeError,
   isTenantReservedObjectPath,
 } from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
 import { hasTenantAttachmentReference } from "../lib/attachmentReferences";
 import {
   isStagedPhotoEntityType,
@@ -27,6 +30,12 @@ import { cancelStagedPhotoReceipt, cleanupStagedPhotoUploads } from "../lib/stag
 const router = Router();
 const storage = new ObjectStorageService();
 const ALLOWED_PHOTO_TYPES: ReadonlySet<AllowedUploadType> = new Set(["image/jpeg", "image/png"]);
+// A saved record takes photos and short videos, the same types as FixTrack
+// issues and track actions (finalizeVerifiedIssueMediaUpload checks them).
+// Required photo evidence staged before a record exists stays JPEG or PNG.
+const RECORD_MEDIA_TYPES = [
+  "image/jpeg", "image/png", "image/webp", "image/avif", "video/mp4", "video/quicktime", "video/webm",
+] as const;
 const STAGED_ENTITY_TYPE_SET: ReadonlySet<string> = new Set(STAGED_PHOTO_ENTITY_TYPES);
 
 /**
@@ -50,6 +59,7 @@ export const PHOTO_ENTITY_TABLES = {
   incident: "incidents",
   pat_test: "pat_tests",
   pest_visit: "pest_visits",
+  pest_activity: "pest_activity",
   training_record: "train_track_records",
   tree_inspection: "tree_inspections",
   green_pre_use_check: "green_pre_use_checks",
@@ -64,9 +74,53 @@ export const PHOTO_ENTITY_TABLES = {
   safe_handbook: "safe_handbook",
   safe_training_record: "safe_training_records",
   safe_induction: "safe_inductions",
+  premises_inspection: "premises_inspections",
+  coshh_check: "coshh_checks",
+  pat_certificate: "pat_certificates",
+  pat_failure: "pat_failures",
+  kitchen_cleaning_log: "kitchen_cleaning_logs",
+  kitchen_weekly_record: "kitchen_weekly_records",
+  kitchen_probe_check: "kitchen_probe_checks",
 } as const;
 
 export type PhotoEntityType = keyof typeof PHOTO_ENTITY_TABLES;
+
+/**
+ * Records whose module limits department-scoped staff and viewers to sites in
+ * their department (or with no department), plus records with no site — the
+ * same rule each of these modules applies to its own lists and edits. A photo
+ * may only be listed, attached or removed within that same scope. BikeTrack,
+ * GreenTrack and PestTrack records are not department-scoped by their modules,
+ * so tenant scope alone applies to them; PAT tests have their own rule.
+ */
+const SITE_DEPARTMENT_SCOPED_ENTITIES: ReadonlySet<PhotoEntityType> = new Set<PhotoEntityType>([
+  "fire_safety_check", "pool_check", "daily_checklist", "daily_checklist_pm",
+  "food_safety_record", "food_safety_check", "legionella_check", "hot_tub_check",
+  "incident", "training_record", "tree_inspection",
+  "swim_session", "swim_surveillance_check", "swim_first_aid_check", "swim_incident",
+  "safe_risk_assessment", "safe_sop", "safe_handbook", "safe_training_record", "safe_induction",
+  "premises_inspection", "coshh_check", "pat_certificate", "pat_failure",
+  "kitchen_cleaning_log", "kitchen_weekly_record", "kitchen_probe_check",
+]);
+
+/**
+ * A record whose site is held elsewhere: a PAT failure belongs to the site of
+ * the certificate it was found on, as PAT's own failure routes decide.
+ */
+function siteColumn(entityType: PhotoEntityType, alias: string) {
+  const record = sql.raw(alias);
+  if (entityType === "pat_failure") {
+    return sql`(SELECT c.site_id FROM pat_certificates c WHERE c.id = ${record}.certificate_id AND c.client_id = ${record}.client_id)`;
+  }
+  return sql.raw(`${alias}.site_id`);
+}
+
+/** SQL condition limiting the record's site to the department's sites (or none). */
+function departmentSiteCondition(entityType: PhotoEntityType, alias: string, clientId: number, departmentId: number | null) {
+  if (departmentId === null) return sql``;
+  const column = siteColumn(entityType, alias);
+  return sql`AND (${column} IS NULL OR ${column} IN (${visibleSiteIdsSql(clientId, departmentId)}))`;
+}
 
 export function isSupportedPhotoEntityType(entityType: string): entityType is PhotoEntityType {
   return Object.prototype.hasOwnProperty.call(PHOTO_ENTITY_TABLES, entityType);
@@ -86,9 +140,13 @@ const greenServiceCreationRole: RequestHandler = (req, res, next) => {
   next();
 };
 
-function photoStorageError(err: unknown): { status: number; error: string } {
+function photoStorageError(
+  err: unknown,
+  badContent = "Photo contents must be a valid JPEG or PNG",
+): { status: number; error: string } {
   const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
-    : err instanceof ObjectContentError ? "Photo contents must be a valid JPEG or PNG"
+    : err instanceof UploadTooLargeError ? err.message
+    : err instanceof ObjectContentError ? badContent
     : err instanceof ObjectGenerationError ? err.message
     : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded photo";
   const status = err instanceof ObjectNotFoundError ? 404
@@ -115,10 +173,35 @@ async function requireOwnedPhotoEntity(
   }
   // table names come only from the constant above, never the request.
   const table = sql.raw(PHOTO_ENTITY_TABLES[entityType]);
+  const scope = SITE_DEPARTMENT_SCOPED_ENTITIES.has(entityType)
+    ? departmentSiteCondition(entityType, "e", clientId, departmentId)
+    : sql``;
   const result = await db.execute(sql`
-    SELECT id FROM ${table} WHERE id = ${entityId} AND client_id = ${clientId} LIMIT 1
+    SELECT e.id FROM ${table} e WHERE e.id = ${entityId} AND e.client_id = ${clientId} ${scope} LIMIT 1
   `);
   return Boolean((result as any).rows[0]);
+}
+
+/**
+ * Whether a photo's parent record is outside the caller's department scope.
+ * A missing parent is not: orphaned photo rows stay deletable.
+ */
+async function photoParentOutsideDepartment(
+  executor: { execute: typeof db.execute },
+  entityType: string,
+  entityId: number,
+  clientId: number,
+  departmentId: number | null,
+): Promise<boolean> {
+  if (departmentId === null || !isSupportedPhotoEntityType(entityType)
+    || !SITE_DEPARTMENT_SCOPED_ENTITIES.has(entityType)) return false;
+  const table = sql.raw(PHOTO_ENTITY_TABLES[entityType]);
+  const result = await executor.execute(sql`
+    SELECT e.id, (TRUE ${departmentSiteCondition(entityType, "e", clientId, departmentId)}) AS in_scope
+    FROM ${table} e WHERE e.id = ${entityId} AND e.client_id = ${clientId} LIMIT 1
+  `);
+  const row = (result as any).rows[0] as { in_scope: boolean } | undefined;
+  return !!row && !row.in_scope;
 }
 
 async function rejectUnownedPhotoEntity(
@@ -165,6 +248,7 @@ router.post(
     }
 
     try {
+      await ensureUploadCapacity(clientId, req.log);
       const uploadUrl = await storage.getObjectEntityUploadURL(clientId, body.contentType);
       const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
       if (!isTenantReservedObjectPath(objectPath, clientId)) {
@@ -264,14 +348,15 @@ router.post("/request-upload", requireAuth, denyViewers, async (req, res) => {
     entityType: z.string().min(1).max(100),
     entityId: z.number().int().positive(),
     name: z.string().min(1).max(200),
-    contentType: z.enum(["image/jpeg", "image/png"], {
-      message: "Photos must be JPEG or PNG",
+    contentType: z.enum(RECORD_MEDIA_TYPES, {
+      message: "Choose a JPEG, PNG, WebP, MP4, MOV, or WebM file",
     }),
   }).parse(req.body);
 
   if (await rejectUnownedPhotoEntity(res, body.entityType, body.entityId, clientId, getActiveDepartmentId(req))) return;
 
   try {
+    await ensureUploadCapacity(clientId, req.log);
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId, body.contentType);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });
@@ -299,26 +384,18 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     if (!isTenantReservedObjectPath(normalizedPath, clientId)) {
       throw new ObjectOwnershipError("Upload was not reserved for this tenant");
     }
-    // This storage primitive pins generation + metageneration, fully validates
-    // the image, and copies exactly those bytes to a fresh immutable key before
-    // applying the ACL. A still-live staging PUT cannot replace attached data.
-    const finalized = await storage.finalizeVerifiedTenantUpload(
-      normalizedPath,
-      clientId,
-      ALLOWED_PHOTO_TYPES,
-    );
+    // Images are fully decoded and normalised; videos are signature-checked.
+    // Either way exactly the verified bytes are copied to a fresh immutable
+    // key before the ACL is applied, so a still-live staging PUT cannot
+    // replace attached data.
+    const finalized = await storage.finalizeVerifiedIssueMediaUpload(normalizedPath, clientId);
     objectPath = finalized.objectPath;
   } catch (err) {
     // Rejected uploads are still unfinalised. Best-effort deletion prevents
     // invalid bytes from accumulating; a foreign path is refused by this call.
     await storage.discardTenantUpload(body.objectPath, clientId).catch(() => {});
-    const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
-      : err instanceof ObjectContentError ? "Photo contents must be a valid JPEG or PNG"
-      : err instanceof ObjectGenerationError ? err.message
-      : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded photo";
-    return res.status(err instanceof ObjectNotFoundError ? 404
-      : err instanceof ObjectContentError ? 400
-      : err instanceof ObjectGenerationError ? 409 : 403).json({ error });
+    const mapped = photoStorageError(err, "The file must be a valid JPEG, PNG, WebP, MP4, MOV or WebM photo or video");
+    return res.status(mapped.status).json({ error: mapped.error });
   }
 
   const result = await db.execute(sql`
@@ -382,6 +459,10 @@ router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
     // orphaned row (no parent) remains deletable, as described below.
     if (row.entity_type === "pat_test"
       && await patTestHistoryAccess(tx as any, clientId, row.entity_id, departmentId) === "forbidden") {
+      return null;
+    }
+    // Other records' photos stay inside the record's department scope too.
+    if (await photoParentOutsideDepartment(tx as any, row.entity_type, row.entity_id, clientId, departmentId)) {
       return null;
     }
 

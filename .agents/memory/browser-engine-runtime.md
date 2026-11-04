@@ -1,10 +1,10 @@
 ---
 name: Browser engine runtime
-description: Playwright browser-engine coverage depends on system libraries beyond the npm package.
+description: Where Playwright Firefox/WebKit tests can actually run, and why missing engines must fail, not skip.
 ---
 
-Firefox and Chromium can run the compliance tracker browser harness in the current Nix environment after installing the available GTK/X11/media packages. Playwright WebKit may still fail because its bundled MiniBrowser requires exact Ubuntu sonames such as libgles2 and a matching GStreamer codec library that the available Nix package index does not provide.
+Cloud (Claude Code) sessions ship only Chromium under /opt/pw-browsers, and their network policy blocks Playwright's browser CDN (playwright.download.prss.microsoft.com), so `playwright install firefox webkit` fails there. GitHub Actions `ubuntu-latest` installs both with `pnpm exec playwright install --with-deps <browser>`, and the native libraries (GTK for Firefox, GStreamer/GLES for WebKit) come with `--with-deps`. Path-filtered matrix workflows already run cross-engine suites: `.github/workflows/contractor-approvals-browser.yml` and `.github/workflows/hot-tub-pdf-browser.yml` (2026-10-16: the inspection PDF download passed in Chromium, Firefox and WebKit).
 
-**Why:** Installing the WebKit browser archive alone is not enough; host validation and the MiniBrowser loader both require version-specific native libraries.
+**Why:** a skipped engine looks like a pass. Steuart asked (2026-10-16) that unavailable browsers fail explicitly.
 
-**How to apply:** Keep cross-engine tests parameterized and make missing browser binaries or host libraries explicit skips. Do not report a WebKit pass unless the MiniBrowser actually launches and completes the UI assertions.
+**How to apply:** keep cross-engine tests parameterised (e.g. `HOT_TUB_BROWSER`), throw when the engine cannot launch, and run Firefox/WebKit through a workflow (a draft PR, or workflow_dispatch) instead of in a cloud session. Report a WebKit pass only when the engine launched and the assertions completed. Playwright WebKit on Linux is not Safari on macOS/iOS, so it does not prove iPhone download behaviour.

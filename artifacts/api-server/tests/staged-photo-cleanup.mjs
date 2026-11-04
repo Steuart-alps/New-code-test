@@ -10,6 +10,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { buildOwnedFixturePurgeSql, resolveRunId } from "./fixture-ownership.mjs";
 
 if (process.env.FRESH_SCHEMA_TEST !== "1" || !process.env.DATABASE_URL) {
   throw new Error("Run through tests/run-fresh-schema.sh: a disposable database is required");
@@ -67,12 +68,13 @@ try {
     await db.execute(sql`CREATE TABLE IF NOT EXISTS contractors (id serial PRIMARY KEY, client_id integer)`);
     await db.execute(sql`CREATE TABLE IF NOT EXISTS certificates (id serial PRIMARY KEY, contractor_id integer, file_url text)`);
   }
-  const tag = `staged-cleanup-${Date.now()}`;
+  const runId = resolveRunId();
+  const tag = `staged-cleanup-${runId}`;
   const [clientA] = await rows(sql`INSERT INTO clients (name, slug, active) VALUES (${`${tag} A`}, ${`${tag}-a`}, true) RETURNING id`);
   const [clientB] = await rows(sql`INSERT INTO clients (name, slug, active) VALUES (${`${tag} B`}, ${`${tag}-b`}, true) RETURNING id`);
   const user = async (clientId, suffix) => (await rows(sql`
     INSERT INTO users (email, password_hash, name, role, client_id)
-    VALUES (${`${tag}-${suffix}@example.test`}, 'not-a-real-hash', ${`Fixture ${suffix}`}, 'client_staff', ${clientId})
+    VALUES (${`${tag}-${suffix}@test.local`}, 'not-a-real-hash', ${`Fixture ${suffix}`}, 'client_staff', ${clientId})
     RETURNING id
   `))[0].id;
   const A = clientA.id;
@@ -264,11 +266,19 @@ try {
     console.log("Staged photo cleanup tests passed (cancel, expiry, references, ACL, interruption, bounds, create races)");
   } finally {
     ObjectStorageService.prototype.deleteTenantObject = originalDelete;
-    await db.execute(sql`DELETE FROM check_photos WHERE client_id IN (${A}, ${B})`);
-    await db.execute(sql`DELETE FROM staged_photo_upload_receipts WHERE client_id IN (${A}, ${B})`);
-    await db.execute(sql`DELETE FROM users WHERE id IN (${actorA}, ${actorA2}, ${actorB})`);
-    await db.execute(sql`DELETE FROM clients WHERE id IN (${A}, ${B})`);
-    await pool.end();
+    // Remove only this run's tenants, including the audit_log rows their
+    // photos produced, which would otherwise block DELETE FROM clients
+    // (tests/fixture-ownership.mjs).
+    const cleanupConnection = await pool.connect();
+    try {
+      await cleanupConnection.query(buildOwnedFixturePurgeSql({ runId, clientIds: [A, B] }));
+    } catch (err) {
+      await cleanupConnection.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      cleanupConnection.release();
+      await pool.end();
+    }
   }
 } finally {
   await rm(outDir, { recursive: true, force: true });

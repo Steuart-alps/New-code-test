@@ -14,6 +14,10 @@ import { useToast } from "@/hooks/use-toast";
 import { format, startOfWeek } from "date-fns";
 import { Calendar, CheckCircle2, Save, Plus, Trash2, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { kitchenWeeklyAttentionAnswer, kitchenWeeklyNeedsAttention } from "@workspace/api-client-react";
+import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ── Data shape ────────────────────────────────────────────────────────────────
 
@@ -62,10 +66,15 @@ const REVIEW_QUESTIONS: { key: string; label: string }[] = [
 
 // ── YNA toggle ────────────────────────────────────────────────────────────────
 
-function YNAToggle({ value, onChange, disabled, invertColors }: { value: Answer; onChange: (v: Answer) => void; disabled?: boolean; invertColors?: boolean }) {
+const ANSWER_GOOD = "bg-emerald-100 text-emerald-800 border-emerald-300";
+const ANSWER_ATTENTION = "bg-rose-100 text-rose-800 border-rose-300";
+const ANSWER_NEUTRAL = "bg-slate-100 text-slate-700 border-slate-300";
+
+/** invertColors: "Yes" is the answer that needs attention. neutral: neither answer does. */
+function YNAToggle({ value, onChange, disabled, invertColors, neutral }: { value: Answer; onChange: (v: Answer) => void; disabled?: boolean; invertColors?: boolean; neutral?: boolean }) {
   const opts: { v: Answer; label: string; cls: string }[] = [
-    { v: "yes", label: "Yes", cls: invertColors ? "bg-rose-100 text-rose-800 border-rose-300"    : "bg-emerald-100 text-emerald-800 border-emerald-300" },
-    { v: "no",  label: "No",  cls: invertColors ? "bg-emerald-100 text-emerald-800 border-emerald-300" : "bg-rose-100 text-rose-800 border-rose-300" },
+    { v: "yes", label: "Yes", cls: neutral ? ANSWER_NEUTRAL : invertColors ? ANSWER_ATTENTION : ANSWER_GOOD },
+    { v: "no",  label: "No",  cls: neutral ? ANSWER_NEUTRAL : invertColors ? ANSWER_GOOD : ANSWER_ATTENTION },
     { v: "na",  label: "N/A", cls: "bg-slate-100 text-slate-700 border-slate-300" },
   ];
   return (
@@ -103,7 +112,11 @@ function CheckRow({ q, value, onChange, disabled }: {
         <p className="text-sm font-medium">{q.label}</p>
         {q.sublabel && <p className="text-xs text-muted-foreground mt-0.5">{q.sublabel}</p>}
       </div>
-      <YNAToggle value={value} onChange={onChange} disabled={disabled} />
+      <YNAToggle
+        value={value} onChange={onChange} disabled={disabled}
+        invertColors={kitchenWeeklyAttentionAnswer(q.key) === "yes"}
+        neutral={kitchenWeeklyAttentionAnswer(q.key) === null}
+      />
     </div>
   );
 }
@@ -122,6 +135,7 @@ export default function WeeklyReviewTab() {
 
   const [checks, setChecks] = useState<Record<string, Answer>>({});
   const [deviations, setDeviations] = useState<{ rule?: string; action?: string }[]>([]);
+  const newRow = useFocusNewRow();
   const [additional, setAdditional] = useState<Record<string, any>>({});
   const [managerSig, setManagerSig] = useState("");
 
@@ -156,7 +170,7 @@ export default function WeeklyReviewTab() {
 
   async function save(submit = false) {
     if (submit && !managerSig.trim()) {
-      toast({ title: "Manager signature required", variant: "destructive" });
+      toast({ title: "Manager name required", variant: "destructive" });
       return;
     }
     setSaving(true);
@@ -190,8 +204,8 @@ export default function WeeklyReviewTab() {
 
   const isSubmitted = !!record?.submitted_at;
 
-  // flag any "no" answers
-  const noAnswers = [...HOUSE_RULES, ...REVIEW_QUESTIONS].filter(q => checks[q.key] === "no");
+  // Flag the answers that fail the week (the same rule the API uses for the result).
+  const attentionAnswers = [...HOUSE_RULES, ...REVIEW_QUESTIONS].filter(q => kitchenWeeklyNeedsAttention(q.key, checks[q.key]));
 
   return (
     <div className="space-y-6">
@@ -201,7 +215,7 @@ export default function WeeklyReviewTab() {
           <CardHeader className="border-b border-border/50 pb-4">
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="text-base font-display">Week Commencing</CardTitle>
+                <CardTitle className="text-base font-display font-bold">Week Commencing</CardTitle>
                 <CardDescription className="text-xs mt-1">Select the Monday for the week being reviewed</CardDescription>
               </div>
               {isSubmitted && (
@@ -221,7 +235,7 @@ export default function WeeklyReviewTab() {
 
         <Card>
           <CardHeader className="border-b border-border/50 pb-4">
-            <CardTitle className="text-base font-display">Recent Reviews</CardTitle>
+            <CardTitle className="text-base font-display font-bold">Recent Reviews</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             {history.length === 0 ? (
@@ -252,7 +266,7 @@ export default function WeeklyReviewTab() {
           {/* Section 1: House Rules */}
           <Card>
             <CardHeader className="border-b border-border/50 pb-4">
-              <CardTitle className="text-base font-display">House Rules Review</CardTitle>
+              <CardTitle className="text-base font-display font-bold">House Rules Review</CardTitle>
               <CardDescription className="text-xs mt-1">
                 Has each area followed the house rules this week? Answer Yes / No / N/A for each.
               </CardDescription>
@@ -263,7 +277,7 @@ export default function WeeklyReviewTab() {
                   key={q.key}
                   q={q}
                   value={checks[q.key] as Answer ?? ""}
-                  onChange={v => setChecks(prev => ({ ...prev, [q.key]: v }))}
+                  onChange={v => setChecks(prev => { const next = { ...prev, [q.key]: v }; if (!v) delete next[q.key]; return next; })}
                   disabled={isSubmitted}
                 />
               ))}
@@ -275,23 +289,23 @@ export default function WeeklyReviewTab() {
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-base font-display">House Rules Deviations Observed</CardTitle>
+                  <CardTitle className="text-base font-display font-bold">House Rules Deviations Observed</CardTitle>
                   <CardDescription className="text-xs mt-1">
                     If any answer above is "No", record the deviation and corrective action taken
                   </CardDescription>
                 </div>
                 {!isSubmitted && (
-                  <Button variant="outline" size="sm" onClick={() => setDeviations([...deviations, {}])}>
+                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setDeviations([...deviations, {}]); }}>
                     <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
                   </Button>
                 )}
               </div>
             </CardHeader>
-            <CardContent className="p-4 space-y-2">
-              {noAnswers.length > 0 && deviations.length === 0 && !isSubmitted && (
+            <CardContent ref={newRow.ref} className="p-4 space-y-2">
+              {attentionAnswers.length > 0 && deviations.length === 0 && !isSubmitted && (
                 <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-start gap-2 mb-3">
                   <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-                  <span>{noAnswers.map(q => q.label).join(", ")} answered "No" — please record the deviation and action taken below.</span>
+                  <span>{attentionAnswers.map(q => `${q.label} (${checks[q.key] === "yes" ? "Yes" : "No"})`).join(", ")}: these answers need attention. Please record the deviation and action taken below.</span>
                 </div>
               )}
               {deviations.length === 0 ? (
@@ -327,7 +341,7 @@ export default function WeeklyReviewTab() {
           {/* Section 2: Review questions */}
           <Card>
             <CardHeader className="border-b border-border/50 pb-4">
-              <CardTitle className="text-base font-display">Management Review Questions</CardTitle>
+              <CardTitle className="text-base font-display font-bold">Management Review Questions</CardTitle>
               <CardDescription className="text-xs mt-1">
                 Additional review checks covering allergens, suppliers, complaints, training and ongoing records
               </CardDescription>
@@ -338,7 +352,7 @@ export default function WeeklyReviewTab() {
                   key={q.key}
                   q={q}
                   value={checks[q.key] as Answer ?? ""}
-                  onChange={v => setChecks(prev => ({ ...prev, [q.key]: v }))}
+                  onChange={v => setChecks(prev => { const next = { ...prev, [q.key]: v }; if (!v) delete next[q.key]; return next; })}
                   disabled={isSubmitted}
                 />
               ))}
@@ -348,7 +362,7 @@ export default function WeeklyReviewTab() {
           {/* Additional info */}
           <Card>
             <CardHeader className="border-b border-border/50 pb-4">
-              <CardTitle className="text-base font-display">Additional Information</CardTitle>
+              <CardTitle className="text-base font-display font-bold">Additional Information</CardTitle>
             </CardHeader>
             <CardContent className="p-4 space-y-4">
               <div className="flex items-center justify-between gap-4 py-2">
@@ -376,15 +390,15 @@ export default function WeeklyReviewTab() {
           {/* Sign-off */}
           <Card>
             <CardHeader className="border-b border-border/50 pb-4">
-              <CardTitle className="text-base font-display">Manager / Proprietor Sign-off</CardTitle>
+              <CardTitle className="text-base font-display font-bold">Manager / Proprietor Sign-off</CardTitle>
             </CardHeader>
             <CardContent className="p-4 space-y-4">
               <div className="space-y-1.5">
-                <Label>Manager / Proprietor name (signature)</Label>
+                <Label>Manager / Proprietor name</Label>
                 <Input
                   value={managerSig}
                   onChange={e => setManagerSig(e.target.value)}
-                  placeholder="Type your name to sign"
+                  placeholder="Your name (you sign when you submit)"
                   disabled={isSubmitted}
                   className="max-w-sm"
                 />
@@ -393,6 +407,7 @@ export default function WeeklyReviewTab() {
                 <div className="flex items-center gap-2 text-sm text-emerald-700">
                   <CheckCircle2 className="w-4 h-4" />
                   Submitted on {format(new Date(record!.submitted_at!), "dd/MM/yyyy 'at' HH:mm")} by {record!.manager_signature}
+                  <RecordSignedBy recordType="kitchen_weekly_review" recordId={record!.id} compact className="ml-2" />
                 </div>
               ) : (
                 <div className="flex items-center gap-3">
@@ -405,6 +420,11 @@ export default function WeeklyReviewTab() {
                   </Button>
                 </div>
               )}
+              <div className="border-t pt-3">
+                {record?.id ? (
+                  <CheckPhotoUploader entityType="kitchen_weekly_record" entityId={record.id} compact />
+                ) : !isSubmitted && <p className="text-xs text-muted-foreground">Save a draft to add photos or videos.</p>}
+              </div>
             </CardContent>
           </Card>
         </>

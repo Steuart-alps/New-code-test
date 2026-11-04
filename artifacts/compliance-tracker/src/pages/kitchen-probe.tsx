@@ -14,6 +14,41 @@ import { format } from "date-fns";
 import { CheckCircle2, XCircle, Save, Plus, Trash2, Thermometer } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
+import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { RecordSignedBy } from "@/components/record-signature";
+
+// ── Method guide ──────────────────────────────────────────────────────────────
+
+/** How to carry out the two calibration tests, shown on the check page. */
+function ProbeMethodGuide() {
+  return (
+    <details className="rounded-sm border bg-muted/20 p-3 text-sm">
+      <summary className="cursor-pointer font-medium">How to check a probe thermometer</summary>
+      <div className="mt-3 space-y-3 text-muted-foreground">
+        <p>Clean and sanitise the probe before you start, and check the battery, the tip and the cable for damage.</p>
+        <div>
+          <p className="font-medium text-foreground">Ice-point test (should read between -1°C and 1°C)</p>
+          <ol className="list-decimal pl-5 space-y-0.5">
+            <li>Fill a cup or jug with crushed ice and add a little cold water, so the ice is wet but not floating.</li>
+            <li>Stir and leave it for about a minute to settle.</li>
+            <li>Put the probe tip into the middle of the ice, not touching the sides or bottom.</li>
+            <li>Wait until the reading stops changing, then record it.</li>
+          </ol>
+        </div>
+        <div>
+          <p className="font-medium text-foreground">Boiling-point test (should read between 99°C and 101°C)</p>
+          <ol className="list-decimal pl-5 space-y-0.5">
+            <li>Bring a pan of water to a full rolling boil.</li>
+            <li>Put the probe tip into the water, away from the sides and bottom of the pan. Keep your hand clear of the steam.</li>
+            <li>Wait until the reading stops changing, then record it.</li>
+          </ol>
+        </div>
+        <p>If either reading is more than 1°C out, take the probe out of use and use a spare. Have it repaired, recalibrated or replaced, and write what you did in the notes. Clean and sanitise the probe again when you finish.</p>
+      </div>
+    </details>
+  );
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -33,6 +68,7 @@ type ProbeRecord = {
   probes: ProbeRow[];
   overall_result?: string | null;
   checked_by?: string | null;
+  checked_by_roster_id?: number | null;
   signature?: string | null;
   notes?: string | null;
   submitted_at?: string | null;
@@ -171,6 +207,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
   const [saving, setSaving] = useState(false);
 
   const [probes, setProbes] = useState<ProbeRow[]>(() => defaultProbes(defaultProbeNames));
+  const newRow = useFocusNewRow();
   const [overallResult, setOverallResult] = useState<"pass" | "fail" | "">("");
   const [checkedBy, setCheckedBy] = useState("");
   const [checkedByRosterId, setCheckedByRosterId] = useState<number | null>(null);
@@ -192,6 +229,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
         setProbes(Array.isArray(r.probes) ? r.probes : defaultProbes(defaultProbeNames));
         setOverallResult((r.overall_result as any) ?? "");
         setCheckedBy(r.checked_by ?? "");
+        setCheckedByRosterId(r.checked_by_roster_id ?? null);
         setSignature(r.signature ?? "");
         setNotes(r.notes ?? "");
       } else {
@@ -199,6 +237,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
         setProbes(defaultProbes(defaultProbeNames));
         setOverallResult("");
         setCheckedBy("");
+        setCheckedByRosterId(null);
         setSignature("");
         setNotes("");
       }
@@ -218,7 +257,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
 
   async function save(submit = false) {
     if (submit && !signature.trim()) {
-      toast({ title: "Signature required to submit", variant: "destructive" });
+      toast({ title: "Name required to submit", variant: "destructive" });
       return;
     }
     setSaving(true);
@@ -266,7 +305,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
           <CardHeader className="border-b border-border/50 pb-4">
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="text-base font-display">Probe Check Date</CardTitle>
+                <CardTitle className="text-base font-display font-bold">Probe Check Date</CardTitle>
                 <CardDescription className="text-xs mt-1">
                   Probes should be calibrated at least once every 4 weeks (monthly). Test using ice-point (0°C) and boiling-point (100°C) methods. Acceptable range: ±1°C.
                 </CardDescription>
@@ -279,17 +318,18 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
               )}
             </div>
           </CardHeader>
-          <CardContent className="p-4">
+          <CardContent className="p-4 space-y-4">
             <div className="flex items-center gap-3">
               <Label className="text-sm whitespace-nowrap">Check date:</Label>
               <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="max-w-xs" />
             </div>
+            <ProbeMethodGuide />
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="border-b border-border/50 pb-4">
-            <CardTitle className="text-base font-display">Probe Check History</CardTitle>
+            <CardTitle className="text-base font-display font-bold">Probe Check History</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             {history.length === 0 ? (
@@ -350,17 +390,17 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-base font-display">Probe Calibration Results</CardTitle>
+                  <CardTitle className="text-base font-display font-bold">Probe Calibration Results</CardTitle>
                   <CardDescription className="text-xs mt-1">Record each probe's ice-point and boiling-point readings</CardDescription>
                 </div>
                 {!isSubmitted && (
-                  <Button variant="outline" size="sm" onClick={() => setProbes(p => [...p, emptyProbe()])}>
+                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setProbes(p => [...p, emptyProbe()]); }}>
                     <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Probe
                   </Button>
                 )}
               </div>
             </CardHeader>
-            <CardContent className="p-4 space-y-4">
+            <CardContent ref={newRow.ref} className="p-4 space-y-4">
               {probes.length === 0 ? (
                 <p className="text-sm text-muted-foreground italic">No probes added.</p>
               ) : (
@@ -381,7 +421,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
           {/* General notes */}
           <Card>
             <CardHeader className="border-b border-border/50 pb-4">
-              <CardTitle className="text-base font-display">General Notes</CardTitle>
+              <CardTitle className="text-base font-display font-bold">General Notes</CardTitle>
             </CardHeader>
             <CardContent className="p-4">
               <Textarea
@@ -397,7 +437,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
           {/* Sign-off */}
           <Card>
             <CardHeader className="border-b border-border/50 pb-4">
-              <CardTitle className="text-base font-display">Sign-off</CardTitle>
+              <CardTitle className="text-base font-display font-bold">Sign-off</CardTitle>
             </CardHeader>
             <CardContent className="p-4 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -405,8 +445,8 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
                   <StaffPerformerSelect label="Checked by" value={checkedBy} onChange={setCheckedBy} onRosterIdChange={setCheckedByRosterId} className={isSubmitted ? "pointer-events-none opacity-60" : undefined} />
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Signature (type name)</Label>
-                  <Input value={signature} onChange={e => setSignature(e.target.value)} placeholder="Type name to sign" disabled={isSubmitted} />
+                  <Label>Name of person signing</Label>
+                  <Input value={signature} onChange={e => setSignature(e.target.value)} placeholder="Your name (you sign when you submit)" disabled={isSubmitted} />
                 </div>
               </div>
 
@@ -414,6 +454,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
                 <div className="flex items-center gap-2 text-sm text-emerald-700">
                   <CheckCircle2 className="w-4 h-4" />
                   Submitted on {format(new Date(record!.submitted_at!), "dd/MM/yyyy 'at' HH:mm")} by {record!.signature ?? record!.checked_by}
+                  <RecordSignedBy recordType="kitchen_probe_check" recordId={record!.id} compact className="ml-2" />
                 </div>
               ) : (
                 <div className="flex items-center gap-3">
@@ -426,6 +467,11 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
                   </Button>
                 </div>
               )}
+              <div className="border-t pt-3">
+                {record?.id ? (
+                  <CheckPhotoUploader entityType="kitchen_probe_check" entityId={record.id} compact />
+                ) : !isSubmitted && <p className="text-xs text-muted-foreground">Save a draft to add photos or videos.</p>}
+              </div>
             </CardContent>
           </Card>
         </>

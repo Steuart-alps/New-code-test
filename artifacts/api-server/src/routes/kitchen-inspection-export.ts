@@ -3,16 +3,16 @@ import { z } from "zod";
 import { ZipArchive } from "archiver";
 import { db } from "@workspace/db";
 import { sitesTable } from "@workspace/db/schema";
-import { and, eq, isNull, or } from "drizzle-orm";
-import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
+import { and, eq } from "drizzle-orm";
+import { requireAuth, getClientId, getActiveDepartmentId, isDepartmentLead } from "../middleware/requireAuth";
 import { requireService } from "../lib/services";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
 import { KitchenRegisterTooLarge, kitchenInspectionRegister } from "../lib/kitchenInspectionRegister";
 
 const router = Router();
 const requireKitchenManager: RequestHandler = (req, res, next) => {
   const user = req.currentUser;
-  if (user && (user.role === "client_admin" || user.role === "consultant"
-    || (user.role === "client_staff" && user.isDepartmentManager === true))) return next();
+  if (user && (user.role === "client_admin" || user.role === "consultant" || isDepartmentLead(user))) return next();
   res.status(403).json({ error: "Manager access required" });
 };
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
@@ -37,7 +37,7 @@ router.get("/export/kitchen-register", requireAuth, requireKitchenManager, requi
   const departmentId = getActiveDepartmentId(req);
   const [site] = await db.select().from(sitesTable).where(and(
     eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId),
-    ...(departmentId === null ? [] : [or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId))!]),
+    ...(departmentId === null ? [] : [sitesTableVisibleTo(departmentId)]),
   ));
   if (!site) return res.status(403).json({ error: "Site not accessible" });
   let files: Record<string, string>;

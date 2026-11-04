@@ -7,10 +7,14 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { sendEmail } from "../lib/email";
 import { getPublicAppUrl } from "../lib/email";
-import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
+import { ObjectContentError, ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
 import { digestBearerToken } from "../lib/bearerTokens";
 import { recordPublicLinkAccess } from "../lib/publicLinkEvidence";
+import { createUserNotifications } from "../lib/userNotifications";
+import { logger } from "../lib/logger";
+import { ownersOfClient } from "../lib/ownerBusinesses";
 
 const router = Router();
 export const fixTrackQuoteRouter = Router();
@@ -61,13 +65,13 @@ fixTrackQuoteRouter.post("/:token", async (req, res) => {
     ON CONFLICT (queue_id) DO NOTHING RETURNING id`);
   if (!(inserted.rows as any[])[0]) return res.status(409).json({ error: "A quote has already been submitted" });
   await db.execute(sql`UPDATE contractor_email_queue SET status='approved', updated_at=now() WHERE id=${q.id}`);
-  const managers = await db.execute(sql`SELECT id,email FROM users WHERE client_id=${q.client_id}
-    AND role IN ('client_admin','consultant') AND active=true AND email IS NOT NULL`);
+  const managers = await db.execute(sql`SELECT id,email FROM users WHERE ((client_id=${q.client_id}
+    AND role='consultant') OR ${ownersOfClient(q.client_id)}) AND active=true AND email IS NOT NULL`);
   await db.execute(sql`INSERT INTO fix_track_manager_notifications
     (client_id,user_id,issue_id,kind,title,body)
     SELECT ${q.client_id}, id, ${q.issue_id}, 'quote_submitted', ${"Quote submitted: " + q.title},
       ${`A contractor submitted a quote of £${price.toFixed(2)}.`} FROM users
-    WHERE client_id=${q.client_id} AND role IN ('client_admin','consultant') AND active=true`);
+    WHERE ((client_id=${q.client_id} AND role='consultant') OR ${ownersOfClient(q.client_id)}) AND active=true`);
   for (const manager of (managers.rows as any[])) {
     const reviewUrl = `${getPublicAppUrl()}/fix-track?quote=${(inserted.rows as any[])[0].id}`;
     try { await sendEmail({ to: manager.email, subject: `Quote submitted: ${q.title}`,
@@ -99,6 +103,9 @@ interface TokenRow {
   site_name: string | null;
   company_name: string;
   contractor_name: string | null;
+  target_date: string | null;
+  contractor_visit_date: string | null;
+  issue_status: string;
 }
 
 async function lookupToken(token: string): Promise<TokenRow | null> {
@@ -111,6 +118,9 @@ async function lookupToken(token: string): Promise<TokenRow | null> {
       fi.priority    AS issue_priority,
       fi.location    AS issue_location,
       fi.description AS issue_description,
+      fi.status      AS issue_status,
+      to_char(fi.target_date, 'YYYY-MM-DD') AS target_date,
+      to_char(fi.contractor_visit_date, 'YYYY-MM-DD') AS contractor_visit_date,
       s.name         AS site_name,
       cl.name        AS company_name
       ,c.name        AS contractor_name
@@ -130,6 +140,45 @@ function esc(s: string) {
   return String(s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function longDate(isoDate: string): string {
+  return new Date(`${isoDate}T12:00:00Z`).toLocaleDateString("en-GB", {
+    weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC",
+  });
+}
+
+/**
+ * Tell the one person looking after the job, on the bell (and phone), that the
+ * contractor picked a date or finished: the issue's assignee, else the manager
+ * who sent the job. No email, so nobody else is disturbed.
+ */
+async function notifyJobHolder(t: TokenRow, kind: "contractor_booked" | "contractor_completed", body: string) {
+  try {
+    const result = await db.execute(sql`
+      SELECT u.id, fi.site_id
+      FROM fix_track_issues fi
+      JOIN users u ON u.client_id = fi.client_id AND u.active = true
+        AND u.id = COALESCE(fi.assignee_user_id, fi.email_sent_by, fi.email_requested_by)
+      WHERE fi.id = ${t.issue_id} AND fi.client_id = ${t.client_id}
+      LIMIT 1
+    `);
+    const holder = (result.rows as any[])[0];
+    if (!holder) return;
+    await createUserNotifications([{
+      clientId: t.client_id,
+      userId: Number(holder.id),
+      module: "fix",
+      siteId: holder.site_id == null ? null : Number(holder.site_id),
+      kind: `fixtrack_${kind}`,
+      title: `${kind === "contractor_booked" ? "Visit booked" : "Job done"}: ${t.issue_title}`,
+      body,
+      linkPath: `/fix-track/${t.issue_id}`,
+      dedupeKey: `fixtrack-${kind}-${t.id}`,
+    }]);
+  } catch (err) {
+    logger.warn({ err, issueId: t.issue_id }, "FixTrack contractor update notification failed");
+  }
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -197,6 +246,8 @@ function issueBlock(t: TokenRow) {
   <div class="row"><span class="lbl">Priority</span><span class="val">${PRI_LABELS[t.issue_priority] ?? esc(t.issue_priority)}</span></div>
   <div class="row"><span class="lbl">Location</span><span class="val">${esc(t.issue_location)}</span></div>
   ${t.site_name ? `<div class="row"><span class="lbl">Site</span><span class="val">${esc(t.site_name)}</span></div>` : ""}
+  ${t.target_date ? `<div class="row"><span class="lbl">Needed by</span><span class="val">${esc(longDate(t.target_date))}</span></div>` : ""}
+  ${t.contractor_visit_date ? `<div class="row"><span class="lbl">Visit</span><span class="val">${esc(longDate(t.contractor_visit_date))}</span></div>` : ""}
   ${t.issue_description ? `<p class="desc">${esc(t.issue_description)}</p>` : ""}
 </div>`;
 }
@@ -220,7 +271,7 @@ router.get("/:token", async (req, res) => {
   if (t.used_at) {
     return res.send(shell("Already Actioned",
       `<div class="big">✅</div><div class="stitle">Already recorded</div>
-       <div class="ssub">You already updated this job — no further action needed.</div>
+       <div class="ssub">You already updated this job — no further action needed. If you need to change the date, please contact ${esc(t.company_name)}.</div>
        ${issueBlock(t)}`
     ));
   }
@@ -237,23 +288,29 @@ router.get("/:token", async (req, res) => {
 
   if (t.action === "booked") {
     const tok = esc(req.params.token);
-    return res.send(shell("Confirm Job Booking", `
-      <h1>Confirm job booking</h1>
-      <p class="sub">Confirm that you accept this job. Opening this page does not change the job status.</p>
+    const today = new Date().toISOString().slice(0, 10);
+    return res.send(shell("Pick a Visit Date", `
+      <h1>Pick your visit date</h1>
+      <p class="sub">Choose the day you will visit to do this job. Opening this page does not change anything.</p>
       ${issueBlock(t)}
-      <button class="btn" id="confirm" type="button">Confirm booking</button>
+      <label for="visit">Visit date</label>
+      <input type="date" id="visit" min="${today}" value="${esc(t.target_date && t.target_date >= today ? t.target_date : "")}"
+        style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:15px;font-family:inherit">
+      <button class="btn" id="confirm" type="button">Confirm visit date</button>
       <div id="msg"></div>
       <script>
-        const btn=document.getElementById('confirm'),msg=document.getElementById('msg');
+        const btn=document.getElementById('confirm'),msg=document.getElementById('msg'),visit=document.getElementById('visit');
         btn.addEventListener('click',async()=>{
+          if(!visit.value){msg.className='msg err';msg.textContent='Please pick a visit date';return;}
           btn.disabled=true;btn.textContent='Saving…';
           try {
-            const response=await fetch('/api/fix-track/action/${tok}/booked',{method:'POST'});
+            const response=await fetch('/api/fix-track/action/${tok}/booked',{method:'POST',
+              headers:{'Content-Type':'application/json'},body:JSON.stringify({visitDate:visit.value})});
             if(!response.ok)throw new Error(await response.text());
             window.location.reload();
           } catch(error) {
             msg.className='msg err';msg.textContent=error.message||'Please try again';
-            btn.disabled=false;btn.textContent='Confirm booking';
+            btn.disabled=false;btn.textContent='Confirm visit date';
           }
         });
       </script>
@@ -261,6 +318,15 @@ router.get("/:token", async (req, res) => {
   }
 
   // ── Completed: show form ──────────────────────────────────────────────────
+
+  // The job is booked before it can be done, so the issue's history runs in order.
+  if (t.action === "completed" && t.issue_status === "reported") {
+    return res.send(shell("Pick a Visit Date First",
+      `<div class="big">📅</div><div class="stitle">Please pick your visit date first</div>
+       <div class="ssub">Use the "Pick a visit date" button in the job email, then come back to this link when the job is done.</div>
+       ${issueBlock(t)}`
+    ));
+  }
 
   if (t.action === "completed") {
     const tok = esc(req.params.token);
@@ -335,6 +401,22 @@ router.post("/:token/booked", async (req, res) => {
   if (t.used_at) return res.status(409).send("Already actioned");
   if (new Date(t.expires_at) < new Date()) return res.status(410).send("Link expired");
 
+  // The page sends the visit date the contractor picked; older links posted
+  // nothing, which still books the job without a date.
+  const rawVisitDate = req.body?.visitDate;
+  let visitDate: string | null = null;
+  if (rawVisitDate != null && rawVisitDate !== "") {
+    if (typeof rawVisitDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(rawVisitDate)
+      || Number.isNaN(new Date(`${rawVisitDate}T00:00:00Z`).getTime())) {
+      return res.status(400).send("Please pick a valid visit date");
+    }
+    // Allow yesterday in UTC, so a contractor ahead of or behind UTC can still pick today.
+    if (rawVisitDate < new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)) {
+      return res.status(400).send("Please pick today or a later date");
+    }
+    visitDate = rawVisitDate;
+  }
+
   let outcome: "updated" | "used" | "invalid" = "used";
   try {
     outcome = await db.transaction(async (tx) => {
@@ -345,22 +427,38 @@ router.post("/:token/booked", async (req, res) => {
         RETURNING id
       `);
       if (!(tokenClaim.rows as any[])[0]) return "used" as const;
-      const issueUpdate = await tx.execute(sql`
-        UPDATE fix_track_issues
-        SET status = 'in_progress', updated_at = now()
-        WHERE id = ${t.issue_id} AND client_id = ${t.client_id} AND status = 'reported'
-        RETURNING id
+      // A manager may already have started the job; the visit date still counts.
+      const locked = await tx.execute(sql`
+        SELECT status FROM fix_track_issues
+        WHERE id = ${t.issue_id} AND client_id = ${t.client_id} FOR UPDATE
       `);
-      if (!(issueUpdate.rows as any[])[0]) throw new Error("INVALID_TRANSITION");
+      const previousStatus = (locked.rows as any[])[0]?.status;
+      if (previousStatus !== "reported" && previousStatus !== "in_progress") throw new Error("INVALID_TRANSITION");
       await tx.execute(sql`
-        INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, status, created_at)
-        VALUES (${t.client_id}, ${t.issue_id}, 'status', 'in_progress', now())
+        UPDATE fix_track_issues
+        SET status = 'in_progress',
+            contractor_visit_date = COALESCE(${visitDate}::date, contractor_visit_date),
+            updated_at = now()
+        WHERE id = ${t.issue_id} AND client_id = ${t.client_id}
       `);
+      if (previousStatus === "reported") {
+        await tx.execute(sql`
+          INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, status, created_at)
+          VALUES (${t.client_id}, ${t.issue_id}, 'status', 'in_progress', now())
+        `);
+      }
       await tx.execute(sql`
         INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, note, created_at)
         VALUES (${t.client_id}, ${t.issue_id}, 'note',
           ${`Marked as booked by ${t.contractor_name ?? "contractor"} via email`}, now())
       `);
+      if (visitDate) {
+        await tx.execute(sql`
+          INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, note, created_at)
+          VALUES (${t.client_id}, ${t.issue_id}, 'note',
+            ${`Visit date picked by ${t.contractor_name ?? "the contractor"}: ${longDate(visitDate)}`}, now())
+        `);
+      }
       return "updated" as const;
     });
   } catch (err: any) {
@@ -369,7 +467,10 @@ router.post("/:token/booked", async (req, res) => {
   }
   if (outcome === "used") return res.status(409).send("Already actioned");
   if (outcome === "invalid") return res.status(409).send("Job cannot be booked; its status has changed");
-  res.status(200).json({ ok: true });
+  await notifyJobHolder(t, "contractor_booked", visitDate
+    ? `${t.contractor_name ?? "The contractor"} will visit on ${longDate(visitDate)}.`
+    : `${t.contractor_name ?? "The contractor"} accepted the job.`);
+  res.status(200).json({ ok: true, visitDate });
 });
 
 router.post("/:token", async (req, res) => {
@@ -386,10 +487,14 @@ router.post("/:token", async (req, res) => {
   const notes                = typeof req.body?.notes === "string"                ? req.body.notes.slice(0, 5000) : null;
   const completionObjectPath = typeof req.body?.completionObjectPath === "string" ? req.body.completionObjectPath : null;
   const today                = new Date().toISOString().slice(0, 10);
+  // Appended like a manager note so the manager's own solution notes survive.
+  const stamp                = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  const notesEntry           = notes?.trim() ? `[${stamp}] ${t.contractor_name ?? "Contractor"}: ${notes.trim()}` : null;
   if (completionObjectPath) {
     try {
       await storage.finalizeTenantUpload(completionObjectPath, t.client_id);
     } catch (err) {
+      if (err instanceof ObjectContentError) return res.status(400).json({ error: err.message });
       const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
         : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded document";
       return res.status(err instanceof ObjectNotFoundError ? 404 : 403).json({ error });
@@ -411,8 +516,13 @@ router.post("/:token", async (req, res) => {
         UPDATE fix_track_issues
         SET status                   = 'resolved',
             resolved_date            = ${today},
-            solution_notes           = COALESCE(${notes}, solution_notes),
+            solution_notes           = CASE
+              WHEN ${notesEntry}::text IS NULL THEN solution_notes
+              WHEN solution_notes IS NULL OR solution_notes = '' THEN ${notesEntry}
+              ELSE solution_notes || E'\n\n' || ${notesEntry}
+            END,
             completion_document_path = COALESCE(${completionObjectPath}, completion_document_path),
+            contractor_completed_at  = now(),
             updated_at               = now()
         WHERE id = ${t.issue_id} AND client_id = ${t.client_id} AND status = 'in_progress'
         RETURNING id
@@ -448,6 +558,8 @@ router.post("/:token", async (req, res) => {
   if (outcome === "used") return res.status(409).send("Already actioned");
   if (outcome === "invalid") return res.status(409).send("Issue must be in progress before it can be completed");
 
+  await notifyJobHolder(t, "contractor_completed",
+    `${t.contractor_name ?? "The contractor"} marked the job done${notes?.trim() ? `: ${notes.trim().slice(0, 200)}` : "."} Please check it and close the issue.`);
   res.status(200).send("ok");
 });
 
@@ -466,11 +578,12 @@ router.post("/:token/upload-url", async (req, res) => {
   if (new Date(t.expires_at) < new Date()) return res.status(410).json({ error: "Link expired" });
 
   try {
+    await ensureUploadCapacity(t.client_id, req.log);
     const uploadUrl  = await storage.getObjectEntityUploadURL(t.client_id);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });
   } catch (err) {
-    return respondObjectStorageUnavailable(req, res, err, "public FixTrack completion upload");
+    return respondObjectStorageUnavailable(req, res, err, "public FixTrack completion upload", { external: true });
   }
 });
 

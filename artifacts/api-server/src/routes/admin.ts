@@ -1,12 +1,17 @@
 import { Router } from "express";
 import { seedDemo } from "../lib/seedDemo";
 import { ensureServicePrices, getServicePricePreflight } from "../lib/services";
-import { requireAuth, requireConsultant } from "../middleware/requireAuth";
+import { requireAuth, requireConsultant, requirePlatformOperator } from "../middleware/requireAuth";
+import { isPlatformAdmin } from "../lib/platformAdmin";
 import { getClientId, requireClientAdmin } from "../middleware/requireAuth";
 import { logger } from "../lib/logger";
+import { sendTestErrorReport } from "../lib/sentry";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { escapeHtml, sendSystemEmail } from "../lib/email";
+import { checkStorageAddonPrice } from "../lib/storagePricing";
+import { getBillingSummary } from "../lib/billingAlerts";
+import { getAiFinance } from "../lib/aiFinance";
 
 const router = Router();
 
@@ -20,11 +25,21 @@ type DeletionRequest = {
   status: string;
 };
 
-async function deletionEligibility(clientId: number, consultant: boolean): Promise<DeletionClient | null> {
+/**
+ * Only the business's own owner may ask for its deletion: an Owner
+ * (client_admin) or an older self-signup owner (consultant role) whose own
+ * business it is. A consultant who looks after the business through a link,
+ * including ALPS, cannot ask on its behalf; they review requests instead.
+ */
+function isBusinessOwner(user: { role: string; clientId: number | null }, clientId: number): boolean {
+  return (user.role === "client_admin" || user.role === "consultant") && user.clientId === clientId;
+}
+
+async function deletionEligibility(clientId: number, owner: boolean): Promise<DeletionClient | null> {
   const result = await db.execute(sql`
     SELECT c.id, c.name,
-      (c.data_deleted_at IS NULL AND (${consultant} OR (
-        (c.cancelled_at IS NOT NULL OR EXISTS (
+      (${owner} AND c.data_deleted_at IS NULL
+        AND (c.cancelled_at IS NOT NULL OR EXISTS (
           SELECT 1 FROM stripe.subscriptions s
           WHERE s.customer = c.stripe_customer_id AND s.status = 'canceled'
         ))
@@ -32,20 +47,21 @@ async function deletionEligibility(clientId: number, consultant: boolean): Promi
           SELECT 1 FROM stripe.subscriptions live
           WHERE live.customer = c.stripe_customer_id
             AND live.status IN ('active', 'trialing', 'past_due')
-        )
-      ))) AS eligible
+        )) AS eligible
     FROM clients c WHERE c.id = ${clientId} LIMIT 1
   `);
   return (result.rows[0] as DeletionClient | undefined) ?? null;
 }
 
-// Account-level erasure request: records are kept for at least 30 days and
-// remain untouched until an administrator has reviewed legal retention holds.
+// Account-level erasure request: only the business's owner may ask, after
+// cancelling. Records are kept for at least 30 days and remain untouched until
+// an administrator has reviewed legal retention holds.
 router.get("/data-deletion/request", requireAuth, requireClientAdmin, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "Select a client first" });
   try {
-    const client = await deletionEligibility(clientId, req.currentUser!.role === "consultant");
+    const owner = isBusinessOwner(req.currentUser!, clientId);
+    const client = await deletionEligibility(clientId, owner);
     if (!client) return res.status(404).json({ error: "Client not found" });
     const result = await db.execute(sql`
       SELECT id, requested_at, earliest_deletion_at, notification_state, status
@@ -53,7 +69,7 @@ router.get("/data-deletion/request", requireAuth, requireClientAdmin, async (req
       WHERE client_id = ${clientId} AND status IN ('pending','approved')
       LIMIT 1
     `);
-    res.json({ eligible: client.eligible, request: result.rows[0] ?? null });
+    res.json({ eligible: client.eligible, owner, request: result.rows[0] ?? null });
   } catch (err) {
     logger.error({ err, clientId }, "Could not load data deletion request");
     res.status(503).json({ error: "Deletion request status unavailable" });
@@ -66,8 +82,10 @@ router.post("/data-deletion/request", requireAuth, requireClientAdmin, async (re
   const adminEmail = process.env.ADMIN_EMAIL?.trim();
   if (!adminEmail) return res.status(503).json({ error: "Deletion requests are temporarily unavailable. Contact support." });
   try {
-    const consultant = req.currentUser!.role === "consultant";
-    const client = await deletionEligibility(clientId, consultant);
+    if (!isBusinessOwner(req.currentUser!, clientId)) {
+      return res.status(403).json({ error: "Only the business's owner can request data deletion" });
+    }
+    const client = await deletionEligibility(clientId, true);
     if (!client) return res.status(404).json({ error: "Client not found" });
     if (!client.eligible) return res.status(403).json({ error: "Data deletion can be requested after cancellation" });
     // Unique pending request per client, even across concurrent POSTs. A
@@ -82,17 +100,15 @@ router.post("/data-deletion/request", requireAuth, requireClientAdmin, async (re
       SELECT c.id, ${req.currentUser!.id}, now() + interval '30 days'
       FROM clients c WHERE c.id = ${clientId}
         AND c.data_deleted_at IS NULL
-        AND (${consultant} OR (
-          (c.cancelled_at IS NOT NULL OR EXISTS (
-            SELECT 1 FROM stripe.subscriptions s
-            WHERE s.customer = c.stripe_customer_id AND s.status = 'canceled'
-          ))
-          AND NOT EXISTS (
-            SELECT 1 FROM stripe.subscriptions live
-            WHERE live.customer = c.stripe_customer_id
-              AND live.status IN ('active', 'trialing', 'past_due')
-          )
+        AND (c.cancelled_at IS NOT NULL OR EXISTS (
+          SELECT 1 FROM stripe.subscriptions s
+          WHERE s.customer = c.stripe_customer_id AND s.status = 'canceled'
         ))
+        AND NOT EXISTS (
+          SELECT 1 FROM stripe.subscriptions live
+          WHERE live.customer = c.stripe_customer_id
+            AND live.status IN ('active', 'trialing', 'past_due')
+        )
       ON CONFLICT (client_id) WHERE status IN ('pending','approved')
         DO UPDATE SET client_id = EXCLUDED.client_id
       RETURNING id, client_id, requested_at, earliest_deletion_at, notification_state, status
@@ -159,6 +175,9 @@ router.post("/data-deletion/request", requireAuth, requireClientAdmin, async (re
 });
 
 router.get("/admin/data-deletion-requests", requireAuth, requireConsultant, async (req, res) => {
+  // Platform administrators (PLATFORM_ADMIN_EMAILS) review requests from
+  // businesses with no second consultant, e.g. self-signups.
+  const platformAdmin = isPlatformAdmin(req.currentUser!.email);
   try {
     const result = await db.execute(sql`
       SELECT r.id, r.client_id, c.name AS client_name, r.requested_at,
@@ -166,7 +185,7 @@ router.get("/admin/data-deletion-requests", requireAuth, requireConsultant, asyn
       FROM client_data_deletion_requests r
       JOIN clients c ON c.id = r.client_id
       WHERE r.status IN ('pending', 'approved')
-        AND (r.client_id = ${req.currentUser!.clientId}
+        AND (${platformAdmin} OR r.client_id = ${req.currentUser!.clientId}
           OR EXISTS (
             SELECT 1 FROM consultant_clients cc
             WHERE cc.client_id = r.client_id AND cc.user_id = ${req.currentUser!.id}
@@ -187,13 +206,16 @@ router.patch("/admin/data-deletion-requests/:id/review", requireAuth, requireCon
   if (!Number.isSafeInteger(id) || id < 1 || !["approved", "refused"].includes(decision) || note.length < 10 || note.length > 2000) {
     return res.status(400).json({ error: "Choose approve or refuse and provide a review note (10–2000 characters)" });
   }
+  // A platform administrator may review any business's request; the reviewer
+  // must still differ from the requester, and holds/the 30-day wait still apply.
+  const platformAdmin = isPlatformAdmin(req.currentUser!.email);
   try {
     const result = await db.transaction(async tx => {
       const selected = await tx.execute(sql`
         SELECT r.client_id FROM client_data_deletion_requests r
         WHERE r.id = ${id} AND r.status = 'pending'
           AND r.requested_by IS DISTINCT FROM ${req.currentUser!.id}
-          AND (r.client_id = ${req.currentUser!.clientId}
+          AND (${platformAdmin} OR r.client_id = ${req.currentUser!.clientId}
             OR EXISTS (
               SELECT 1 FROM consultant_clients cc
               WHERE cc.client_id = r.client_id AND cc.user_id = ${req.currentUser!.id}
@@ -208,7 +230,7 @@ router.patch("/admin/data-deletion-requests/:id/review", requireAuth, requireCon
             reviewed_at = now(), review_note = ${note}
         WHERE r.id = ${id} AND r.status = 'pending'
           AND r.requested_by IS DISTINCT FROM ${req.currentUser!.id}
-          AND (r.client_id = ${req.currentUser!.clientId}
+          AND (${platformAdmin} OR r.client_id = ${req.currentUser!.clientId}
             OR EXISTS (SELECT 1 FROM consultant_clients cc
               WHERE cc.client_id = r.client_id AND cc.user_id = ${req.currentUser!.id}))
           AND (${decision} = 'refused' OR NOT EXISTS (
@@ -232,8 +254,10 @@ router.patch("/admin/data-deletion-requests/:id/review", requireAuth, requireCon
 // Read-only launch check. This is deliberately separate from the repair
 // endpoint below: an administrator can see every catalogue gap without
 // creating Stripe products, changing a subscription, or granting access.
+// Platform operators only (PLATFORM_ADMIN_EMAILS): every self-signup owner
+// has the consultant role.
 // GET /api/admin/service-price-preflight
-router.get("/api/admin/service-price-preflight", requireAuth, requireConsultant, async (_req, res) => {
+router.get("/admin/service-price-preflight", requireAuth, requireConsultant, requirePlatformOperator, async (_req, res) => {
   try {
     const result = await getServicePricePreflight();
     res.status(result.ready ? 200 : 503).json(result);
@@ -247,6 +271,71 @@ router.get("/api/admin/service-price-preflight", requireAuth, requireConsultant,
       missing: [],
     });
   }
+});
+
+// Compare the Stripe storage add-on price with the provider rate plus ALPS
+// margin, fresh from Stripe. Read-only: it changes no price or subscription.
+// 200 when in line; 503 when drifted, misconfigured or unreadable (new
+// storage purchases are paused meanwhile); 404 when the add-on is not offered.
+// Platform operators only (PLATFORM_ADMIN_EMAILS).
+// GET /api/admin/storage-price-check
+router.get("/admin/storage-price-check", requireAuth, requireConsultant, requirePlatformOperator, async (_req, res) => {
+  const result = await checkStorageAddonPrice({ maxAgeMs: 0 });
+  const status = result.status === "ok" ? 200 : result.status === "not_configured" ? 404 : 503;
+  res.status(status).json(result);
+});
+
+// Business dashboard: new subscriptions, cancellations (with reasons), plan
+// changes, new free trials and module activity between two dates (inclusive,
+// UTC days; default the last 7 days), and the current paying and trial totals.
+// The same figures as ALPS's Monday billing digest. Read-only.
+// Platform operators only (PLATFORM_ADMIN_EMAILS).
+// GET /api/admin/business-dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD
+const DASHBOARD_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const DASHBOARD_MAX_DAYS = 3 * 366;
+router.get("/admin/business-dashboard", requireAuth, requireConsultant, requirePlatformOperator, async (req, res) => {
+  const day = (value: unknown): Date | null | undefined => {
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || !DASHBOARD_DAY.test(value)) return null;
+    const date = new Date(`${value}T00:00:00Z`);
+    return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value ? null : date;
+  };
+  const fromDay = day(req.query.from);
+  const toDay = day(req.query.to);
+  if (fromDay === null || toDay === null) {
+    return void res.status(400).json({ error: "Dates must be YYYY-MM-DD" });
+  }
+  const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+  const to = new Date((toDay ?? today).getTime() + 86_400_000);
+  const from = fromDay ?? new Date(to.getTime() - 7 * 86_400_000);
+  if (from >= to) return void res.status(400).json({ error: "The start date must be on or before the end date" });
+  if (to.getTime() - from.getTime() > DASHBOARD_MAX_DAYS * 86_400_000) {
+    return void res.status(400).json({ error: "Choose at most three years" });
+  }
+  try {
+    const [summary, ai] = await Promise.all([
+      getBillingSummary({ from, to }),
+      getAiFinance({ from, to }).catch((err) => {
+        logger.error({ err }, "AI income and cost could not be read for the business dashboard");
+        return null;
+      }),
+    ]);
+    res.json({ ...summary, ai });
+  } catch (err) {
+    logger.error({ err }, "Business dashboard could not be read");
+    res.status(503).json({ error: "The business dashboard is unavailable" });
+  }
+});
+
+// Sends one deliberate error report to Sentry and returns Sentry's answer
+// (accepted, rejected with a status code, failed, or not configured), so the
+// operator can confirm SENTRY_DSN and the environment tag without breaking
+// anything. Platform operators only (PLATFORM_ADMIN_EMAILS).
+// POST /api/admin/error-reports/test
+router.post("/admin/error-reports/test", requireAuth, requireConsultant, requirePlatformOperator, async (_req, res) => {
+  const result = await sendTestErrorReport();
+  logger.info({ configured: result.configured, eventId: result.eventId, delivery: result.delivery }, "Test error report requested");
+  res.json(result);
 });
 
 // One-shot demo seed endpoint, gated by a secret token.
@@ -276,9 +365,9 @@ router.post("/admin/seed-demo", async (req, res) => {
 // Ensure a Stripe price exists for every activatable module so clients can
 // turn any of them on from their billing page. Idempotent — safe to call
 // repeatedly; only creates prices for modules that are currently missing one.
-// Consultant-only (platform administration action).
+// Platform operators only (PLATFORM_ADMIN_EMAILS); creates Stripe prices.
 // POST /api/admin/ensure-service-prices
-router.post("/admin/ensure-service-prices", requireAuth, requireConsultant, async (_req, res) => {
+router.post("/admin/ensure-service-prices", requireAuth, requireConsultant, requirePlatformOperator, async (_req, res) => {
   try {
     const result = await ensureServicePrices();
     logger.info({ result }, "Ensured Stripe service prices");

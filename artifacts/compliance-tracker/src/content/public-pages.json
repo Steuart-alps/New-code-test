@@ -1,0 +1,438 @@
+{
+  "consultancyUrl": "https://www.alpsconsultancy.co.uk",
+  "index": {
+    "features": {
+      "title": "Health & Safety Modules | ComplyTrack",
+      "description": "Every ComplyTrack module: fire safety logbook, food safety records with CookSafe, legionella, hot tubs, pools, golf machinery, pest control, PAT testing, training and more. £10 per module per site per month.",
+      "heading": "Every ComplyTrack module",
+      "summary": "Pick the parts of health and safety your business actually has to keep records for. Each module is £10 per site per month on top of ComplyTrack Core, and everything is capped at £50 per site per month."
+    },
+    "templates": {
+      "title": "Free Health & Safety Log Templates to Print | ComplyTrack",
+      "description": "Free printable logs for UK businesses: weekly fire alarm test, emergency lighting, legionella water temperatures, outlet flushing, hot tub tests, fridge temperatures and NSTS sprayer tests.",
+      "heading": "Free printable health and safety logs",
+      "summary": "Print these and use them today. No sign-up needed. When you are ready to stop chasing paper, ComplyTrack keeps the same records on your phone with reminders and a full history."
+    },
+    "pricing": {
+      "title": "Pricing | ComplyTrack Health & Safety Software",
+      "description": "ComplyTrack pricing: Core £10 per site per month, each module £10, everything capped at £50 per site per month with ComplyTrack Complete. Monthly, cancel any time, 14-day free trial.",
+      "heading": "Simple pricing, month to month",
+      "summary": "Pay for the modules you need, per site, per month. No long contract, no set-up fee, and a 14-day free trial with no card needed."
+    }
+  },
+  "modules": [
+    {
+      "slug": "fire-safety-logbook",
+      "name": "FireTrack",
+      "serviceKey": "firetrack",
+      "title": "Digital Fire Safety Logbook | FireTrack by ComplyTrack",
+      "description": "Keep your fire safety logbook on your phone: weekly fire alarm tests by call point, monthly emergency lighting tests, fire drills, extinguishers and fire doors, with reminders and a full history.",
+      "heading": "Digital fire safety logbook",
+      "summary": "FireTrack replaces the paper fire logbook. Staff record each check on a phone, ComplyTrack reminds them when the next one is due, and you can show an inspector the full history in seconds.",
+      "records": [
+        "Weekly fire alarm tests, recorded against each call point so every one gets tested in turn",
+        "Monthly emergency lighting flick tests",
+        "Fire drills, including night staff",
+        "Extinguisher and fire door checks",
+        "Escape route checks and alarm zones",
+        "Reminders the day before each check is due"
+      ],
+      "law": [
+        "England and Wales: Regulatory Reform (Fire Safety) Order 2005",
+        "Scotland: Fire (Scotland) Act 2005 and Fire Safety (Scotland) Regulations 2006",
+        "Weekly alarm testing follows BS 5839-1; emergency lighting testing follows BS 5266-1"
+      ],
+      "scotland": "Scottish premises follow the Fire (Scotland) Act 2005 rather than the Fire Safety Order. The checks are much the same, and FireTrack records them the same way.",
+      "goodFor": ["Holiday parks", "Hotels and pubs", "Golf clubhouses", "Offices and shops"],
+      "templates": ["fire-alarm-weekly-test-log", "emergency-lighting-monthly-test-log"]
+    },
+    {
+      "slug": "food-safety-records",
+      "name": "KitchenTrack",
+      "serviceKey": "kitchentrack",
+      "title": "Food Safety Records App with CookSafe | KitchenTrack by ComplyTrack",
+      "description": "Digital food safety diary for UK kitchens: opening and closing checks, fridge temperatures, cooking and cooling temps, deliveries and allergens. Supports CookSafe in Scotland and HACCP-based records.",
+      "heading": "Food safety records for busy kitchens",
+      "summary": "KitchenTrack is the kitchen diary on a phone or tablet. Opening and closing checks, temperatures and deliveries are quick to record, problems get a corrective action, and the manager signs off each day.",
+      "records": [
+        "Kitchen opening and closing checks",
+        "Fridge and freezer temperatures",
+        "Cooking, cooling and hot-holding temperatures",
+        "Delivery and cold food checks",
+        "Corrective actions when something is out of limits",
+        "Manager sign-off and a weekly review based on CookSafe house rules",
+        "Allergen records alongside your daily checks"
+      ],
+      "law": [
+        "Food Safety Act 1990",
+        "Food hygiene rules requiring procedures based on HACCP principles (Regulation 852/2004 as kept in UK law)",
+        "Scotland: CookSafe from Food Standards Scotland. England: Safer Food Better Business from the Food Standards Agency"
+      ],
+      "scotland": "In Scotland, kitchens usually follow CookSafe from Food Standards Scotland, and inspection results are shown as Pass or Improvement Required. KitchenTrack has CookSafe-style records built in.",
+      "goodFor": ["Restaurants and cafes", "Pubs and hotels", "Golf clubhouses", "Holiday park cafes and bars"],
+      "templates": ["fridge-freezer-temperature-log"]
+    },
+    {
+      "slug": "legionella-water-safety",
+      "name": "LegionellaTrack",
+      "serviceKey": "legionellatrack",
+      "title": "Legionella Log Book App | LegionellaTrack by ComplyTrack",
+      "description": "Water safety logbook for legionella control: monthly hot and cold water temperature checks, sentinel outlets, flushing of little-used outlets, shower head cleaning and tank inspections.",
+      "heading": "Legionella and water safety records",
+      "summary": "LegionellaTrack keeps your water safety checks in one place. Temperatures are recorded in degrees C against each outlet, overdue checks are flagged, and the records support your legionella risk assessment and written scheme.",
+      "records": [
+        "Hot and cold water temperature checks at sentinel outlets",
+        "Flushing of little-used outlets",
+        "Shower head cleaning and descaling",
+        "Tank and calorifier inspections",
+        "Risk assessment review dates and actions",
+        "Overdue alerts by type of check"
+      ],
+      "law": [
+        "Health and Safety at Work etc. Act 1974 and COSHH Regulations 2002",
+        "HSE Approved Code of Practice L8 and guidance HSG274"
+      ],
+      "goodFor": ["Holiday parks and caravan sites", "Hotels and guest houses", "Leisure centres", "Care homes and schools"],
+      "templates": ["legionella-water-temperature-log", "little-used-outlet-flushing-log"]
+    },
+    {
+      "slug": "hot-tub-records",
+      "name": "TubTrack",
+      "serviceKey": "hottubtrack",
+      "title": "Hot Tub and Spa Pool Records App | TubTrack by ComplyTrack",
+      "description": "Hot tub and spa pool logbook for holiday lets, parks and hotels: pH, sanitiser and temperature readings, operating limits per tub, and records based on HSE HSG282 and PWTAG guidance.",
+      "heading": "Hot tub and spa pool records",
+      "summary": "TubTrack is built for holiday parks, lodges and hotels with hot tubs. Each tub has its own operating limits, readings outside them are flagged straight away, and you can download the history as a PDF.",
+      "records": [
+        "pH and sanitiser readings",
+        "Water temperature",
+        "Operating limits set for each tub",
+        "Draining, cleaning and refilling",
+        "A downloadable PDF record for each tub"
+      ],
+      "law": [
+        "HSE guidance HSG282: The control of legionella and other infectious agents in spa-pool systems",
+        "Pool Water Treatment Advisory Group (PWTAG) guidance"
+      ],
+      "goodFor": ["Holiday parks and lodges", "Hotels and spas", "Holiday lets with hot tubs"],
+      "templates": ["hot-tub-water-test-log"]
+    },
+    {
+      "slug": "swimming-pool-records",
+      "name": "AquaTrack",
+      "serviceKey": null,
+      "title": "Swimming Pool Records App | AquaTrack by ComplyTrack",
+      "description": "Pool water testing and swimming session records in one place: water quality tests, session logs and safety equipment checks for pools at holiday parks, hotels and leisure sites.",
+      "heading": "Swimming pool water tests and safety checks",
+      "summary": "AquaTrack covers both sides of running a pool: the water quality tests, and the sessions and safety equipment around them, such as rescue equipment, first aid kits and defibrillators.",
+      "records": [
+        "Pool water quality tests",
+        "Swimming session records",
+        "Safety equipment checks, including rescue poles, ring buoys, first aid kits and defibrillators",
+        "Overdue check alerts"
+      ],
+      "law": [
+        "HSE guidance HSG179: Managing health and safety in swimming pools",
+        "Pool Water Treatment Advisory Group (PWTAG) guidance"
+      ],
+      "goodFor": ["Holiday parks", "Hotels and spas", "Leisure clubs"],
+      "templates": []
+    },
+    {
+      "slug": "golf-course-machinery",
+      "name": "GreenTrack",
+      "serviceKey": null,
+      "title": "Golf Course Machinery and Greenkeeping Records | GreenTrack by ComplyTrack",
+      "description": "Greenkeeping records for golf clubs and grounds teams: machinery register, pre-use checks, PUWER inspections, defects, servicing and fuel logs, all on a phone in the shed.",
+      "heading": "Machinery and greenkeeping records for golf clubs",
+      "summary": "GreenTrack keeps every mower, tractor, sprayer and utility vehicle in one register. Greenkeepers do pre-use checks on a phone, defects are reported and tracked to a fix, and PUWER inspections and services have reminders.",
+      "records": [
+        "Machinery register, including mowers, tractors, sprayers and spreaders",
+        "Pre-use checks: fluids, tyres, blades, guards and more",
+        "PUWER inspections with next-due reminders",
+        "Defects reported and tracked until fixed",
+        "Service records and fuel logs"
+      ],
+      "law": [
+        "Provision and Use of Work Equipment Regulations 1998 (PUWER)",
+        "COSHH Regulations 2002 for the pesticides and fuels you store"
+      ],
+      "goodFor": ["Golf clubs", "Estates and grounds teams", "Holiday park grounds staff"],
+      "templates": ["nsts-sprayer-test-record"]
+    },
+    {
+      "slug": "pest-control-log",
+      "name": "PestTrack",
+      "serviceKey": "pesttrack",
+      "title": "Pest Control Log App | PestTrack by ComplyTrack",
+      "description": "Pest control records for food businesses and sites: contractor visits, findings, treatments and pest sightings between visits, with a PDF pest control register ready for inspection.",
+      "heading": "Pest control records",
+      "summary": "PestTrack records every visit from your pest control contractor and every sighting your staff report in between. Download the pest control register as a PDF when the inspector asks.",
+      "records": [
+        "Pest control contractor visits, findings and treatments",
+        "Pest activity spotted by staff between visits",
+        "Follow-up actions",
+        "A PDF register ready for inspection"
+      ],
+      "law": [
+        "Food hygiene rules requiring adequate pest control in food businesses",
+        "Prevention of Damage by Pests Act 1949"
+      ],
+      "goodFor": ["Kitchens and food businesses", "Hotels", "Holiday parks"],
+      "templates": []
+    },
+    {
+      "slug": "pat-testing-register",
+      "name": "PATtrack",
+      "serviceKey": "pattrack",
+      "title": "PAT Testing Register App | PATtrack by ComplyTrack",
+      "description": "In-house PAT testing register: a full appliance list by site and room, pass and fail results, failed appliances and replacements, and next test due dates.",
+      "heading": "PAT testing register",
+      "summary": "PATtrack keeps a full list of your portable appliances, where they are and when they were last tested. Results, failures and replacements are all recorded, and you can see what is due next across every site.",
+      "records": [
+        "Appliance list by site and room",
+        "Pass and fail results",
+        "Failed appliances, where they were and what replaced them",
+        "Next test due dates"
+      ],
+      "law": [
+        "Electricity at Work Regulations 1989",
+        "IET Code of Practice for In-service Inspection and Testing of Electrical Equipment"
+      ],
+      "goodFor": ["Holiday parks and lets", "Hotels", "Offices", "Clubhouses"],
+      "templates": []
+    },
+    {
+      "slug": "staff-training-records",
+      "name": "TrainTrack",
+      "serviceKey": "traintrack",
+      "title": "Staff Training Records and Certificate Expiry | TrainTrack by ComplyTrack",
+      "description": "Know who is trained in what and when it runs out: staff training records, certificate expiry reminders and staff sign-off, by site and department.",
+      "heading": "Staff training records",
+      "summary": "TrainTrack shows who is trained, in what, and when it expires. Staff can sign off training, and you get a reminder before certificates run out.",
+      "records": [
+        "Training records for every member of staff",
+        "Certificate expiry dates and reminders",
+        "Staff sign-off of training",
+        "Training by site and department"
+      ],
+      "law": [
+        "Health and Safety at Work etc. Act 1974",
+        "Management of Health and Safety at Work Regulations 1999"
+      ],
+      "goodFor": ["Any business with staff", "Seasonal teams", "Kitchens and greenkeeping teams"],
+      "templates": []
+    },
+    {
+      "slug": "tree-inspection-records",
+      "name": "TreeTrack",
+      "serviceKey": "treetrack",
+      "title": "Tree Inspection Records App | TreeTrack by ComplyTrack",
+      "description": "Tree inspection logbook for parks, golf courses and estates: visual checks, detailed surveys, post-storm checks and remedial works, with the location of each tree.",
+      "heading": "Tree inspection records",
+      "summary": "TreeTrack records every tree inspection with its location, result and any work needed, so you can show you are managing tree risk across your site.",
+      "records": [
+        "Visual tree assessments and detailed surveys",
+        "Post-storm checks",
+        "Results from pass to urgent action",
+        "Remedial works",
+        "Tree location, including what3words"
+      ],
+      "law": [
+        "Occupiers' Liability Acts 1957 and 1984; in Scotland, the Occupiers' Liability (Scotland) Act 1960",
+        "BS 3998:2010 Tree work and National Tree Safety Group guidance"
+      ],
+      "goodFor": ["Holiday parks", "Golf courses", "Estates and schools"],
+      "templates": []
+    },
+    {
+      "slug": "accident-incident-book",
+      "name": "IncidentTrack",
+      "serviceKey": null,
+      "title": "Digital Accident Book and RIDDOR Records | IncidentTrack by ComplyTrack",
+      "description": "A digital accident and incident book: who, what, where and when, the RIDDOR decision and reason, and the HSE reference and receipt when you report.",
+      "heading": "Accident book and RIDDOR records",
+      "summary": "IncidentTrack replaces the paper accident book. Every incident records who was involved, what happened and where, and whether it is reportable under RIDDOR, with the reason and the HSE reference kept on file.",
+      "records": [
+        "Accidents, near misses and incidents",
+        "Person involved, location and department",
+        "The RIDDOR decision and the reason for it",
+        "The HSE reference, date and receipt when reported"
+      ],
+      "law": [
+        "Reporting of Injuries, Diseases and Dangerous Occurrences Regulations 2013 (RIDDOR)",
+        "Social Security (Claims and Payments) Regulations 1979 accident book requirement"
+      ],
+      "goodFor": ["Any business with staff or visitors"],
+      "templates": []
+    },
+    {
+      "slug": "maintenance-reporting",
+      "name": "FixTrack",
+      "serviceKey": "fixtrack",
+      "title": "Maintenance Issue Reporting App | FixTrack by ComplyTrack",
+      "description": "Let staff report maintenance faults with photos, set priority, assign them and track each one to resolved, with notes on how it was fixed.",
+      "heading": "Maintenance issue reporting",
+      "summary": "FixTrack lets anyone on site report a fault with a photo. Managers set the priority, assign it, and follow it through to fixed, so nothing gets forgotten.",
+      "records": [
+        "Faults reported by type, such as electrical, plumbing or heating",
+        "Photos and videos as evidence",
+        "Priority from low to urgent",
+        "Assignment and target dates",
+        "Status from reported to resolved, with solution notes"
+      ],
+      "law": [
+        "Workplace (Health, Safety and Welfare) Regulations 1992: keeping the workplace and equipment maintained"
+      ],
+      "goodFor": ["Holiday parks", "Hotels", "Clubhouses", "Multi-site businesses"],
+      "templates": []
+    },
+    {
+      "slug": "premises-inspections",
+      "name": "PremisesTrack",
+      "serviceKey": "premisestrack",
+      "title": "Workplace Inspection Records | PremisesTrack by ComplyTrack",
+      "description": "Routine workplace and premises inspections on a phone: walk-round checks, faults found and housekeeping records for every site.",
+      "heading": "Workplace and premises inspections",
+      "summary": "PremisesTrack turns the daily or weekly walk-round into a quick checklist on a phone, with any faults passed on to be fixed.",
+      "records": [
+        "Routine workplace inspections",
+        "Faults found on inspection",
+        "Housekeeping records"
+      ],
+      "law": [
+        "Workplace (Health, Safety and Welfare) Regulations 1992"
+      ],
+      "goodFor": ["Any site", "Holiday parks", "Hotels and shops"],
+      "templates": []
+    }
+  ],
+  "templates": [
+    {
+      "slug": "fire-alarm-weekly-test-log",
+      "name": "Fire alarm weekly test log",
+      "module": "fire-safety-logbook",
+      "title": "Free Fire Alarm Weekly Test Log Template | ComplyTrack",
+      "description": "Free printable fire alarm weekly test log for UK premises. Record the call point tested, whether sounders were heard, any faults and who tested it.",
+      "heading": "Fire alarm weekly test log",
+      "summary": "Test the fire alarm once a week, using a different call point each time so every one is tested in turn. Write down which call point you used and what happened.",
+      "guidance": [
+        "Test at about the same time each week so staff and guests know it is a test.",
+        "Use a different manual call point each week and record its number or location.",
+        "Check that the alarm can be heard everywhere, including back rooms and outbuildings.",
+        "Report any fault to your fire alarm engineer and write down what was done."
+      ],
+      "fields": ["Site", "Year"],
+      "columns": ["Date", "Time", "Call point (number or location)", "Heard everywhere? Y/N", "Faults found", "Tested by"],
+      "rows": 14
+    },
+    {
+      "slug": "emergency-lighting-monthly-test-log",
+      "name": "Emergency lighting monthly test log",
+      "module": "fire-safety-logbook",
+      "title": "Free Emergency Lighting Test Log Template | ComplyTrack",
+      "description": "Free printable emergency lighting monthly test record. Log each light or area checked, whether it lit, faults and actions.",
+      "heading": "Emergency lighting monthly test log",
+      "summary": "Once a month, switch off the normal lighting supply briefly and check every emergency light comes on. Once a year a competent person should do a full-length test.",
+      "guidance": [
+        "Use the test key switch for a short test, then restore the power.",
+        "Walk every escape route and check each light or sign is lit.",
+        "Write down any light that failed and when it was fixed.",
+        "Keep this with your annual full-duration test certificate."
+      ],
+      "fields": ["Site", "Year"],
+      "columns": ["Date", "Light or area", "Lit on test? Y/N", "Fault found", "Action taken", "Tested by"],
+      "rows": 14
+    },
+    {
+      "slug": "legionella-water-temperature-log",
+      "name": "Legionella water temperature log",
+      "module": "legionella-water-safety",
+      "title": "Free Legionella Water Temperature Log Template | ComplyTrack",
+      "description": "Free printable legionella monthly water temperature log for sentinel outlets: hot water after one minute, cold water after two minutes, with actions.",
+      "heading": "Legionella water temperature log",
+      "summary": "Check the temperature at your sentinel outlets every month. These are usually the taps nearest to and furthest from the hot water heater or tank.",
+      "guidance": [
+        "Hot water should reach at least 50°C within one minute of running.",
+        "Cold water should be below 20°C after running for two minutes.",
+        "If a reading is outside these limits, write down what you did about it.",
+        "Follow your own legionella risk assessment if it sets different checks."
+      ],
+      "fields": ["Site", "Month and year"],
+      "columns": ["Date", "Outlet (location)", "Hot °C after 1 min", "Cold °C after 2 min", "Within limits? Y/N", "Action taken", "Checked by"],
+      "rows": 14
+    },
+    {
+      "slug": "little-used-outlet-flushing-log",
+      "name": "Little-used outlet flushing log",
+      "module": "legionella-water-safety",
+      "title": "Free Water Outlet Flushing Log Template | ComplyTrack",
+      "description": "Free printable weekly flushing record for little-used taps and showers, a common legionella control in holiday parks, hotels and other sites.",
+      "heading": "Little-used outlet flushing log",
+      "summary": "Taps and showers that are not used often should be flushed regularly, usually once a week, so water does not sit still in the pipes.",
+      "guidance": [
+        "List every little-used outlet named in your legionella risk assessment.",
+        "Run each one until the water is at its normal hot or cold temperature.",
+        "Run showers gently to avoid spray.",
+        "Record the date, the outlet and who did it."
+      ],
+      "fields": ["Site", "Month and year"],
+      "columns": ["Date", "Outlet (location)", "Hot or cold", "Flushed for (minutes)", "Notes", "Done by"],
+      "rows": 16
+    },
+    {
+      "slug": "hot-tub-water-test-log",
+      "name": "Hot tub water test log",
+      "module": "hot-tub-records",
+      "title": "Free Hot Tub Water Test Log Template | ComplyTrack",
+      "description": "Free printable hot tub and spa pool water test log for holiday lets, parks and hotels: pH, sanitiser, temperature and actions.",
+      "heading": "Hot tub water test log",
+      "summary": "Test the water before the tub is used and at the times your risk assessment sets. Write your own operating limits at the top so anyone testing knows what is in range.",
+      "guidance": [
+        "Write your operating limits for pH and sanitiser in the boxes at the top.",
+        "Record every test, including the time.",
+        "If a reading is out of range, close the tub until it is corrected and write down what you did.",
+        "HSE guidance HSG282 explains how to manage spa pools safely."
+      ],
+      "fields": ["Hot tub", "pH limits", "Sanitiser limits", "Month and year"],
+      "columns": ["Date", "Time", "pH", "Sanitiser (mg/l)", "Temp °C", "Clear? Y/N", "Action taken", "Tested by"],
+      "rows": 16
+    },
+    {
+      "slug": "fridge-freezer-temperature-log",
+      "name": "Fridge and freezer temperature log",
+      "module": "food-safety-records",
+      "title": "Free Fridge Temperature Log Sheet Template | ComplyTrack",
+      "description": "Free printable fridge and freezer temperature log sheet for kitchens, with morning and afternoon readings and corrective actions.",
+      "heading": "Fridge and freezer temperature log",
+      "summary": "Check every fridge and freezer at least twice a day and write down the readings. Most kitchens aim for fridges at 5°C or below and freezers at minus 18°C or below.",
+      "guidance": [
+        "Use a probe or the display, and say which in the notes.",
+        "If a fridge is too warm, check the food and move it if needed.",
+        "Write down what you did and who checked it.",
+        "In Scotland, CookSafe explains the checks Food Standards Scotland expects."
+      ],
+      "fields": ["Site", "Week beginning"],
+      "columns": ["Date", "Fridge or freezer", "AM °C", "PM °C", "Action taken", "Checked by"],
+      "rows": 16
+    },
+    {
+      "slug": "nsts-sprayer-test-record",
+      "name": "NSTS sprayer test record",
+      "module": "golf-course-machinery",
+      "title": "Free NSTS Sprayer Test Record Template | ComplyTrack",
+      "description": "Free printable record of NSTS sprayer tests for golf clubs and grounds teams: each sprayer, its certificate number, test date and next test due.",
+      "heading": "NSTS sprayer test record",
+      "summary": "Professional pesticide sprayers need a valid test under the National Sprayer Testing Scheme (NSTS). Keep one line per sprayer so you can see when each test runs out.",
+      "guidance": [
+        "List every sprayer and spreader you use for pesticides.",
+        "Copy the certificate number and test date from each NSTS certificate.",
+        "Check with NSTS how often your type of sprayer must be retested.",
+        "Keep the certificates with this sheet."
+      ],
+      "fields": ["Site", "Year"],
+      "columns": ["Sprayer (make and model)", "Serial number", "NSTS certificate no.", "Test date", "Next test due", "Notes"],
+      "rows": 10
+    }
+  ]
+}

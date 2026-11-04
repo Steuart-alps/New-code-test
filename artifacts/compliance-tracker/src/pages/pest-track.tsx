@@ -1,6 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSayItFill, withSpokenNote, type SayItFill } from "@/lib/say-it-fill";
+import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
+import { useRecordMedia } from "@/components/record-media";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,7 +36,10 @@ import { format, parseISO, isValid, differenceInDays } from "date-fns";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
-import { beginApiMutation } from "@/lib/api";
+import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { sortByLabel } from "@/lib/sort-options";
+import { TrackContractorChecks } from "@/components/track-contractor-checks";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -62,11 +69,12 @@ const SEVERITY_LABELS: Record<string, string> = {
 
 async function apiFetch(path: string, opts?: RequestInit) {
   const mutationSucceeded = beginApiMutation(opts?.method, `/pest-track${path}`);
-  const res = await fetch(`${baseUrl}/api/pest-track${path}`, {
+  const res = await fetchWithOverrideReason(withActiveClient(`${baseUrl}/api/pest-track${path}`, opts?.body), await withCsrfToken({
     ...opts,
     headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
     credentials: "include",
-  });
+  }));
+  notifyAuthStatus(res);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body?.error ?? `Request failed (${res.status})`);
@@ -104,36 +112,38 @@ function SeverityBadge({ severity }: { severity: string }) {
 
 interface PestVisit {
   id: number;
-  client_id: number;
-  site_id: number | null;
-  visit_date: string;
-  contractor_name: string | null;
-  contractor_company: string | null;
-  areas_inspected: string | null;
+  clientId: number;
+  siteId: number | null;
+  visitDate: string;
+  contractorName: string | null;
+  contractorCompany: string | null;
+  areasInspected: string | null;
   findings: string | null;
-  treatments_applied: string | null;
+  treatmentsApplied: string | null;
   recommendations: string | null;
-  next_visit_date: string | null;
-  signed_off_by: string | null;
+  nextVisitDate: string | null;
+  signedOffBy: string | null;
+  signedOffByRosterId: number | null;
   notes: string | null;
-  created_at: string;
+  createdAt: string;
 }
 
 interface PestActivity {
   id: number;
-  client_id: number;
-  site_id: number | null;
-  recorded_date: string;
-  pest_type: string;
-  evidence_type: string;
+  clientId: number;
+  siteId: number | null;
+  recordedDate: string;
+  pestType: string;
+  evidenceType: string;
   location: string | null;
   severity: string;
-  action_taken: string | null;
-  recorded_by: string | null;
+  actionTaken: string | null;
+  recordedBy: string | null;
+  recordedByRosterId: number | null;
   resolved: boolean;
-  resolved_at: string | null;
+  resolvedAt: string | null;
   notes: string | null;
-  created_at: string;
+  createdAt: string;
 }
 
 interface PestStatus {
@@ -165,20 +175,26 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
   const { toast } = useToast();
   const isEdit = !!visit;
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState(() => ({
-    visitDate:          visit?.visit_date ?? new Date().toISOString().slice(0, 10),
-    contractorName:     visit?.contractor_name ?? config.pest_contractor_name ?? "",
-    contractorCompany:  visit?.contractor_company ?? config.pest_contractor_company ?? "",
-    areasInspected:     visit?.areas_inspected ?? "",
+  const media = useRecordMedia("pest_visit", { open, disabled: saving });
+  const workingSiteId = useWorkingSiteId();
+  const initialForm = () => ({
+    visitDate:          visit?.visitDate ?? new Date().toISOString().slice(0, 10),
+    contractorName:     visit?.contractorName ?? config.pest_contractor_name ?? "",
+    contractorCompany:  visit?.contractorCompany ?? config.pest_contractor_company ?? "",
+    areasInspected:     visit?.areasInspected ?? "",
     findings:           visit?.findings ?? "",
-    treatmentsApplied:  visit?.treatments_applied ?? "",
+    treatmentsApplied:  visit?.treatmentsApplied ?? "",
     recommendations:    visit?.recommendations ?? "",
-    nextVisitDate:      visit?.next_visit_date ?? "",
-    signedOffBy:        visit?.signed_off_by ?? "",
-     signedOffByRosterId: (visit as any)?.signed_off_by_roster_id ?? null,
+    nextVisitDate:      visit?.nextVisitDate ?? "",
+    signedOffBy:        visit?.signedOffBy ?? "",
+     signedOffByRosterId: visit?.signedOffByRosterId ?? null,
     notes:              visit?.notes ?? "",
-    siteId:             String(visit?.site_id ?? ""),
-  }));
+    // A new visit starts on the user's working site.
+    siteId:             visit ? String(visit.siteId ?? "") : workingSiteId ? String(workingSiteId) : "",
+  });
+  const [form, setForm] = useState(initialForm);
+  // The dialog stays mounted: refill the form each time it opens.
+  useEffect(() => { if (open) setForm(initialForm()); }, [open, visit]);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }));
@@ -204,7 +220,8 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
       if (isEdit) {
         await apiFetch(`/visits/${visit.id}`, { method: "PUT", body: JSON.stringify(payload) });
       } else {
-        await apiFetch("/visits", { method: "POST", body: JSON.stringify(payload) });
+        const created = await apiFetch("/visits", { method: "POST", body: JSON.stringify(payload) });
+        await media.attach(created?.id);
       }
       toast({ title: isEdit ? "Visit updated" : "Visit logged" });
       onSaved(); onClose();
@@ -230,6 +247,11 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
           <div className="space-y-1.5">
             <Label>Next scheduled visit</Label>
             <Input type="date" value={form.nextVisitDate} onChange={set("nextVisitDate")} className="rounded-sm" />
+            {!isEdit && !form.nextVisitDate && (
+              <p className="text-xs text-muted-foreground">
+                Leave blank to use your visit frequency (every {config.pest_visit_frequency_months || "3"} months).
+              </p>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label>Contractor name</Label>
@@ -242,10 +264,10 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
           {sites.length > 0 && (
             <div className="space-y-1.5">
               <Label>Site</Label>
-              <Select value={form.siteId} onValueChange={v => setForm(f => ({ ...f, siteId: v }))}>
+              <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                 <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All sites</SelectItem>
+                  <SelectItem value="none">All sites</SelectItem>
                   {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -274,6 +296,9 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
             <Label>Notes</Label>
             <Textarea rows={2} value={form.notes} onChange={set("notes")} className="rounded-sm" />
           </div>
+          <div className="col-span-full">
+            {visit ? <CheckPhotoUploader entityType="pest_visit" entityId={visit.id} /> : media.picker}
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving} className="rounded-sm">Cancel</Button>
@@ -288,36 +313,61 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
 
 // ─── ActivityDialog ───────────────────────────────────────────────────────────
 
-function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
+function ActivityDialog({ open, activity, onClose, onSaved, sites, spoken }: {
   open: boolean;
   activity: PestActivity | null;
   onClose: () => void;
   onSaved: () => void;
   sites: { id: number; name: string }[];
+  /** A sighting said to Say it, filled in when the dialog opens. */
+  spoken?: SayItFill | null;
 }) {
   const { toast } = useToast();
   const isEdit = !!activity;
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("pest_activity", { open, disabled: saving });
   const { data: formOptions } = useFormOptions();
   // Effective (custom or default) lists; include the record's stored value even
   // if it was removed from the list, so editing an old record still works.
-  const pestTypeOpts = withValue(pickOptions(formOptions, "pest_types"), activity?.pest_type);
-  const evidenceTypeOpts = withValue(pickOptions(formOptions, "pest_evidence_types"), activity?.evidence_type);
-  const [form, setForm] = useState(() => ({
-    recordedDate: activity?.recorded_date ?? new Date().toISOString().slice(0, 10),
-    pestType:     activity?.pest_type ?? "rodent",
-    evidenceType: activity?.evidence_type ?? "live_sighting",
+  const pestTypeOpts = withValue(pickOptions(formOptions, "pest_types"), activity?.pestType);
+  const evidenceTypeOpts = withValue(pickOptions(formOptions, "pest_evidence_types"), activity?.evidenceType);
+  const workingSiteId = useWorkingSiteId();
+  const initialForm = () => ({
+    recordedDate: activity?.recordedDate ?? new Date().toISOString().slice(0, 10),
+    pestType:     activity?.pestType ?? "rodent",
+    evidenceType: activity?.evidenceType ?? "live_sighting",
     location:     activity?.location ?? "",
     severity:     activity?.severity ?? "low",
-    actionTaken:  activity?.action_taken ?? "",
-    recordedBy:   activity?.recorded_by ?? "", recordedByRosterId: (activity as any)?.recorded_by_roster_id ?? null,
+    actionTaken:  activity?.actionTaken ?? "",
+    recordedBy:   activity?.recordedBy ?? "", recordedByRosterId: activity?.recordedByRosterId ?? null,
     resolved:     activity?.resolved ?? false,
     notes:        activity?.notes ?? "",
-    siteId:       String(activity?.site_id ?? ""),
-  }));
+    // A new record starts on the user's working site.
+    siteId:       activity ? String(activity.siteId ?? "") : workingSiteId ? String(workingSiteId) : "",
+  });
+  const [form, setForm] = useState(initialForm);
+  // The dialog stays mounted: refill the form each time it opens.
+  useEffect(() => { if (open) setForm(initialForm()); }, [open, activity]);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }));
+
+  useEffect(() => {
+    if (!open || activity || !spoken) return;
+    const v = spoken.values;
+    const option = (value: unknown, options: string[], fallback: string) => (typeof value === "string" && options.includes(value) ? value : fallback);
+    setForm(f => ({
+      ...f,
+      recordedDate: new Date().toISOString().slice(0, 10),
+      pestType: option(v.pestType, pestTypeOpts, pestTypeOpts.includes("rodent") ? "rodent" : pestTypeOpts[0] ?? f.pestType),
+      evidenceType: option(v.evidenceType, evidenceTypeOpts, evidenceTypeOpts[0] ?? f.evidenceType),
+      location: typeof v.location === "string" ? v.location : "",
+      severity: typeof v.severity === "string" ? v.severity : "low",
+      actionTaken: "", resolved: false,
+      notes: withSpokenNote("", spoken.text),
+      siteId: spoken.siteId ? String(spoken.siteId) : f.siteId,
+    }));
+  }, [open, spoken]);
 
   const handleSave = async () => {
     if (!form.recordedDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
@@ -339,7 +389,8 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
       if (isEdit) {
         await apiFetch(`/activity/${activity.id}`, { method: "PUT", body: JSON.stringify(payload) });
       } else {
-        await apiFetch("/activity", { method: "POST", body: JSON.stringify(payload) });
+        const created = await apiFetch("/activity", { method: "POST", body: JSON.stringify(payload) });
+        await media.attach(created?.id);
       }
       toast({ title: isEdit ? "Record updated" : "Activity logged" });
       onSaved(); onClose();
@@ -367,7 +418,7 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
             <Select value={form.pestType} onValueChange={v => setForm(f => ({ ...f, pestType: v }))}>
               <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {pestTypeOpts.map(t => <SelectItem key={t} value={t}>{PEST_TYPE_LABELS[t] ?? t}</SelectItem>)}
+                {sortByLabel(pestTypeOpts, t => PEST_TYPE_LABELS[t] ?? t).map(t => <SelectItem key={t} value={t}>{PEST_TYPE_LABELS[t] ?? t}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -376,7 +427,7 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
             <Select value={form.evidenceType} onValueChange={v => setForm(f => ({ ...f, evidenceType: v }))}>
               <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {evidenceTypeOpts.map(t => <SelectItem key={t} value={t}>{EVIDENCE_LABELS[t] ?? t}</SelectItem>)}
+                {sortByLabel(evidenceTypeOpts, t => EVIDENCE_LABELS[t] ?? t).map(t => <SelectItem key={t} value={t}>{EVIDENCE_LABELS[t] ?? t}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -399,10 +450,10 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
           {sites.length > 0 && (
             <div className="space-y-1.5">
               <Label>Site</Label>
-              <Select value={form.siteId} onValueChange={v => setForm(f => ({ ...f, siteId: v }))}>
+              <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                 <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All sites</SelectItem>
+                  <SelectItem value="none">All sites</SelectItem>
                   {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -422,6 +473,9 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
               <p className="text-xs text-muted-foreground">Mark as resolved when pest activity has been dealt with</p>
             </div>
             <Switch checked={form.resolved} onCheckedChange={v => setForm(f => ({ ...f, resolved: v }))} />
+          </div>
+          <div className="col-span-full">
+            {activity ? <CheckPhotoUploader entityType="pest_activity" entityId={activity.id} /> : media.picker}
           </div>
         </div>
         <DialogFooter>
@@ -488,6 +542,10 @@ function ConfigDialog({ open, onClose, config, onSaved }: {
             <Input type="number" min={1} max={24} value={form.pest_visit_frequency_months} onChange={set("pest_visit_frequency_months")} className="rounded-sm w-28" />
             <p className="text-xs text-muted-foreground">Used to calculate when the next visit is due if no date is set on the last visit record.</p>
           </div>
+          <p className="text-xs text-muted-foreground">
+            To email your pest control contractor a reminder before each visit is due, choose them under{" "}
+            <Link href="/contractors" className="underline">Contractors, Contractor visits</Link>.
+          </p>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving} className="rounded-sm">Cancel</Button>
@@ -513,6 +571,14 @@ export default function PestTrackPage() {
   const [configDialog, setConfigDialog]     = useState(false);
   const [editVisit, setEditVisit]           = useState<PestVisit | null>(null);
   const [editActivity, setEditActivity]     = useState<PestActivity | null>(null);
+  // A sighting said to Say it ("mouse droppings in the dry store").
+  const [spokenActivity, setSpokenActivity] = useState<SayItFill | null>(null);
+  useSayItFill(["pest-activity"], fill => {
+    setActiveTab("activity");
+    setEditActivity(null);
+    setSpokenActivity(fill);
+    setActivityDialog(true);
+  });
   const [deleteVisitId, setDeleteVisitId]   = useState<number | null>(null);
   const [deleteActivityId, setDeleteActivityId] = useState<number | null>(null);
   const [downloading, setDownloading] = useState(false);
@@ -542,7 +608,7 @@ export default function PestTrackPage() {
   const { data: sites = [] } = useQuery<{ id: number; name: string }[]>({
     queryKey: ["/api/sites"],
     queryFn: async () => {
-      const res = await fetch(`${baseUrl}/api/sites`, { credentials: "include" });
+      const res = await fetch(withActiveClient(`${baseUrl}/api/sites`), { credentials: "include" });
       if (!res.ok) return [];
       return res.json();
     },
@@ -584,12 +650,12 @@ export default function PestTrackPage() {
   // ── Filtered lists ─────────────────────────────────────────────────────────
 
   const filteredVisits = visits.filter(v =>
-    !q || [v.contractor_name, v.contractor_company, v.areas_inspected, v.findings]
+    !q || [v.contractorName, v.contractorCompany, v.areasInspected, v.findings]
       .some(s => s?.toLowerCase().includes(q.toLowerCase()))
   );
 
   const filteredActivity = activity.filter(a =>
-    !q || [a.pest_type, a.evidence_type, a.location, a.action_taken, a.recorded_by]
+    !q || [a.pestType, a.evidenceType, a.location, a.actionTaken, a.recordedBy]
       .some(s => s?.toLowerCase().includes(q.toLowerCase()))
   );
 
@@ -643,11 +709,11 @@ export default function PestTrackPage() {
               <Bug className="w-4 h-4 text-emerald-700" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold leading-tight">PestTrack</h1>
+              <h1 className="text-lg font-bold leading-tight">PestTrack</h1>
               <p className="text-xs text-muted-foreground">Pest control visits and activity log</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {canAdmin && (
               <Button data-testid="button-download-pest-register" variant="outline" size="sm"
                 className="rounded-sm gap-1.5 h-8 text-xs" onClick={handleDownloadRegister}
@@ -735,6 +801,8 @@ export default function PestTrackPage() {
           </div>
         </div>
 
+        <TrackContractorChecks module="pest" />
+
         {/* ── Tabs ─────────────────────────────────────────────────────────── */}
         <Tabs value={activeTab} onValueChange={v => setActiveTab(v as any)}>
           <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -811,16 +879,16 @@ export default function PestTrackPage() {
                   </thead>
                   <tbody>
                     {filteredVisits.map((v, i) => {
-                      const isNextOverdue = v.next_visit_date && v.next_visit_date < today;
+                      const isNextOverdue = v.nextVisitDate && v.nextVisitDate < today;
                       return (
                         <tr key={v.id} className={cn("group border-t border-border hover:bg-muted/20", i === 0 && "border-t-0")}>
                           <td className="px-4 py-3">
-                            <p className="text-sm font-medium">{fmt(v.visit_date)}</p>
-                            {v.areas_inspected && <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[120px]">{v.areas_inspected}</p>}
+                            <p className="text-sm font-medium">{fmt(v.visitDate)}</p>
+                            {v.areasInspected && <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[120px]">{v.areasInspected}</p>}
                           </td>
                           <td className="px-4 py-3 hidden sm:table-cell">
-                            <p className="text-sm">{v.contractor_name ?? <span className="text-muted-foreground/40">—</span>}</p>
-                            {v.contractor_company && <p className="text-xs text-muted-foreground">{v.contractor_company}</p>}
+                            <p className="text-sm">{v.contractorName ?? <span className="text-muted-foreground/40">—</span>}</p>
+                            {v.contractorCompany && <p className="text-xs text-muted-foreground">{v.contractorCompany}</p>}
                           </td>
                           <td className="px-4 py-3 hidden md:table-cell">
                             <p className="text-xs text-muted-foreground line-clamp-2 max-w-xs">
@@ -828,14 +896,15 @@ export default function PestTrackPage() {
                             </p>
                           </td>
                           <td className="px-4 py-3 hidden lg:table-cell">
-                            {v.next_visit_date ? (
+                            {v.nextVisitDate ? (
                               <p className={cn("text-xs", isNextOverdue ? "text-red-600 font-medium" : "text-muted-foreground")}>
-                                {fmt(v.next_visit_date)}
+                                {fmt(v.nextVisitDate)}
                                 {isNextOverdue && <span className="ml-1 font-bold">Overdue</span>}
                               </p>
                             ) : <span className="text-muted-foreground/40">—</span>}
                           </td>
                           <td className="px-2 py-3">
+                            <RecordSignedBy recordType="pest_visit" recordId={v.id} compact className="mb-1" />
                             <CheckPhotoUploader entityType="pest_visit" entityId={v.id} compact />
                           </td>
                           <td className="px-4 py-3">
@@ -898,10 +967,11 @@ export default function PestTrackPage() {
                   <tbody>
                     {filteredActivity.map((a, i) => (
                       <tr key={a.id} className={cn("group border-t border-border hover:bg-muted/20", i === 0 && "border-t-0")}>
-                        <td className="px-4 py-3 text-sm">{fmt(a.recorded_date)}</td>
+                        <td className="px-4 py-3 text-sm">{fmt(a.recordedDate)}</td>
                         <td className="px-4 py-3">
-                          <p className="text-sm font-medium">{PEST_TYPE_LABELS[a.pest_type] ?? a.pest_type}</p>
-                          <p className="text-xs text-muted-foreground">{EVIDENCE_LABELS[a.evidence_type] ?? a.evidence_type}</p>
+                          <p className="text-sm font-medium">{PEST_TYPE_LABELS[a.pestType] ?? a.pestType}</p>
+                          <p className="text-xs text-muted-foreground">{EVIDENCE_LABELS[a.evidenceType] ?? a.evidenceType}</p>
+                          <CheckPhotoUploader entityType="pest_activity" entityId={a.id} compact />
                         </td>
                         <td className="px-4 py-3 hidden sm:table-cell text-xs text-muted-foreground">
                           {a.location ?? <span className="text-muted-foreground/40">—</span>}
@@ -957,8 +1027,9 @@ export default function PestTrackPage() {
         open={activityDialog}
         activity={editActivity}
         sites={sites}
+        spoken={spokenActivity}
         onSaved={refetchAll}
-        onClose={() => { setActivityDialog(false); setEditActivity(null); }}
+        onClose={() => { setActivityDialog(false); setEditActivity(null); setSpokenActivity(null); }}
       />
       {canAdmin && (
         <ConfigDialog

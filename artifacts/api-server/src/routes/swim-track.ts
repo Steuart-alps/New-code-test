@@ -1,10 +1,14 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { sitesTable } from "@workspace/db/schema";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { createWithStagedPhotoReceipts, StagedPhotoReceiptError } from "../lib/stagedPhotoReceipts";
+import {
+  findRawStoredEntry, isUniqueViolation, respondToRawStoredEntry, stagedPhotoEntry,
+} from "../lib/clientEntryReplay";
+import { siteVisibleToDepartment, visibleSiteIdsSql } from "../lib/departmentSites";
 
 const router = Router();
 
@@ -24,15 +28,38 @@ async function checkSiteAccess(
   if (siteId === null) return departmentId === null ? null : "required";
   if (!Number.isSafeInteger(siteId) || siteId <= 0) return "invalid";
 
-  const [site] = await db.select({ departmentId: sitesTable.departmentId })
+  const [site] = await db.select({ id: sitesTable.id, departmentId: sitesTable.departmentId })
     .from(sitesTable)
     .where(sql`${sitesTable.id} = ${siteId} AND ${sitesTable.clientId} = ${clientId}`)
     .limit(1);
   if (!site) return "invalid";
-  if (departmentId !== null && site.departmentId !== null && site.departmentId !== departmentId) {
+  if (!(await siteVisibleToDepartment(site, departmentId))) {
     return "forbidden";
   }
   return null;
+}
+
+/**
+ * Rejects a client-supplied siteId that is malformed, not this client's, or
+ * outside the active department. Sends the error and returns true when it did.
+ * A null/absent siteId passes (these records may be business-wide).
+ */
+async function rejectInaccessibleSite(
+  res: Response,
+  rawSiteId: unknown,
+  clientId: number,
+  departmentId: number | null,
+): Promise<boolean> {
+  if (rawSiteId == null) return false;
+  const siteId = Number(rawSiteId);
+  if ((typeof rawSiteId !== "number" && typeof rawSiteId !== "string") || !Number.isSafeInteger(siteId) || siteId <= 0) {
+    res.status(400).json({ error: "Invalid siteId" });
+    return true;
+  }
+  const access = await checkSiteAccess(siteId, clientId, departmentId);
+  if (access === "invalid") { res.status(400).json({ error: "Invalid site" }); return true; }
+  if (access === "forbidden") { res.status(403).json({ error: "Site not accessible" }); return true; }
+  return false;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -62,8 +89,7 @@ router.get("/sessions", async (req, res) => {
       WHERE s.client_id = ${clientId}
         ${hasSiteFilter ? sql`AND s.site_id = ${requestedSiteId}` : sql``}
         ${departmentId !== null ? sql`AND (s.site_id IS NULL OR s.site_id IN (
-          SELECT id FROM sites WHERE client_id = ${clientId}
-            AND (department_id IS NULL OR department_id = ${departmentId})
+          ${visibleSiteIdsSql(clientId, departmentId)}
         ))` : sql``}
       ORDER BY s.session_date DESC, s.open_time DESC NULLS LAST
       LIMIT ${parseInt(limit, 10)}
@@ -84,6 +110,8 @@ router.post("/sessions", denyViewers, async (req, res) => {
        poolClosed, closureReason, notes, photoUploadIds,
     } = req.body;
     if (!sessionDate) return res.status(400).json({ error: "sessionDate is required" });
+    const entry = stagedPhotoEntry(req.body);
+    if (entry === "invalid") return res.status(400).json({ error: "Invalid clientEntryId" });
     const rawSiteId = req.body.siteId;
     const siteId = rawSiteId == null ? null : Number(rawSiteId);
     if (rawSiteId != null && (
@@ -100,6 +128,9 @@ router.post("/sessions", denyViewers, async (req, res) => {
 
     const performer = await resolveStaffRoster(clientId, lifeguardRosterId, lifeguardName);
     if (lifeguardRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
+    const userId = req.currentUser!.id;
+    const prior = await findRawStoredEntry("swim_sessions", clientId, entry);
+    if (entry && prior) return respondToRawStoredEntry(res, prior, userId, entry);
     const canonicalPreSessionResult = preSessionResult === "fail" ? "fail" : "pass";
     const canonicalResult = poolClosed === true ? "fail" : canonicalPreSessionResult;
     const created = await createWithStagedPhotoReceipts({
@@ -113,7 +144,8 @@ router.post("/sessions", denyViewers, async (req, res) => {
         INSERT INTO swim_sessions (
           client_id, site_id, session_date, session_type, lifeguard_name, lifeguard_roster_id,
           open_time, close_time, max_bathers, bather_count_peak,
-          pre_session_result, pre_session_notes, pool_closed, closure_reason, notes, result, created_by
+          pre_session_result, pre_session_notes, pool_closed, closure_reason, notes, result, created_by,
+          client_entry_id, client_entry_hash
         ) VALUES (
           ${clientId}, ${siteId ?? null}, ${sessionDate},
            ${sessionType ?? "public_swim"}, ${performer?.performedBy ?? lifeguardName?.trim() ?? null}, ${performer?.staffRosterId ?? null},
@@ -121,7 +153,8 @@ router.post("/sessions", denyViewers, async (req, res) => {
           ${maxBathers ?? null}, ${batherCountPeak ?? null},
           ${canonicalPreSessionResult}, ${preSessionNotes?.trim() ?? null},
           ${poolClosed ?? false}, ${closureReason?.trim() ?? null},
-          ${notes?.trim() ?? null}, ${canonicalResult}, ${req.currentUser!.id}
+          ${notes?.trim() ?? null}, ${canonicalResult}, ${userId},
+          ${entry?.id ?? null}, ${entry?.hash ?? null}
         )
         RETURNING *
       `);
@@ -130,6 +163,12 @@ router.post("/sessions", denyViewers, async (req, res) => {
     res.status(201).json(created);
   } catch (err) {
     if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
+    // A concurrent resend of the same device entry won the insert.
+    const entry = stagedPhotoEntry(req.body);
+    if (entry && entry !== "invalid" && isUniqueViolation(err)) {
+      const raced = await findRawStoredEntry("swim_sessions", getClientId(req)!, entry);
+      if (raced) return respondToRawStoredEntry(res, raced, req.currentUser!.id, entry);
+    }
     res.status(500).json({ error: "Failed to create session" });
   }
 });
@@ -142,6 +181,8 @@ router.put("/sessions/:id", denyViewers, async (req, res) => {
       maxBathers, batherCountPeak, preSessionResult, preSessionNotes,
       poolClosed, closureReason, notes,
     } = req.body;
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    if (await rejectInaccessibleSite(res, siteId, clientId, getActiveDepartmentId(req))) return;
     const existing = (await db.execute(sql`SELECT lifeguard_roster_id, lifeguard_name FROM swim_sessions WHERE id=${req.params.id} AND client_id=${clientId}`)).rows[0] as any;
     if (!existing) return res.status(404).json({ error: "Session not found" });
     const performer = await resolveStaffPerformerUpdate(clientId, lifeguardRosterId, lifeguardName, existing.lifeguard_roster_id, existing.lifeguard_name);
@@ -214,6 +255,7 @@ router.post("/surveillance", denyViewers, async (req, res) => {
     const clientId = getClientId(req);
     if (!clientId) return res.status(400).json({ error: "No client context" });
      const { sessionId, siteId, checkDate, checkTime, batherCount, scanCompleted, observations, checkedBy, checkedByRosterId, photoUploadIds } = req.body;
+    if (await rejectInaccessibleSite(res, siteId, clientId, getActiveDepartmentId(req))) return;
      const performer = await resolveStaffRoster(clientId, checkedByRosterId, checkedBy);
      if (checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
     if (!checkDate) return res.status(400).json({ error: "checkDate is required" });
@@ -250,6 +292,8 @@ router.put("/surveillance/:id", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
      const { siteId, checkDate, checkTime, batherCount, scanCompleted, observations, checkedBy, checkedByRosterId } = req.body;
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    if (await rejectInaccessibleSite(res, siteId, clientId, getActiveDepartmentId(req))) return;
      const existing = (await db.execute(sql`SELECT checked_by_roster_id, checked_by FROM swim_surveillance_checks WHERE id=${req.params.id} AND client_id=${clientId}`)).rows[0] as any;
      if (!existing) return res.status(404).json({ error: "Check not found" });
      const performer = await resolveStaffPerformerUpdate(clientId, checkedByRosterId, checkedBy, existing.checked_by_roster_id, existing.checked_by);
@@ -318,6 +362,7 @@ router.post("/first-aid", denyViewers, async (req, res) => {
       throwBagOk, spineBoardOk, ringBuoyOk, oxygenKitOk,
        checkedBy, checkedByRosterId, defectsFound, notes, photoUploadIds,
     } = req.body;
+    if (await rejectInaccessibleSite(res, siteId, clientId, getActiveDepartmentId(req))) return;
      const performer = await resolveStaffRoster(clientId, checkedByRosterId, checkedBy);
      if (checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
     if (!checkDate) return res.status(400).json({ error: "checkDate is required" });
@@ -365,6 +410,8 @@ router.put("/first-aid/:id", denyViewers, async (req, res) => {
       throwBagOk, spineBoardOk, ringBuoyOk, oxygenKitOk,
        checkedBy, checkedByRosterId, defectsFound, notes,
     } = req.body;
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    if (await rejectInaccessibleSite(res, siteId, clientId, getActiveDepartmentId(req))) return;
      const existing = (await db.execute(sql`
        SELECT *
        FROM swim_first_aid_checks
@@ -463,6 +510,7 @@ router.post("/incidents", denyViewers, async (req, res) => {
       personsInvolved, description, actionTaken, reportedTo,
       reportedDate, outcome, notes, photoUploadIds,
     } = req.body;
+    if (await rejectInaccessibleSite(res, siteId, clientId, getActiveDepartmentId(req))) return;
     if (!incidentDate) return res.status(400).json({ error: "incidentDate is required" });
     if (!description?.trim()) return res.status(400).json({ error: "description is required" });
 
@@ -504,6 +552,8 @@ router.put("/incidents/:id", denyViewers, async (req, res) => {
       personsInvolved, description, actionTaken, reportedTo,
       reportedDate, outcome, notes,
     } = req.body;
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    if (await rejectInaccessibleSite(res, siteId, clientId, getActiveDepartmentId(req))) return;
     const dbResult = await db.execute(sql`
       UPDATE swim_incidents SET
         site_id = ${siteId ?? null}, incident_date = ${incidentDate},

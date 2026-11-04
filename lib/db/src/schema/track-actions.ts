@@ -1,7 +1,8 @@
-import { boolean, date, integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, date, integer, jsonb, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
 import { clientsTable } from "./clients";
 import { departmentsTable } from "./departments";
 import { sitesTable } from "./sites";
+import { usersTable } from "./users";
 
 // Operational action register and its client-maintained required-action catalogue.
 export const trackActionTemplatesTable = pgTable("track_action_templates", {
@@ -36,13 +37,24 @@ export const trackActionsTable = pgTable("track_actions", {
   instruction: text("instruction"),
   severity: text("severity").notNull(),
   ownerName: text("owner_name"),
+  /** The person responsible, when picked from the business's users; their
+   *  reminders go to them (lib/personalReminders.ts). ownerName keeps the
+   *  name shown, or a typed name for someone without an account. */
+  assigneeUserId: integer("assignee_user_id").references(() => usersTable.id, { onDelete: "set null" }),
   leadTimeDays: integer("lead_time_days"),
   dueDate: date("due_date"),
   remedialAction: text("remedial_action"),
   evidenceReference: text("evidence_reference"),
+  /** Photos and videos attached as evidence (private /objects/ paths),
+   *  added through routes/track-actions.ts like FixTrack issue media. */
+  mediaUrls: jsonb("media_urls").notNull().default([]).$type<string[]>(),
   resolutionNotes: text("resolution_notes"),
   status: text("status").notNull(),
   createdBy: integer("created_by"),
+  // Actions taken from an uploaded report: "ai" when ComplyTrack suggested
+  // the wording, "manual" when a person typed it; and who confirmed it.
+  draftSource: text("draft_source"),
+  confirmedByName: text("confirmed_by_name"),
   resolvedBy: integer("resolved_by"),
   resolvedByName: text("resolved_by_name"),
   resolverSignature: text("resolver_signature"),

@@ -9,13 +9,16 @@ import { Label } from "@/components/ui/label";
 import { motion } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 import { parseSignupPlan, registrationPlanFields } from "@/lib/signup-plan";
+import { BUSINESS_TYPE_OPTIONS } from "@/lib/onboarding";
 import alpsLogo from "@/assets/alps-logo.png";
+import { copyrightNotice } from "@/lib/copyright";
 
 const PESTTRACK_RECOMMENDED_BUSINESS_TYPES = new Set([
   "hotel_accommodation",
   "restaurant_cafe_pub",
   "care_home_healthcare",
   "holiday_park_campsite",
+  "golf_club",
 ]);
 
 export default function SignupPage() {
@@ -87,7 +90,7 @@ export default function SignupPage() {
         </button>
         <div className="flex items-center gap-3">
           <ShieldCheck className="w-6 h-6 text-primary" />
-          <span className="font-medium font-display text-xl text-[#162D42]">ComplyTrack</span>
+          <span className="font-bold font-display text-xl text-[#162D42]">ComplyTrack</span>
         </div>
         <button
           onClick={() => navigate("/login")}
@@ -107,9 +110,9 @@ export default function SignupPage() {
           <div className="text-center mb-10">
             <div className="flex justify-center items-center gap-2 mb-6 opacity-70">
               <span className="text-xs font-display italic text-[#162D42]">by</span>
-              <img src={alpsLogo} alt="ALPS Consulting" className="h-4 grayscale mix-blend-multiply" />
+              <img src={alpsLogo} alt="ALPS Consultancy" className="h-6 grayscale mix-blend-multiply" />
             </div>
-            <h1 className="text-4xl font-display text-[#162D42] mb-3">Start your free trial</h1>
+            <h1 className="text-4xl font-display font-bold text-[#162D42] mb-3">Start your free trial</h1>
             <p className="text-muted-foreground text-sm font-light">
               14 days, full access. No credit card required.
             </p>
@@ -155,16 +158,7 @@ export default function SignupPage() {
                     className="w-full h-12 pl-4 pr-10 bg-[#F7F2E4]/50 border border-border/50 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary rounded-none text-[#1A1A1A]"
                   >
                     <option value="">Select your business type…</option>
-                    <option value="hotel_accommodation">Hotel / Accommodation</option>
-                    <option value="holiday_park_campsite">Holiday Park / Campsite</option>
-                    <option value="leisure_sports_centre">Leisure / Sports Centre</option>
-                    <option value="restaurant_cafe_pub">Restaurant / Café / Pub</option>
-                    <option value="care_home_healthcare">Care Home / Healthcare</option>
-                    <option value="nursery_school">Nursery / School</option>
-                    <option value="offices_commercial">Offices / Commercial</option>
-                    <option value="retail">Retail</option>
-                    <option value="pest_control">Pest Control</option>
-                    <option value="other">Other</option>
+                    {BUSINESS_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                   <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 </div>
@@ -194,6 +188,7 @@ export default function SignupPage() {
                   />
                   <button
                     type="button"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-[#162D42]"
                     onClick={() => setShowPassword(!showPassword)}
                   >
@@ -259,7 +254,7 @@ export default function SignupPage() {
                 By creating an account you agree to our{" "}
                 <button type="button" onClick={() => navigate("/terms")} className="underline underline-offset-2 hover:text-foreground">Terms of Service</button>
                 {" "}and{" "}
-                <button type="button" onClick={() => navigate("/privacy")} className="underline underline-offset-2 hover:text-foreground">Privacy Policy</button>.
+                <span className="whitespace-nowrap"><button type="button" onClick={() => navigate("/privacy")} className="underline underline-offset-2 hover:text-foreground">Privacy Policy</button>.</span>
               </p>
             </form>
 
@@ -275,6 +270,7 @@ export default function SignupPage() {
                 Already have an account?{" "}
                 <button onClick={() => navigate("/login")} className="text-primary font-medium hover:underline">Sign in</button>
               </p>
+              <p className="text-center text-xs text-muted-foreground/60 font-light">{copyrightNotice()}</p>
             </div>
           </div>
         </motion.div>

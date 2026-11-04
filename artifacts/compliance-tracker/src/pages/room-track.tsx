@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { PassAllButton } from "@/components/pass-all-button";
 import { AppLayout } from "@/components/layout";
+import { ImportCsvButton } from "@/components/import-csv-dialog";
 import { apiFetch } from "@/lib/api";
+import { takeLinkParams } from "@/lib/deep-link";
+import { matchSpokenItem, useSayItFill, withSpokenNote, type SayItFill } from "@/lib/say-it-fill";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useListSites } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -15,6 +19,8 @@ import { useToast } from "@/hooks/use-toast";
 import { BedDouble, CheckCircle2, CheckSquare, ClipboardCheck, Loader2, Pencil, Plus, Archive, AlertCircle, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
+import { RecordSignedBy } from "@/components/record-signature";
 
 type CheckValues = { clean: boolean; tidy: boolean; toStandard: boolean };
 
@@ -72,11 +78,15 @@ function RoomDialog({ room, sites, open, onOpenChange, onSaved }: {
 }) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
+  // A new room starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
   const [form, setForm] = useState(() => ({
     roomNumber: room ? roomNumber(room) : "",
     name: room?.name ?? "",
     floor: room?.floor ?? "",
-    siteId: room && roomSiteId(room) ? String(roomSiteId(room)) : "__none__",
+    siteId: room
+      ? roomSiteId(room) ? String(roomSiteId(room)) : "__none__"
+      : workingSiteId ? String(workingSiteId) : "__none__",
     notes: room?.notes ?? "",
   }));
   const update = (key: keyof typeof form, value: string) => setForm(current => ({ ...current, [key]: value }));
@@ -144,15 +154,24 @@ export default function RoomTrackPage() {
   const { toast } = useToast();
   const { data: sites = [] } = useListSites();
   const [date, setDate] = useState(today);
-  const [siteId, setSiteId] = useState("__all__");
+  const [siteId, setSiteId] = useSiteFilter("__all__");
   const [rooms, setRooms] = useState<Room[]>([]);
   const [checks, setChecks] = useState<RoomCheck[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<number | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
+  // A scanned QR label shows just that room's check card.
+  const [onlyRoomId, setOnlyRoomId] = useState<number | null>(null);
+  useEffect(() => {
+    const id = Number(takeLinkParams(["room", "open"] as const)?.room);
+    if (Number.isSafeInteger(id) && id > 0) setOnlyRoomId(id);
+  }, []);
 
+  // A slower answer for the previous site or date must not replace this one.
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -165,16 +184,33 @@ export default function RoomTrackPage() {
       if (!roomsResponse.ok) throw new Error((await roomsResponse.json().catch(() => ({}))).error ?? "Unable to load rooms");
       if (!checksResponse.ok) throw new Error((await checksResponse.json().catch(() => ({}))).error ?? "Unable to load room checks");
       const [roomData, checkData] = await Promise.all([roomsResponse.json(), checksResponse.json()]);
+      if (seq !== loadSeq.current) return;
       setRooms(roomData);
       setChecks(checkData);
     } catch (error: any) {
-      toast({ title: "Couldn't load RoomTrack", description: error.message, variant: "destructive" });
-    } finally { setLoading(false); }
+      if (seq === loadSeq.current) toast({ title: "Couldn't load RoomTrack", description: error.message, variant: "destructive" });
+    } finally { if (seq === loadSeq.current) setLoading(false); }
   }, [date, siteId, toast]);
 
   useEffect(() => { load(); }, [load]);
 
+  // A check said to Say it ("room 12 all done") shows that room's card ticked.
+  const [spokenCheck, setSpokenCheck] = useState<{ roomId: number; fill: SayItFill } | null>(null);
+  useSayItFill(["room-check"], fill => {
+    const live = rooms.filter(room => !room.archived && !room.isArchived);
+    const room = matchSpokenItem(fill.item, live.map(r => ({
+      ...r, name: roomNumber(r) ? `Room ${roomNumber(r)}` : r.name ?? "", aliases: [r.name, roomNumber(r), `${roomNumber(r) ?? ""} ${r.name ?? ""}`],
+    })));
+    if (!room) {
+      toast({ title: "Room not found", description: `"${fill.item ?? fill.text}" didn't match a room${siteId === "__all__" ? "" : " at this site"}.`, variant: "destructive" });
+      return;
+    }
+    setOnlyRoomId(room.id);
+    setSpokenCheck({ roomId: room.id, fill });
+  }, !loading);
+
   const activeRooms = rooms.filter(room => !room.archived && !room.isArchived && (siteId === "__all__" || roomSiteId(room) === Number(siteId)));
+  const shownRooms = onlyRoomId === null ? activeRooms : activeRooms.filter(room => room.id === onlyRoomId);
   const saveCheck = async (room: Room, values: CheckValues, notes: string, checkedBy: string, checkedByRosterId: number | null) => {
     setSavingId(room.id);
     try {
@@ -206,8 +242,8 @@ export default function RoomTrackPage() {
     <AppLayout title="RoomTrack">
       <div className="space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-sm border border-sky-200 bg-sky-50"><BedDouble className="h-4 w-4 text-sky-700" /></div><div><h1 className="text-lg font-semibold">RoomTrack</h1><p className="text-xs text-muted-foreground">Daily room housekeeping checks</p></div></div>
-          {canAdmin && <Button size="sm" className="gap-1.5 rounded-sm" onClick={() => { setEditingRoom(null); setDialogOpen(true); }}><Plus className="h-3.5 w-3.5" />Add room</Button>}
+          <div className="flex gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-sm border border-sky-200 bg-sky-50"><BedDouble className="h-4 w-4 text-sky-700" /></div><div><h1 className="text-lg font-bold">RoomTrack</h1><p className="text-xs text-muted-foreground">Daily room housekeeping checks</p></div></div>
+          <div className="flex flex-wrap gap-2"><ImportCsvButton type="room-track-rooms" onImported={load} className="rounded-sm" />{canAdmin && <Button size="sm" className="gap-1.5 rounded-sm" onClick={() => { setEditingRoom(null); setDialogOpen(true); }}><Plus className="h-3.5 w-3.5" />Add room</Button>}</div>
         </div>
         <p className="rounded-sm border border-sky-200 bg-sky-50 px-4 py-2.5 text-xs text-sky-900">Clean, Tidy and To standard are all housekeeping outcomes. Use notes to capture anything needing attention.</p>
         <Card className="grid gap-3 rounded-sm p-4 sm:grid-cols-[minmax(140px,1fr)_minmax(180px,1fr)_auto]">
@@ -215,34 +251,53 @@ export default function RoomTrackPage() {
           <div className="space-y-1"><Label className="text-xs">Site</Label><Select value={siteId} onValueChange={setSiteId}><SelectTrigger className="h-9" aria-label="Filter rooms by site"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__all__">All sites</SelectItem>{sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}</SelectContent></Select></div>
           <div className="flex items-end"><Button variant="outline" className="h-9" onClick={load}>Refresh</Button></div>
         </Card>
-        {loading ? <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : activeRooms.length === 0 ? (
+        {onlyRoomId !== null && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-sm border bg-muted/40 px-4 py-2.5 text-sm">
+            <span>{shownRooms.length ? "Showing the room you scanned." : loading ? "Finding the room you scanned…" : "The room you scanned isn't in today's list for this site."}</span>
+            <Button variant="outline" size="sm" onClick={() => setOnlyRoomId(null)}>Show every room</Button>
+          </div>
+        )}
+        {/* Only the first load replaces the cards with a spinner: on a site or
+            date change they stay mounted, so unsaved ticks aren't lost. */}
+        {loading && rooms.length === 0 ? <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : shownRooms.length === 0 ? (
           <div className="rounded-sm border border-dashed p-12 text-center"><BedDouble className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" /><p className="text-sm font-medium text-muted-foreground">No active rooms for this selection</p>{canAdmin && <Button variant="outline" size="sm" className="mt-4" onClick={() => { setEditingRoom(null); setDialogOpen(true); }}>Add the first room</Button>}</div>
-        ) : <div className="grid gap-4 lg:grid-cols-2">{activeRooms.map(room => {
+        ) : <div className="grid gap-4 lg:grid-cols-2">{shownRooms.map(room => {
           const check = checks.find(item => checkRoomId(item) === room.id);
-          return <RoomCheckCard key={room.id} room={room} check={check} disabled={savingId === room.id} defaultCheckedBy={user?.name ?? ""} canAdmin={canAdmin} onSave={saveCheck} onEdit={() => { setEditingRoom(room); setDialogOpen(true); }} onArchive={() => archive(room)} />;
+          return <RoomCheckCard key={room.id} room={room} check={check} spoken={spokenCheck?.roomId === room.id ? spokenCheck.fill : null} disabled={savingId === room.id} defaultCheckedBy={user?.name ?? ""} canAdmin={canAdmin} onSave={saveCheck} onEdit={() => { setEditingRoom(room); setDialogOpen(true); }} onArchive={() => archive(room)} />;
         })}</div>}
-        {canAdmin && activeRooms.length > 0 && <section className="rounded-sm border border-border"><div className="border-b bg-muted/30 px-4 py-3"><h2 className="text-sm font-semibold">Active room register</h2><p className="text-xs text-muted-foreground">Edit room details or archive rooms no longer in use.</p></div><div className="divide-y">{activeRooms.map(room => <div key={room.id} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm"><span className="font-medium">{roomNumber(room) || room.name}</span>{room.name && roomNumber(room) && <span className="text-muted-foreground">{room.name}</span>}<span className="text-xs text-muted-foreground">{room.floor || "No floor"}</span><span className="ml-auto flex gap-1"><Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditingRoom(room); setDialogOpen(true); }} aria-label={`Edit ${roomNumber(room) || room.name}`}><Pencil className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => archive(room)} aria-label={`Archive ${roomNumber(room) || room.name}`}><Archive className="h-3.5 w-3.5" /></Button></span></div>)}</div></section>}
+        {canAdmin && activeRooms.length > 0 && <section className="rounded-sm border border-border"><div className="border-b bg-muted/30 px-4 py-3"><h2 className="text-sm font-bold">Active room register</h2><p className="text-xs text-muted-foreground">Edit room details or archive rooms no longer in use.</p></div><div className="divide-y">{activeRooms.map(room => <div key={room.id} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm"><span className="font-medium">{roomNumber(room) || room.name}</span>{room.name && roomNumber(room) && <span className="text-muted-foreground">{room.name}</span>}<span className="text-xs text-muted-foreground">{room.floor || "No floor"}</span><span className="ml-auto flex gap-1"><Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditingRoom(room); setDialogOpen(true); }} aria-label={`Edit ${roomNumber(room) || room.name}`}><Pencil className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => archive(room)} aria-label={`Archive ${roomNumber(room) || room.name}`}><Archive className="h-3.5 w-3.5" /></Button></span></div>)}</div></section>}
       </div>
       {dialogOpen && <RoomDialog key={editingRoom?.id ?? "new"} room={editingRoom} sites={sites} open={dialogOpen} onOpenChange={setDialogOpen} onSaved={load} />}
     </AppLayout>
   );
 }
 
-function RoomCheckCard({ room, check, defaultCheckedBy, disabled, canAdmin, onSave, onEdit, onArchive }: {
-  room: Room; check?: RoomCheck; defaultCheckedBy: string; disabled: boolean; canAdmin: boolean;
+function RoomCheckCard({ room, check, spoken, defaultCheckedBy, disabled, canAdmin, onSave, onEdit, onArchive }: {
+  room: Room; check?: RoomCheck; spoken?: SayItFill | null; defaultCheckedBy: string; disabled: boolean; canAdmin: boolean;
   onSave: (room: Room, values: CheckValues, notes: string, checkedBy: string, checkedByRosterId: number | null) => void; onEdit: () => void; onArchive: () => void;
 }) {
   const [values, setValues] = useState<CheckValues>(() => checkValues(check));
   const [notes, setNotes] = useState(check?.notes ?? "");
   const [checkedByRosterId, setCheckedByRosterId] = useState<number | null>((check as any)?.checkedByRosterId ?? null);
   const [checkedBy, setCheckedBy] = useState(check ? checkBy(check) ?? "" : defaultCheckedBy);
-  useEffect(() => { setValues(checkValues(check)); setNotes(check?.notes ?? ""); setCheckedBy(check ? checkBy(check) ?? "" : defaultCheckedBy); }, [check, defaultCheckedBy]);
+  // Reset only when the stored check itself changes (saved, or another day's
+  // record), not when a reload hands over an identical copy.
+  const stored = check ? JSON.stringify([check.id, checkValues(check), check.notes ?? "", checkBy(check) ?? ""]) : "";
+  useEffect(() => { setValues(checkValues(check)); setNotes(check?.notes ?? ""); setCheckedBy(check ? checkBy(check) ?? "" : defaultCheckedBy); }, [stored, defaultCheckedBy]);
+  // Ticks said to Say it are added to the card, to check and save.
+  useEffect(() => {
+    if (!spoken) return;
+    const v = spoken.values;
+    setValues(current => ({ clean: current.clean || v.clean === true, tidy: current.tidy || v.tidy === true, toStandard: current.toStandard || v.toStandard === true }));
+    setNotes(current => withSpokenNote([current, typeof v.notes === "string" ? v.notes : ""].filter(Boolean).join("\n"), spoken.text));
+  }, [spoken]);
   const completeCount = Object.values(values).filter(Boolean).length;
   const isComplete = completeCount === OUTCOMES.length;
   return <Card className={cn("rounded-sm border-l-4 p-4", isComplete ? "border-l-emerald-500" : "border-l-amber-400 bg-amber-50/40")}>
-    <div className="mb-3 flex items-start justify-between gap-3"><div><h2 className="font-semibold">{roomNumber(room) || room.name}</h2>{room.name && roomNumber(room) && <p className="text-xs text-muted-foreground">{room.name}</p>}<p className="mt-1 text-xs text-muted-foreground">{room.floor || "Floor not recorded"}{room.notes ? ` · ${room.notes}` : ""}</p></div>{isComplete ? <Badge variant="outline" className="rounded-sm border-emerald-300 bg-emerald-50 text-emerald-800"><CheckCircle2 className="mr-1 h-3 w-3" />Complete · 3/3</Badge> : <Badge variant="outline" className="rounded-sm border-amber-300 bg-amber-50 text-amber-800"><AlertCircle className="mr-1 h-3 w-3" />Requires attention · {completeCount}/3</Badge>}</div>
-    <fieldset className="mb-3"><legend className="mb-1.5 text-xs font-medium">Housekeeping checks ({completeCount}/3)</legend><div className="grid gap-2 sm:grid-cols-3">{OUTCOMES.map(outcome => <button key={outcome.key} type="button" disabled={disabled} aria-pressed={values[outcome.key]} onClick={() => setValues(current => ({ ...current, [outcome.key]: !current[outcome.key] }))} className={cn("flex items-center justify-center gap-2 rounded-sm border px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:opacity-60", values[outcome.key] ? outcome.className : "border-border bg-background text-muted-foreground hover:bg-muted/40")}>{values[outcome.key] ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}{outcome.label}</button>)}</div></fieldset>
+    <div className="mb-3 flex items-start justify-between gap-3"><div><h2 className="font-bold">{roomNumber(room) || room.name}</h2>{room.name && roomNumber(room) && <p className="text-xs text-muted-foreground">{room.name}</p>}<p className="mt-1 text-xs text-muted-foreground">{room.floor || "Floor not recorded"}{room.notes ? ` · ${room.notes}` : ""}</p></div>{isComplete ? <Badge variant="outline" className="rounded-sm border-emerald-300 bg-emerald-50 text-emerald-800"><CheckCircle2 className="mr-1 h-3 w-3" />Complete · 3/3</Badge> : <Badge variant="outline" className="rounded-sm border-amber-300 bg-amber-50 text-amber-800"><AlertCircle className="mr-1 h-3 w-3" />Requires attention · {completeCount}/3</Badge>}</div>
+    <fieldset className="mb-3"><legend className="mb-1.5 text-xs font-medium">Housekeeping checks ({completeCount}/3)</legend><div className="grid gap-2 sm:grid-cols-3">{OUTCOMES.map(outcome => <button key={outcome.key} type="button" disabled={disabled} aria-pressed={values[outcome.key]} onClick={() => setValues(current => ({ ...current, [outcome.key]: !current[outcome.key] }))} className={cn("flex items-center justify-center gap-2 rounded-sm border px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:opacity-60", values[outcome.key] ? outcome.className : "border-border bg-background text-muted-foreground hover:bg-muted/40")}>{values[outcome.key] ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}{outcome.label}</button>)}</div>{!disabled && <div className="mt-2"><PassAllButton verb="Tick" hint={false} remaining={OUTCOMES.length - completeCount} total={OUTCOMES.length} onPassAll={() => setValues({ clean: true, tidy: true, toStandard: true })} /></div>}</fieldset>
     <div className="grid gap-3 sm:grid-cols-2"><StaffPerformerSelect label="Checked by" value={checkedBy} onChange={setCheckedBy} onRosterIdChange={setCheckedByRosterId} optional className={disabled ? "pointer-events-none opacity-60" : undefined} /><div className="space-y-1 sm:col-span-2"><Label htmlFor={`notes-${room.id}`} className="text-xs">Notes</Label><Textarea id={`notes-${room.id}`} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Anything needing attention (optional)" rows={2} className="text-xs" disabled={disabled} /></div></div>
     <div className="mt-3 flex items-center gap-2"><Button size="sm" className="gap-1.5" onClick={() => onSave(room, values, notes, checkedBy, checkedByRosterId)} disabled={disabled}>{disabled ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ClipboardCheck className="h-3.5 w-3.5" />}{check ? "Update check" : "Save check"}</Button>{canAdmin && <><Button variant="ghost" size="sm" onClick={onEdit}>Edit room</Button><Button variant="ghost" size="sm" onClick={onArchive} className="text-muted-foreground">Archive</Button></>}</div>
+    {check?.id && <RecordSignedBy recordType="room_check" recordId={check.id} className="mt-2" />}
   </Card>;
 }

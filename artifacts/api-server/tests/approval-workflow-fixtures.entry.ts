@@ -4,3 +4,8 @@ export { runReminderJob } from "../src/routes/notifications";
 export { runRuntimeMigrations } from "../src/lib/runtimeMigrations";
 export { decryptTokenPayload, encryptTokenPayload, tokenPayloadNeedsReencryption } from "../src/lib/bearerTokens";
 export { reencryptQueuedTokenPayloads } from "../src/lib/runtimeMigrations";
+export { runContractorComplianceReminderJob } from "../src/lib/contractorComplianceReminders";
+export { runCertificateFollowUpJob } from "../src/lib/certificateFollowUp";
+export { runPersonalReminderJob } from "../src/lib/personalReminders";
+export { collectDueItems } from "../src/lib/dueItems";
+export * as certificateInbox from "../src/lib/certificateInbox";

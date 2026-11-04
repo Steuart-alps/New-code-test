@@ -17,7 +17,7 @@ try {
     logLevel: "silent",
   });
 
-  const { accessibleDailyChecklistTypes, canAccessDailyChecklistType } = await import(outFile);
+  const { accessibleDailyChecklistTypes, canAccessDailyChecklistType, dailyTrackRequirements } = await import(outFile);
 
   assert.deepEqual(accessibleDailyChecklistTypes(["kitchentrack"], "am"), ["kitchen_opening"]);
   assert.deepEqual(accessibleDailyChecklistTypes(["kitchentrack"], "pm"), ["kitchen_closing"]);
@@ -36,6 +36,18 @@ try {
   assert.equal(canAccessDailyChecklistType(["kitchentrack"], "am", "premises_opening"), false);
   assert.equal(canAccessDailyChecklistType(["premisestrack"], "pm", "kitchen_closing"), false);
   assert.equal(canAccessDailyChecklistType("all", "pm", "kitchen_closing"), true);
+
+  // The status page's daily requirements follow the same services; the
+  // manager sign-off comes with any PM checklist.
+  assert.deepEqual(dailyTrackRequirements("all"),
+    ["kitchen_opening", "premises_opening", "kitchen_closing", "premises_closing", "signoff"]);
+  assert.deepEqual(dailyTrackRequirements(["core", "kitchentrack"]), ["kitchen_opening", "kitchen_closing", "signoff"]);
+  assert.deepEqual(dailyTrackRequirements(["core", "premisestrack"]), ["premises_opening", "premises_closing", "signoff"]);
+  assert.deepEqual(dailyTrackRequirements(["core", "dailytrack_am"]), ["kitchen_opening", "premises_opening"]);
+  assert.deepEqual(dailyTrackRequirements(["core", "dailytrack_pm"]), ["kitchen_closing", "premises_closing", "signoff"]);
+  assert.deepEqual(dailyTrackRequirements(["core", "kitchentrack", "dailytrack_pm"]),
+    ["kitchen_opening", "kitchen_closing", "premises_closing", "signoff"]);
+  assert.deepEqual(dailyTrackRequirements(["core", "firetrack"]), []);
 
   console.log("Daily checklist entitlement checks passed.");
 } finally {

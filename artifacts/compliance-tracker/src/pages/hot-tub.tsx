@@ -28,11 +28,18 @@ import {
 import { cn } from "@/lib/utils";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { downloadBlob } from "@/lib/download";
+import { takeLinkParams } from "@/lib/deep-link";
 import { trackInspectionPdfDownload } from "@/lib/analytics";
 import { createHotTubLogPdf, HotTubLogPdfError } from "@/lib/hot-tub-log-pdf";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
+import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
+import { sortByLabel } from "@/lib/sort-options";
+import { TrackContractorChecks } from "@/components/track-contractor-checks";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,6 +82,7 @@ interface HotTubCheck {
   temperature: string | null;
   location: string | null;
   performedBy: string | null;
+  staffRosterId?: number | null;
   notes: string | null;
   createdAt: string;
 }
@@ -224,7 +232,8 @@ export default function HotTubPage() {
   const hasHotTub = hasService("hottubtrack");
 
   const [filterType, setFilterType] = useState<CheckType | "all">("all");
-  const [filterSite, setFilterSite] = useState("all");
+  const [filterSite, setFilterSite] = useSiteFilter("all");
+  const workingSiteId = useWorkingSiteId();
   const [filterTub, setFilterTub] = useState("all");
   const [filterFrom, setFilterFrom] = useState(() => defaultDateRange().from);
   const [filterTo, setFilterTo] = useState(() => defaultDateRange().to);
@@ -236,6 +245,7 @@ export default function HotTubPage() {
   const [editItem, setEditItem] = useState<HotTubCheck | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("hot_tub_check", { disabled: saving });
   const [form, setForm] = useState(emptyForm());
   const [staffRosterId, setStaffRosterId] = useState<number | null>(null);
   const [showConfig, setShowConfig] = useState(false);
@@ -267,7 +277,7 @@ export default function HotTubPage() {
     enabled: !!activeClientId,
   });
 
-  const { data: hotTubs = [], refetch: refetchTubs } = useQuery<HotTub[]>({
+  const { data: hotTubs = [], refetch: refetchTubs, isLoading: tubsLoading } = useQuery<HotTub[]>({
     queryKey: ["hot-tubs", activeClientId],
     queryFn: () => apiFetch("/hot-tub/tubs"),
     enabled: !!activeClientId && hasHotTub,
@@ -380,11 +390,58 @@ export default function HotTubPage() {
 
   // ── Dialog ─────────────────────────────────────────────────────────────────
 
+  // Tubs at a site. Every check except the risk assessment review is kept per
+  // tub there, so a site with tubs needs the check recorded against one.
+  const tubsAtSite = (siteId: string) => activeTubs.filter(t => siteId !== "" && String(t.siteId) === siteId);
+
   function openAdd() {
     setEditItem(null);
-    setForm({ ...emptyForm(), performedBy: user?.name ?? "" });
+    const siteId = workingSiteId ? String(workingSiteId) : "";
+    const onlyTub = tubsAtSite(siteId).length === 1 ? tubsAtSite(siteId)[0] : null;
+    setForm({ ...emptyForm(), performedBy: user?.name ?? "", siteId, hotTubId: onlyTub ? String(onlyTub.id) : "" });
+    setStaffRosterId(null);
+    media.clear();
     setShowDialog(true);
   }
+
+  // A scanned QR label opens a new check for its tub once the tubs load.
+  const [scanTubId, setScanTubId] = useState<number | null>(null);
+  useEffect(() => {
+    const link = takeLinkParams(["tub", "open"] as const);
+    const id = Number(link?.tub);
+    if (Number.isSafeInteger(id) && id > 0) setScanTubId(id);
+  }, []);
+  useEffect(() => {
+    if (scanTubId === null || !hotTubs.length) return;
+    const tub = hotTubs.find(t => t.id === scanTubId);
+    setScanTubId(null);
+    if (!tub) return;
+    setFilterTub(String(tub.id));
+    setEditItem(null);
+    setForm({ ...emptyForm(), performedBy: user?.name ?? "", hotTubId: String(tub.id), siteId: tub.siteId ? String(tub.siteId) : "" });
+    setStaffRosterId(null);
+    media.clear();
+    setShowDialog(true);
+  }, [scanTubId, hotTubs]);
+
+  // A water test said to Say it ("hot tub 2, pH 7.4, chlorine 4, 38 degrees").
+  useSayItFill(["tub-test"], fill => {
+    const active = hotTubs.filter(t => t.active);
+    const tub = matchSpokenItem(fill.item, active.map(t => ({ ...t, aliases: [t.description] }))) ?? (active.length === 1 ? active[0] : null);
+    const number = (key: string) => (typeof fill.values[key] === "number" ? String(fill.values[key]) : "");
+    if (tub) setFilterTub(String(tub.id));
+    setEditItem(null);
+    setForm({
+      ...emptyForm(), performedBy: user?.name ?? "", checkType: "water_chemistry",
+      hotTubId: tub ? String(tub.id) : "",
+      siteId: tub?.siteId ? String(tub.siteId) : fill.siteId ? String(fill.siteId) : "",
+      phValue: number("ph"), sanitiserLevel: number("sanitiser"), temperature: number("temperature"),
+      notes: withSpokenNote("", fill.text),
+    });
+    setStaffRosterId(null);
+    setShowDialog(true);
+    if (!tub && hotTubs.length > 1) toast({ title: "Choose the tub", description: fill.item ? `"${fill.item}" didn't match one tub, so pick it in the form.` : "Pick the tub in the form." });
+  }, !tubsLoading);
 
   function openEdit(r: HotTubCheck) {
     setEditItem(r);
@@ -402,6 +459,8 @@ export default function HotTubPage() {
       performedBy: r.performedBy ?? "",
       notes: r.notes ?? "",
     });
+    setStaffRosterId(r.staffRosterId ?? null);
+    media.clear();
     setShowDialog(true);
   }
 
@@ -412,6 +471,9 @@ export default function HotTubPage() {
     }
     if (form.checkType === "temperature" && !form.temperature) {
       toast({ title: "Temperature reading is required", variant: "destructive" }); return;
+    }
+    if (!editItem && form.checkType !== "risk_assessment" && !form.hotTubId && tubsAtSite(form.siteId).length > 0) {
+      toast({ title: "Choose the tub", description: "This site has tubs, so pick the one this check was for.", variant: "destructive" }); return;
     }
     setSaving(true);
     try {
@@ -445,6 +507,7 @@ export default function HotTubPage() {
         toast({ title: "Record updated", description: `Server outcome: ${response?.result ?? body.result}.` });
       } else {
         const response = await apiFetch("/hot-tub", { method: "POST", body: JSON.stringify(body) });
+        await media.attach(response?.id);
         toast({ title: "Record saved", description: `Server outcome: ${response?.result ?? body.result}.` });
       }
       invalidate();
@@ -468,7 +531,7 @@ export default function HotTubPage() {
                 <Lock className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h2 className="text-2xl font-display font-medium text-foreground mb-2">TubTrack</h2>
+                <h2 className="text-2xl font-display font-bold text-foreground mb-2">TubTrack</h2>
                 <p className="text-muted-foreground mb-1">
                   Digital hot tub & spa pool maintenance logbook — daily water chemistry, temperature, filter and drain records based on HSG282 and PWTAG guidance.
                 </p>
@@ -496,15 +559,15 @@ export default function HotTubPage() {
   const isTempCheck = form.checkType === "temperature" || form.checkType === "water_chemistry";
 
   return (
-    <AppLayout title="HotTubTrack">
+    <AppLayout title="TubTrack">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div>
           <p className="text-sm text-muted-foreground mt-1">
             Hot tub & spa maintenance logbook — record water chemistry and controls from your risk-assessed operating procedure
           </p>
         </div>
-        <div className="flex gap-2 flex-shrink-0">
+        <div className="flex flex-wrap gap-2 sm:flex-shrink-0">
           <Button variant="outline" onClick={handleExportLog} className="gap-2 rounded-sm"
             disabled={isLoading || exportingPdf} aria-busy={exportingPdf}
             title="Download the filtered maintenance log as a PDF file">
@@ -573,6 +636,8 @@ export default function HotTubPage() {
       <WaterMonitoringPlan module="hot-tub" siteId={filterSite === "all" ? undefined : Number(filterSite)}
         checks={CHECK_TYPE_LABELS} unit="days" canManage={canAdmin}
         onChanged={() => qc.invalidateQueries({ queryKey: ["hot-tub-status", activeClientId, filterSite] })} />
+      <TrackContractorChecks module="hot_tub" siteId={filterSite !== "all" ? Number(filterSite) : undefined} />
+
       {/* Status overview */}
       {filterSite !== "all" && statuses.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
@@ -703,7 +768,7 @@ export default function HotTubPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All check types</SelectItem>
-            {CHECK_TYPES.map(t => <SelectItem key={t} value={t}>{CHECK_TYPE_LABELS[t]}</SelectItem>)}
+            {sortByLabel(CHECK_TYPES, t => CHECK_TYPE_LABELS[t]).map(t => <SelectItem key={t} value={t}>{CHECK_TYPE_LABELS[t]}</SelectItem>)}
           </SelectContent>
         </Select>
         <div className="relative flex-1 min-w-[180px]">
@@ -794,6 +859,7 @@ export default function HotTubPage() {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{r.performedBy ?? <span className="opacity-40">—</span>}</td>
                     <td className="px-4 py-3 hidden sm:table-cell">
+                      <RecordSignedBy recordType="hot_tub_check" recordId={r.id} compact className="mb-1" />
                       <CheckPhotoUploader entityType="hot_tub_check" entityId={r.id} compact />
                     </td>
                     <td className="px-4 py-3">
@@ -838,7 +904,7 @@ export default function HotTubPage() {
                 <Select value={form.checkType} onValueChange={v => setForm(f => ({ ...f, checkType: v as CheckType }))}>
                   <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {CHECK_TYPES.map(t => (
+                    {sortByLabel(CHECK_TYPES, t => CHECK_TYPE_LABELS[t]).map(t => (
                       <SelectItem key={t} value={t}>{CHECK_TYPE_LABELS[t]}</SelectItem>
                     ))}
                   </SelectContent>
@@ -940,10 +1006,10 @@ export default function HotTubPage() {
             {sites.length > 0 && (
               <div>
                 <Label>Site</Label>
-                <Select value={form.siteId} onValueChange={v => setForm(f => ({ ...f, siteId: v }))}>
+                <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                   <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">No specific site</SelectItem>
+                    <SelectItem value="none">No specific site</SelectItem>
                     {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -954,11 +1020,11 @@ export default function HotTubPage() {
             <div>
               <Label>Hot Tub / Spa</Label>
               {activeTubs.length > 0 ? (
-                <Select value={form.hotTubId} onValueChange={v => setForm(f => ({ ...f, hotTubId: v }))}>
+                <Select value={form.hotTubId || "none"} onValueChange={v => setForm(f => ({ ...f, hotTubId: v === "none" ? "" : v }))}>
                   <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select tub (optional)" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Not tub-specific</SelectItem>
-                    {activeTubs.map(t => (
+                    <SelectItem value="none">Not tub-specific</SelectItem>
+                    {sortByLabel(activeTubs, t => t.name).map(t => (
                       <SelectItem key={t.id} value={String(t.id)}>
                         <span className="flex items-center gap-2">
                           <Waves className="w-3.5 h-3.5 text-cyan-600" />{t.name}
@@ -984,7 +1050,7 @@ export default function HotTubPage() {
               {activeTubs.length > 0 && (
                 <div className="mt-2">
                   <Label htmlFor="location" className="text-xs text-muted-foreground">Specific area / notes (optional)</Label>
-                  <Input id="location" placeholder="e.g. poolside, indoors…"
+                  <Input id="location" dictation placeholder="e.g. poolside, indoors…"
                     value={form.location}
                     onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
                     className="mt-1 rounded-sm" />
@@ -1003,6 +1069,8 @@ export default function HotTubPage() {
                 onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
                 className="mt-1 rounded-sm" rows={2} />
             </div>
+
+            {editItem ? <CheckPhotoUploader entityType="hot_tub_check" entityId={editItem.id} /> : media.picker}
           </div>
 
           <DialogFooter>
@@ -1100,17 +1168,32 @@ function ManageTubsDialog({
   const { toast } = useToast();
   const { activeClientId } = useAuth();
   const [activityFilter, setActivityFilter] = useState<TubActivityFilter>("all");
+  const [tubSearch, setTubSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(tubSearch.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [tubSearch]);
 
-  const { data: tubs = [], refetch } = useQuery<HotTub[]>({
-    queryKey: ["hot-tubs-mgmt", activeClientId, activityFilter],
-    queryFn: () => apiFetch(`/hot-tub/tubs${activityFilter === "all" ? "" : `?active=${activityFilter === "active"}`}`),
+  const { data: tubs = [], refetch, isFetching } = useQuery<HotTub[]>({
+    queryKey: ["hot-tubs-mgmt", activeClientId, activityFilter, debouncedSearch],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (activityFilter !== "all") params.set("active", String(activityFilter === "active"));
+      if (debouncedSearch) params.set("search", debouncedSearch);
+      const qs = params.toString();
+      return apiFetch(`/hot-tub/tubs${qs ? `?${qs}` : ""}`);
+    },
     enabled: open && !!activeClientId,
+    // Keep the current list on screen while the next search loads.
+    placeholderData: previous => previous,
   });
 
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [newSiteId, setNewSiteId] = useState("");
+  const workingSiteId = useWorkingSiteId();
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [togglingId, setTogglingId] = useState<number | null>(null);
@@ -1128,6 +1211,8 @@ function ManageTubsDialog({
         }),
       });
       setNewName(""); setNewDesc(""); setNewSiteId(""); setAdding(false);
+      // Clear the search so the new tub is not hidden by it.
+      setTubSearch(""); setDebouncedSearch("");
       toast({ title: "Tub added" });
       refetch(); onChanged();
     } catch (e: any) {
@@ -1168,24 +1253,40 @@ function ManageTubsDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <Select value={activityFilter} onValueChange={v => setActivityFilter(v as TubActivityFilter)}>
-          <SelectTrigger className="rounded-sm">
-            <Filter className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All tubs</SelectItem>
-            <SelectItem value="active">Active tubs</SelectItem>
-            <SelectItem value="inactive">Inactive tubs</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              type="search"
+              aria-label="Search tubs by tub or site name"
+              placeholder="Search tub or site name…"
+              value={tubSearch}
+              onChange={e => setTubSearch(e.target.value)}
+              maxLength={200}
+              className="pl-9 rounded-sm"
+            />
+          </div>
+          <Select value={activityFilter} onValueChange={v => setActivityFilter(v as TubActivityFilter)}>
+            <SelectTrigger className="rounded-sm sm:w-44" aria-label="Filter tubs by activity">
+              <Filter className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All tubs</SelectItem>
+              <SelectItem value="active">Active tubs</SelectItem>
+              <SelectItem value="inactive">Inactive tubs</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
 
-        <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+        <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1" aria-busy={isFetching}>
           {tubs.length === 0 && !adding && (
             <p className="text-sm text-muted-foreground text-center py-6">
-              {activityFilter === "all"
-                ? "No tubs registered yet. Add your first one below."
-                : `No ${activityFilter} tubs found.`}
+              {debouncedSearch
+                ? `No ${activityFilter === "all" ? "" : `${activityFilter} `}tubs match "${debouncedSearch}".`
+                : activityFilter === "all"
+                  ? "No tubs registered yet. Add your first one below."
+                  : `No ${activityFilter} tubs found.`}
             </p>
           )}
 
@@ -1240,10 +1341,10 @@ function ManageTubsDialog({
                 className="rounded-sm"
               />
               {sites.length > 0 && (
-                <Select value={newSiteId} onValueChange={setNewSiteId}>
+                <Select value={newSiteId || "none"} onValueChange={v => setNewSiteId(v === "none" ? "" : v)}>
                   <SelectTrigger className="rounded-sm"><SelectValue placeholder="Link to a site (optional)" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">No specific site</SelectItem>
+                    <SelectItem value="none">No specific site</SelectItem>
                     {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -1259,7 +1360,7 @@ function ManageTubsDialog({
         </div>
 
         <DialogFooter className="flex-row gap-2 sm:justify-between">
-          <Button variant="outline" className="rounded-sm gap-1.5" onClick={() => setAdding(true)} disabled={adding}>
+          <Button variant="outline" className="rounded-sm gap-1.5" onClick={() => { setNewSiteId(workingSiteId ? String(workingSiteId) : ""); setAdding(true); }} disabled={adding}>
             <Plus className="w-3.5 h-3.5" /> Add Tub
           </Button>
           <Button className="rounded-sm" onClick={onClose}>Done</Button>

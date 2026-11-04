@@ -17,7 +17,15 @@ export interface UpdateComplianceItemRequest {
   categoryId?: number | null;
   contractorId?: number | null;
   assignedTo?: string | null;
+  /** The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it. */
+  assigneeUserId?: number | null;
   dueDate?: Date | null;
   leadTimeDays?: number | null;
+  /**
+     * Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
+     * @minimum 1
+     * @maximum 120
+     */
+  frequencyMonths?: number | null;
   notes?: string | null;
 }

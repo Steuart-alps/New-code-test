@@ -16,7 +16,12 @@ export type ApprovalStorageWindow = Pick<
 };
 
 const approvalRefreshMemory = new Map<string, PersistedApprovalRefreshState>();
+// Keys cleared at sign-out. A queue load that was already in flight must not
+// write them back; the next read for the key (a fresh page load after signing
+// in again) lifts the block.
+const signedOutKeys = new Set<string>();
 const approvalRefreshChannelPrefix = "complytrack:contractor-approval-refresh:";
+const approvalRefreshKeyPrefix = "complytrack:contractor-approvals:";
 
 function getApprovalRefreshChannelName(storageKey: string) {
   return `${approvalRefreshChannelPrefix}${storageKey}`;
@@ -29,6 +34,43 @@ export function getApprovalRefreshStorageKey(
   return userId !== null && clientId !== null
     ? `complytrack:contractor-approvals:${userId}:${clientId}`
     : null;
+}
+
+/** Forgets one user's acknowledgment state for every client in this browser,
+ *  so their next sign-in starts from a fresh baseline. Keys belonging to other
+ *  users are never read or removed (the trailing ":" keeps user 1 from
+ *  matching user 12). */
+export function clearApprovalRefreshStateForUser(
+  windowLike: Pick<ApprovalStorageWindow, "localStorage">,
+  userId: number | null,
+) {
+  if (userId === null) return;
+  const userPrefix = `${approvalRefreshKeyPrefix}${userId}:`;
+
+  const keys = new Set(
+    Array.from(approvalRefreshMemory.keys()).filter(key => key.startsWith(userPrefix)),
+  );
+  const storage = getLocalStorage(windowLike);
+  if (storage) {
+    try {
+      for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index);
+        if (key?.startsWith(userPrefix)) keys.add(key);
+      }
+    } catch {
+      // Unreadable storage holds nothing of ours to remove.
+    }
+  }
+
+  for (const key of keys) {
+    approvalRefreshMemory.delete(key);
+    signedOutKeys.add(key);
+    try {
+      storage?.removeItem(key);
+    } catch {
+      // Blocked storage: the in-memory copy above is already gone.
+    }
+  }
 }
 
 export function parsePersistedApprovalRefreshState(raw: string | null) {
@@ -53,7 +95,7 @@ export function parsePersistedApprovalRefreshState(raw: string | null) {
   }
 }
 
-function getLocalStorage(windowLike: ApprovalStorageWindow): Storage | null {
+function getLocalStorage(windowLike: Pick<ApprovalStorageWindow, "localStorage">): Storage | null {
   try {
     return windowLike.localStorage;
   } catch {
@@ -84,6 +126,7 @@ export function readPersistedApprovalRefreshState(
   storageKey: string | null,
 ) {
   if (!storageKey) return null;
+  signedOutKeys.delete(storageKey);
 
   const storage = getLocalStorage(windowLike);
   if (storage) {
@@ -106,7 +149,7 @@ export function persistApprovalRefreshState(
   knownQueueIds: Set<number> | null,
   newRequestIds: number[],
 ) {
-  if (!storageKey || !knownQueueIds) return;
+  if (!storageKey || !knownQueueIds || signedOutKeys.has(storageKey)) return;
 
   const state: PersistedApprovalRefreshState = {
     knownQueueIds: Array.from(knownQueueIds),

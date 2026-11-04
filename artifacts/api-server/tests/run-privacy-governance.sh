@@ -16,17 +16,22 @@ healthy() {
 }
 
 SERVER_PID=""
+CAPTURE_FILE=""
 cleanup() {
   if [ -n "$SERVER_PID" ]; then
     kill "$SERVER_PID" >/dev/null 2>&1 || true
     wait "$SERVER_PID" 2>/dev/null || true
   fi
+  if [ -n "$CAPTURE_FILE" ]; then rm -f "$CAPTURE_FILE"; fi
 }
 trap cleanup EXIT
 
 if ! healthy; then
   echo "No ready API server at ${API_BASE} — starting a test instance..."
   pnpm run build
+  # Capture outgoing email so the test can check what administrators receive.
+  CAPTURE_FILE="$(mktemp)"
+  export TEST_EMAIL_CAPTURE_PATH="$CAPTURE_FILE"
   NODE_ENV=test OBJECT_STORAGE_TEST_FAKE_USAGE=1 PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
   SERVER_PID=$!
   for _ in $(seq 1 90); do

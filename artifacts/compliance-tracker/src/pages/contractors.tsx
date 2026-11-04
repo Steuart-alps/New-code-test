@@ -3,12 +3,15 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { AppLayout } from "@/components/layout";
 import { ContractorFormDialog } from "@/components/contractor-form-dialog";
+import { ImportCsvButton } from "@/components/import-csv-dialog";
+import { CertificatesOutstandingCard } from "@/components/certificates-outstanding-card";
+import { ContractorVisitsCard } from "@/components/contractor-visits-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Search, Building, Mail, Phone, ChevronRight, CheckCircle2, AlertTriangle, Clock } from "lucide-react";
+import { Plus, Search, Building, Mail, Phone, ChevronRight, CheckCircle2, AlertTriangle, Clock, LogIn } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useAuth } from "@/context/auth-context";
+import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { getContractorListStatus, type ContractorListRecord, type ContractorListStatus } from "@/lib/contractor-list-status";
 
@@ -42,6 +45,7 @@ export default function ContractorsPage() {
   const [showNonCompliantOnly, setShowNonCompliantOnly] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const { activeClientId } = useAuth();
+  const canAdmin = useCanAdmin();
   const clientApiFetch = useActiveClientApi();
 
   const { data: contractors = [], isLoading, isError } = useQuery<ContractorListRecord[]>({
@@ -84,11 +88,20 @@ export default function ContractorsPage() {
             <AlertTriangle className="w-4 h-4 mr-2" />
             Missing or expired ({nonCompliantCount})
           </Button>
+          <ImportCsvButton type="contractors" className="h-10" />
+          <Button asChild variant="outline">
+            <Link href="/contractor-sign-in"><LogIn className="w-4 h-4 mr-2" /> Contractor sign-in</Link>
+          </Button>
         </div>
-        <Button onClick={() => setIsFormOpen(true)} className="shadow-lg shadow-primary/20 w-full sm:w-auto">
-          <Plus className="w-4 h-4 mr-2" /> Add Contractor
-        </Button>
+        {canAdmin && (
+          <Button onClick={() => setIsFormOpen(true)} className="shadow-lg shadow-primary/20 w-full sm:w-auto">
+            <Plus className="w-4 h-4 mr-2" /> Add Contractor
+          </Button>
+        )}
       </div>
+
+      <CertificatesOutstandingCard />
+      <ContractorVisitsCard contractors={contractors} />
 
       {isLoading ? (
         <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full" /></div>
@@ -97,7 +110,7 @@ export default function ContractorsPage() {
       ) : filtered.length === 0 ? (
         <div className="text-center py-24 bg-card rounded-2xl border border-dashed border-border/60">
           <Building className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
-          <h3 className="text-lg font-semibold">No contractors found</h3>
+          <h3 className="text-lg font-bold">No contractors found</h3>
           <p className="text-muted-foreground mt-1 max-w-sm mx-auto">
             {showNonCompliantOnly ? "No contractors with missing or expired compliance fields match your search." : search ? "Try another search." : "Add your external contractors here to track their compliance and certificates."}
           </p>
@@ -117,7 +130,7 @@ export default function ContractorsPage() {
                       <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors transform group-hover:translate-x-1" />
                     </div>
                   </div>
-                  <h3 className="font-display font-semibold text-lg">{contractor.name}</h3>
+                  <h3 className="font-display font-bold text-lg">{contractor.name}</h3>
                   {contractor.company && <p className="text-sm text-muted-foreground mt-0.5">{contractor.company}</p>}
 
                   <div className="mt-auto pt-5 space-y-2">

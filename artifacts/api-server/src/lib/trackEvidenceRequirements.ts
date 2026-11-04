@@ -61,14 +61,24 @@ export async function ensureDefaultTrackEvidenceRequirements(clientId: number, m
   ));
 }
 
+/**
+ * source_kind prefix of track actions confirmed from an uploaded report
+ * (routes/inspection-reports.ts); source_record_id is the report. Each action
+ * gets its own suffix because (module, source_kind, source_record_id) is unique.
+ */
+export const INSPECTION_REPORT_SOURCE_PREFIX = "inspection_report:";
+export const isInspectionReportSource = (sourceKind: string | null | undefined) =>
+  !!sourceKind?.startsWith(INSPECTION_REPORT_SOURCE_PREFIX);
+
 export async function missingEvidenceForAction(clientId: number, action: {
   id: number;
   module: string;
   sourceKind: string | null;
 }) {
-  // Manual actions retain the existing resolution contract. Product-generated
-  // FireTrack/LegionellaTrack actions use the structured profile.
-  if (!action.sourceKind || !DEFAULT_TRACK_EVIDENCE_REQUIREMENTS[action.module]) return [];
+  // Manual actions, and those confirmed from an uploaded report, retain the
+  // existing resolution contract. Product-generated FireTrack/LegionellaTrack
+  // actions use the structured profile.
+  if (!action.sourceKind || isInspectionReportSource(action.sourceKind) || !DEFAULT_TRACK_EVIDENCE_REQUIREMENTS[action.module]) return [];
   if (action.module === "kitchen" && !action.sourceKind.startsWith("kitchen_temperature_")) return [];
   const requirements = await ensureDefaultTrackEvidenceRequirements(clientId, action.module);
   if (!requirements.length) return [];

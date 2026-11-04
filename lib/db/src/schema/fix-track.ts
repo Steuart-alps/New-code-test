@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, date, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, date, jsonb, index } from "drizzle-orm/pg-core";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
@@ -17,12 +17,16 @@ export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   reportedBy: text("reported_by").notNull(),
   reportedDate: date("reported_date").notNull(),
   assignedTo: text("assigned_to"),
+  /** The person responsible, when picked from the business's users (see track_actions). */
+  assigneeUserId: integer("assignee_user_id").references(() => usersTable.id, { onDelete: "set null" }),
   contractorId: integer("contractor_id").references(() => contractorsTable.id, { onDelete: "set null" }),
   targetDate: date("target_date"),
   resolvedDate: date("resolved_date"),
   resolvedByName: text("resolved_by_name"),
   resolverSignature: text("resolver_signature"),
   solutionNotes: text("solution_notes"),
+  // Uploaded by the contractor with the "completed" email link.
+  completionDocumentPath: text("completion_document_path"),
   // Pending contractor-email approval request ("assign" | "quote")
   emailRequestMode: text("email_request_mode"),
   emailRequestedBy: integer("email_requested_by").references(() => usersTable.id, { onDelete: "set null" }),
@@ -36,11 +40,22 @@ export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   // different authorised manager can perform the resulting dispatch.
   emailSentBy: integer("email_sent_by").references(() => usersTable.id, { onDelete: "set null" }),
   emailSentAt: timestamp("email_sent_at"),
+  // Picked by the contractor from the job email's "pick a visit date" link.
+  contractorVisitDate: date("contractor_visit_date"),
+  // When the contractor marked the job done from the job email.
+  contractorCompletedAt: timestamp("contractor_completed_at"),
   mediaUrls: jsonb("media_urls").default([]).$type<string[]>(),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  // Submitter's department when the row was created, set by a database
+  // trigger and never changed (submitterDepartmentMigration.ts).
+  submitterDepartmentId: integer("submitter_department_id"),
+  submitterDepartmentSource: text("submitter_department_source").notNull().default("recorded"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  // Created by the api-server runtime migrations (dashboard read paths).
+  index("IDX_fix_track_issues_client_status").on(table.clientId, table.status),
+]);
 
 export const fixTrackIssueActivityTable = pgTable("fix_track_issue_activity", {
   id: serial("id").primaryKey(),

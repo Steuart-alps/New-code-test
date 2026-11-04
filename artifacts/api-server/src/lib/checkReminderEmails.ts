@@ -2,8 +2,8 @@
  * Daily check-reminder email job.
  *
  * Runs at 08:45. For each active client that has unsafe, overdue or due-soon safety
- * checks (fire, legionella, pool), sends one digest email to all active users
- * of that client. Uses check_reminder_log to ensure only one email per client
+ * checks (fire, legionella, pool, spa) or COSHHTrack reviews and checks, sends
+ * one digest email to the client's notification recipients. Uses check_reminder_log to ensure only one email per client
  * per day.
  */
 
@@ -11,13 +11,17 @@ import { db } from "@workspace/db";
 import { clientsTable } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
-import { sendEmail, getPublicAppUrl } from "./email";
+import { sendEmail, getPublicAppUrl, escapeHtml, renderEmailLayout } from "./email";
+import { getAccountToday } from "./accountClock";
 import { getCheckAlerts, type CheckAlert } from "./checkReminders";
+import { getCoshhDueItems } from "./coshhTrack";
+import { getEntitledServices, isEntitled } from "./services";
 import { getNotificationEmails } from "./getNotificationEmails";
+import { claimEmailDelivery, emailDeliveryIdempotencyKey, settleEmailDelivery } from "./emailDeliveryClaims";
 
 // ── Email HTML builder ────────────────────────────────────────────────────────
 
-function buildEmailHtml(alerts: CheckAlert[], appUrl: string): string {
+export function buildCheckReminderEmailHtml(alerts: CheckAlert[], appUrl: string): string {
   const unsafe = alerts.filter(a => a.status === "action_required");
   const overdue = alerts.filter(a => a.status === "overdue");
   const dueSoon = alerts.filter(a => a.status === "due_soon");
@@ -37,12 +41,14 @@ function buildEmailHtml(alerts: CheckAlert[], appUrl: string): string {
       : "";
     const last = a.lastDate
       ? `Last: ${new Date(`${a.lastDate}T00:00:00Z`).toLocaleDateString("en-GB")}`
+      : a.module === "coshh" && a.dueDate
+      ? `Due: ${new Date(`${a.dueDate}T00:00:00Z`).toLocaleDateString("en-GB")}`
       : "Never completed";
     return `
       <tr>
         <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;">
-          <div style="font-weight:600;font-size:14px;color:#0f172a;">${a.checkLabel}</div>
-          <div style="font-size:12px;color:#64748b;margin-top:2px;">${a.moduleLabel} · ${a.frequencyLabel} · ${last}</div>
+          <div style="font-weight:600;font-size:14px;color:#0f172a;">${escapeHtml(a.checkLabel)}</div>
+          <div style="font-size:12px;color:#64748b;margin-top:2px;">${escapeHtml(a.moduleLabel)} · ${escapeHtml(a.frequencyLabel)} · ${last}</div>
         </td>
         <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;text-align:right;white-space:nowrap;">
           ${badge}<br/>
@@ -53,19 +59,10 @@ function buildEmailHtml(alerts: CheckAlert[], appUrl: string): string {
 
   const allRows = [...unsafe, ...overdue, ...dueSoon].map(rowHtml).join("");
 
-  return `
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"/></head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
-    <div style="background:#0f172a;padding:32px 40px;">
-      <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">
-        🛡️ ComplyTrack
-      </div>
-      <div style="font-size:14px;color:#94a3b8;margin-top:6px;">Safety Check Reminders</div>
-    </div>
-    <div style="padding:32px 40px;">
+  return renderEmailLayout({
+    subtitle: `Safety Check Reminders`,
+    footerNote: `You are receiving this as an account manager.`,
+    bodyHtml: `
       <p style="font-size:16px;color:#334155;margin:0 0 8px;">
         ${unsafe.length > 0
           ? `<strong>${unsafe.length} safety result${unsafe.length !== 1 ? "s" : ""} require${unsafe.length === 1 ? "s" : ""} action</strong>${overdue.length ? `; ${overdue.length} check${overdue.length !== 1 ? "s are" : " is"} overdue` : ""}.`
@@ -84,17 +81,12 @@ function buildEmailHtml(alerts: CheckAlert[], appUrl: string): string {
         <tbody>${allRows}</tbody>
       </table>
       <div style="margin-top:28px;text-align:center;">
-        <a href="${appUrl}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">
+        <a href="${escapeHtml(appUrl)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:10px;font-size:16px;font-weight:700;">
           Open ComplyTrack →
         </a>
       </div>
-    </div>
-    <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
-      ComplyTrack by ALPS Consulting · You are receiving this as an account manager.
-    </div>
-  </div>
-</body>
-</html>`;
+`,
+  });
 }
 
 // ── Job ───────────────────────────────────────────────────────────────────────
@@ -106,10 +98,31 @@ export interface CheckReminderJobResult {
   errors: number;
 }
 
+/** COSHHTrack items in the digest's shape, for businesses that have the track. */
+export async function coshhCheckAlerts(clientId: number, todayIso: string): Promise<CheckAlert[]> {
+  try {
+    if (!isEntitled(await getEntitledServices(clientId), "coshhtrack")) return [];
+    const items = await getCoshhDueItems(clientId, {}, todayIso);
+    return items
+      .filter((item) => item.status === "overdue" || item.status === "due_soon")
+      .map((item) => ({
+        module: "coshh" as const, moduleLabel: "COSHHTrack", modulePath: "/coshh-track",
+        checkType: item.kind,
+        checkLabel: item.siteName ? `${item.siteName}: ${item.label}` : item.label,
+        status: item.status as "overdue" | "due_soon",
+        lastDate: null, dueDate: item.dueDate, daysUntilDue: item.daysUntilDue,
+        frequencyLabel: item.kind === "assessment_review" ? "Assessment review" : "COSHH check",
+        siteId: item.siteId, siteName: item.siteName,
+      }));
+  } catch (err) {
+    logger.warn({ err, clientId }, "Unable to evaluate COSHHTrack reminders");
+    return [];
+  }
+}
+
 export async function runCheckReminderEmailJob(): Promise<CheckReminderJobResult> {
   const result: CheckReminderJobResult = { clientsChecked: 0, clientsEmailed: 0, emailsSent: 0, errors: 0 };
 
-  const todayIso = new Date().toISOString().slice(0, 10);
   const appUrl = getPublicAppUrl();
 
   // Get all active clients
@@ -121,6 +134,8 @@ export async function runCheckReminderEmailJob(): Promise<CheckReminderJobResult
   for (const client of clients) {
     result.clientsChecked++;
     try {
+      // One digest per client per local calendar day.
+      const todayIso = await getAccountToday(client.id);
       // Skip if already sent today
       const logged = await db.execute(sql`
         SELECT 1 FROM check_reminder_log
@@ -130,8 +145,10 @@ export async function runCheckReminderEmailJob(): Promise<CheckReminderJobResult
       const rows = (logged as any).rows ?? [];
       if (rows.length > 0) continue;
 
-      // Get actionable results and due checks — skip "never".
-      const alerts = await getCheckAlerts(client.id);
+      // Get actionable results and due checks — skip "never". Fire, water,
+      // pool and spa checks are evaluated per site, so each site's own gaps
+      // are reported (labelled with the site name).
+      const alerts = [...await getCheckAlerts(client.id), ...await coshhCheckAlerts(client.id, todayIso)];
       const actionable = alerts.filter(a => a.status === "action_required" || a.status === "overdue" || a.status === "due_soon");
       if (actionable.length === 0) continue;
 
@@ -139,7 +156,7 @@ export async function runCheckReminderEmailJob(): Promise<CheckReminderJobResult
       const { emails } = await getNotificationEmails(client.id);
       if (emails.length === 0) continue;
 
-      const html = buildEmailHtml(actionable, appUrl);
+      const html = buildCheckReminderEmailHtml(actionable, appUrl);
       const unsafeCount = actionable.filter(a => a.status === "action_required").length;
       const overdueCount = actionable.filter(a => a.status === "overdue").length;
       const subject = unsafeCount > 0
@@ -148,14 +165,35 @@ export async function runCheckReminderEmailJob(): Promise<CheckReminderJobResult
         ? `⚠️ ${overdueCount} safety check${overdueCount !== 1 ? "s" : ""} overdue — ComplyTrack`
         : `📋 Safety checks due today — ComplyTrack`;
 
-      await sendEmail({ to: emails, subject, html });
+      // Claim before sending so two instances (e.g. during a deploy overlap)
+      // cannot both send today's digest. The lease expires, so a crash
+      // mid-send is retried under the same provider idempotency key.
+      const lease = await claimEmailDelivery("check-reminder", `${client.id}:${todayIso}`);
+      if (!lease) continue;
+      let settled = false;
+      try {
+        const again = await db.execute(sql`
+          SELECT 1 FROM check_reminder_log
+          WHERE client_id = ${client.id} AND log_date = ${todayIso}
+          LIMIT 1
+        `);
+        if (((again as any).rows ?? []).length > 0) continue;
 
-      // Log the send
-      await db.execute(sql`
-        INSERT INTO check_reminder_log (client_id, log_date, sent_at)
-        VALUES (${client.id}, ${todayIso}, now())
-        ON CONFLICT (client_id, log_date) DO NOTHING
-      `);
+        await sendEmail({ to: emails, subject, html, idempotencyKey: emailDeliveryIdempotencyKey(lease) });
+
+        // Log the send and release the lease together.
+        await db.transaction(async (tx) => {
+          await tx.execute(sql`
+            INSERT INTO check_reminder_log (client_id, log_date, sent_at)
+            VALUES (${client.id}, ${todayIso}, now())
+            ON CONFLICT (client_id, log_date) DO NOTHING
+          `);
+          await settleEmailDelivery(lease, tx);
+        });
+        settled = true;
+      } finally {
+        if (!settled) await settleEmailDelivery(lease).catch(() => {});
+      }
 
       result.clientsEmailed++;
       result.emailsSent += emails.length;

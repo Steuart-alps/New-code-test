@@ -11,8 +11,8 @@ import {
  * Native passkeys (iOS 16+, Android 9+) for the installed ComplyTrack app.
  *
  * A passkey takes the place of the email and password only. The server answers
- * a verified passkey exactly as it answers a correct password: with the
- * mandatory authenticator-code step, or with the web two-factor setup link.
+ * a verified passkey exactly as it answers a correct password: with a session,
+ * the authenticator-code step, or the web two-factor setup link.
  *
  * Expo Go and the web build have no native passkey module, so it is loaded
  * lazily and every caller must handle passkeys being unavailable.
@@ -74,6 +74,11 @@ interface CeremonyStart<Options> {
 }
 
 export type PasskeySignInResult =
+  | {
+      token: string;
+      expiresAt: string;
+      user: { id: number; name: string; email: string; role: string; clientId: number | null };
+    }
   | { pendingToken: string }
   | { requires2faSetup: true; setupUrl?: string };
 

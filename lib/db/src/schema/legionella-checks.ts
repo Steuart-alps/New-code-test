@@ -1,4 +1,5 @@
-import { pgTable, serial, text, timestamp, integer, date, numeric } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, date, numeric, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
@@ -16,11 +17,32 @@ export const legionellaChecksTable = pgTable("legionella_checks", {
   temperature: numeric("temperature", { precision: 5, scale: 2 }),
   location: text("location"),
   notes: text("notes"),
+  // Condition answers (sediment, biofilm, lid, screens) for inspections,
+  // cleans and flushes, keyed by question (api-zod legionella-condition.ts).
+  findings: jsonb("findings").$type<Record<string, string>>(),
   performedBy: text("performed_by"),
   staffRosterId: integer("staff_roster_id").references(() => staffMembersTable.id, { onDelete: "set null" }),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  // Submitter's department when the row was created, set by a database
+  // trigger and never changed (submitterDepartmentMigration.ts).
+  submitterDepartmentId: integer("submitter_department_id"),
+  submitterDepartmentSource: text("submitter_department_source").notNull().default("recorded"),
+  // Sentinel outlet this test was logged against. The column and its foreign key
+  // to legionella_sentinel_outlets come from runtime migrations.
+  outletId: integer("outlet_id"),
+  // Equipment list item (cold water tank, calorifier) the check was made on.
+  // The foreign key to equipment_items comes from runtime migrations.
+  equipmentId: integer("equipment_id"),
+  // Mobile outbox entry ID and payload fingerprint: a replay of an applied
+  // submission is recognised instead of creating a duplicate. Not a credential.
+  clientEntryId: text("client_entry_id"),
+  clientEntryHash: text("client_entry_hash"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  uniqueIndex("UQ_legionella_checks_client_entry_id")
+    .on(table.clientId, table.clientEntryId)
+    .where(sql`${table.clientEntryId} IS NOT NULL`),
+]);
 
 export type LegionellaCheck = typeof legionellaChecksTable.$inferSelect;

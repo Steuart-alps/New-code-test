@@ -25,11 +25,35 @@ try {
       export const resolveDownloadToken = () => { throw Error('Unexpected token lookup'); };
       export const getMonthlyDownloadBytes = () => { throw Error('Unexpected usage lookup'); };
       export const utcMonth = () => '2026-01';`,
+    // The paid-storage limit has its own suite (storage-metering); here every
+    // business is under its limit. The gate must still run before each link.
+    storageLimit: `
+      export const STORAGE_NEARLY_FULL_RATIO = 0.8;
+      export const ensureUploadCapacity = async (clientId) => { (globalThis.__storageLimitChecks ??= []).push(clientId); };
+      export const isStorageAutoTopUpOn = () => { throw Error('Unexpected storage limit lookup'); };
+      export const readStorageCapacity = () => { throw Error('Unexpected storage limit lookup'); };
+      export const storageLimitState = () => { throw Error('Unexpected storage limit lookup'); };
+      export const formatStorageGb = () => { throw Error('Unexpected storage limit lookup'); };
+      export const sendPendingStorageLimitEmails = () => { throw Error('Unexpected storage limit lookup'); };
+      export const storageOwnersOf = () => { throw Error('Unexpected storage limit lookup'); };`,
+    // pino's worker transport cannot run from a single-file ESM bundle.
+    logger: `
+      const noop = () => {};
+      export const logger = { trace: noop, debug: noop, info: noop, warn: noop, error: noop, fatal: noop, child() { return logger; } };`,
+    usage: `
+      export const storageUsageLedger = { begin: async () => null, record: async () => {}, abandon: async () => {} };
+      export const readStorageUsageSnapshot = () => { throw Error('Unexpected usage snapshot'); };
+      export const reconcileStorageUsage = () => { throw Error('Unexpected usage reconciliation'); };
+      export const refreshStorageUsageInBackground = () => { throw Error('Unexpected usage refresh'); };
+      export const storageUsageSnapshotIsStale = () => { throw Error('Unexpected usage snapshot'); };`,
     validation: `
       export class ObjectContentError extends Error {}
       export const MAX_RESTRICTED_UPLOAD_BYTES = 10485760;
-      export const detectIssueVideoType = () => { throw Error('Unexpected video validation'); };
-      export const detectUploadType = () => { throw Error('Unexpected image validation'); };
+      export const maxUploadBytes = () => 262144000;
+      export class UploadTooLargeError extends ObjectContentError {}
+      // DocTrack registration checks the file signature; these PDFs are the only uploads.
+      export const detectIssueVideoType = () => null;
+      export const detectUploadType = (bytes) => bytes.subarray(0, 5).toString('latin1') === '%PDF-' ? 'application/pdf' : null;
       export const validatePdfInWorker = () => { throw Error('Unexpected PDF validation'); };
       export const validateUploadContent = () => { throw Error('Unexpected content validation'); };`,
   };
@@ -37,6 +61,9 @@ try {
   await build({
     entryPoints: [path.join(dir, "private-file-acl.entry.ts")],
     bundle: true, platform: "node", format: "esm", outfile: output, logLevel: "silent",
+    // Load drizzle from node_modules: bundled, its pg-core modules can be
+    // initialised in an order that leaves a column builder undefined.
+    external: ["drizzle-orm", "drizzle-orm/*"],
     banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
     plugins: [{
       name: "isolated-acl-dependencies",
@@ -50,6 +77,9 @@ try {
           [/\/acknowledgementRegisterPdf$/, "pdf"],
           [/\/downloadUsage$/, "downloads"],
           [/\/uploadValidation$/, "validation"],
+          [/\/storageUsageSnapshot$/, "usage"],
+          [/\/storageLimit$/, "storageLimit"],
+          [/\/lib\/logger$|^\.\/logger$/, "logger"],
         ]) {
           builder.onResolve({ filter }, () => ({ path: name, namespace: "acl-test" }));
         }
@@ -79,7 +109,8 @@ try {
   });
   app.use("/api", lib.storageRouter);
   app.use("/api", lib.documentsRouter);
-  app.use("/api/doc-track", lib.docTrackRouter);
+  // routes/index.ts sets the account's DocTrack categories; null opens them all.
+  app.use("/api/doc-track", (_req, res, next) => { res.locals.docCategories = null; next(); }, lib.docTrackRouter);
   server = await new Promise(resolve => {
     const listener = app.listen(0, "127.0.0.1", () => resolve(listener));
   });
@@ -123,8 +154,10 @@ try {
     // Failure path: the provider rejects the ACL write once during registration.
     // Only the fake SDK fails; routes, ownership checks and ACL code stay real.
     {
+      const checksBefore = globalThis.__storageLimitChecks?.length ?? 0;
       const reserved = await request("owner", "POST", flow.upload, uploadBody);
       assert.equal(reserved.status, 200, `${flow.label}: failure-path upload URL request succeeds`);
+      assert.equal(globalThis.__storageLimitChecks?.length, checksBefore + 1, `${flow.label}: paid storage checked before the upload link`);
       const failedPath = reserved.data.objectPath;
       assert.match(failedPath, /^\/objects\/uploads\/tenant-7\//);
       const failedBytes = Buffer.from(`%PDF-1.4\n${flow.label} ACL failure content\n`);

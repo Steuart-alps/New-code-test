@@ -26,7 +26,8 @@ async function main() {
   const admin = session();
   const me = await register(admin, "owner");
   check("owner has client", Number.isInteger((me.data?.user ?? me.data)?.clientId));
-  const modules = ["fire", "legionella", "green", "pat", "room"];
+  // "audit" is Report actions and "coshh" COSHHTrack: both list actions with this evidence panel.
+  const modules = ["fire", "legionella", "green", "pat", "room", "audit", "coshh"];
   for (const module of modules) {
     const created = await admin("POST", "/track-evidence", {
       module,
@@ -47,8 +48,16 @@ async function main() {
   status("load LegionellaTrack evidence profile", legionellaRequirements, [200]);
   check("FireTrack profile has five requirements", fireRequirements.data?.length === 5);
   check("LegionellaTrack profile has eight requirements", legionellaRequirements.data?.length === 8);
+  status("load Report actions evidence requirements", await admin("GET", "/track-evidence/requirements?module=audit"), [200]);
+  status("load COSHHTrack evidence requirements", await admin("GET", "/track-evidence/requirements?module=coshh"), [200]);
+  status("list COSHHTrack actions", await admin("GET", "/track-actions?module=coshh"), [200]);
   const fireAction = await admin("POST", "/track-actions", { module: "fire", title: "Evidence test action", severity: "action_required" });
   status("create evidence test action", fireAction, [201]);
+  check("a new action has no photos or videos", Array.isArray(fireAction.data?.mediaUrls) && fireAction.data.mediaUrls.length === 0);
+  const actionId = fireAction.data?.id;
+  status("action photo upload refuses other file types", await admin("POST", `/track-actions/${actionId}/request-upload`, { name: "notes.html", contentType: "text/html" }), [400]);
+  status("action photo upload refuses a missing action", await admin("POST", "/track-actions/999999999/request-upload", { name: "fix.jpg", contentType: "image/jpeg" }), [404]);
+  status("action media cannot be patched directly", await admin("PATCH", `/track-actions/${actionId}`, { mediaUrls: ["/objects/uploads/x.jpg"] }), [400]);
   const required = fireRequirements.data?.[0];
   status("required evidence must link an action", await admin("POST", "/track-evidence", {
     module: "fire",
@@ -64,6 +73,8 @@ async function main() {
   status("other tenant cannot see owner evidence", await other("GET", "/track-evidence?module=fire"), [200]);
   const otherEvidence = await other("GET", "/track-evidence?module=fire");
   check("other tenant receives no owner evidence", Array.isArray(otherEvidence.data) && !otherEvidence.data.some(item => item.id === foreignId));
+  status("other tenant cannot get an upload link for owner action", await other("POST", `/track-actions/${actionId}/request-upload`, { name: "fix.jpg", contentType: "image/jpeg" }), [404]);
+  status("other tenant cannot attach to owner action", await other("POST", `/track-actions/${actionId}/media`, { objectPath: "/objects/uploads/foreign.jpg" }), [404]);
   status("other tenant cannot review owner evidence", await other("POST", `/track-evidence/${foreignId}/review`, { status: "verified", reviewNotes: "No access" }), [404]);
   console.log(`track-evidence tests: ${passed} passed, ${failures.length} failed`);
   if (failures.length) process.exitCode = 1;

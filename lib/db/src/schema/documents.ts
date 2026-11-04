@@ -12,6 +12,8 @@ export const clientDocumentsTable = pgTable("client_documents", {
   objectPath: text("object_path").notNull(), // e.g. /objects/uploads/<uuid>
   fileSize: integer("file_size"),           // bytes
   mimeType: text("mime_type"),
+  // Optional type: "haccp" or "recipe_spec"; NULL = general.
+  category: text("category"),
   uploadedById: integer("uploaded_by_id").references(() => usersTable.id, {
     onDelete: "set null",
   }),

@@ -1,6 +1,7 @@
-import { useState, useMemo, useEffect } from "react";
+import { createContext, useContext, useState, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -22,8 +23,12 @@ import { AuditLog } from "@/components/audit-log";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
+import { PickOrTypeSelect, usePeopleAndContractors } from "@/components/pick-or-type-select";
+import { CorrectiveActionUpdate } from "@/components/corrective-action-update";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
+import { DocumentField, downloadRegisterDocument, type DocumentValue } from "@/components/register-shared";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import {
   useGetIncidentConfig,
   getGetIncidentConfigQueryKey,
@@ -32,10 +37,18 @@ import {
 import {
   AlertOctagon, Plus, AlertTriangle, CheckCircle2, Clock,
   Pencil, Lock, Search, Filter, FileWarning,
-  ShieldAlert, UserX, Activity, Settings, X, Printer,
+  ShieldAlert, UserX, Activity, Settings, Printer, FileText, Download, ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
+import { StringListEditor } from "@/components/string-list-editor";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
+import { useSayItFill } from "@/lib/say-it-fill";
+import { sortByLabel } from "@/lib/sort-options";
+import { localDate } from "@/lib/voice-log";
+import { useManagedBy } from "@/components/managed-by-badge";
+import { VIDEO_PATH } from "@/lib/media-upload";
+import { takeLinkParams } from "@/lib/deep-link";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,6 +61,87 @@ type IncidentType = (typeof INCIDENT_TYPES)[number];
 type Severity = (typeof SEVERITIES)[number];
 type Status = (typeof STATUSES)[number];
 type EmploymentType = (typeof EMPLOYMENT_TYPES)[number];
+
+// RIDDOR 2013 categories. Over-3-day injuries are recorded, not reported.
+const RIDDOR_CATEGORY_LABELS = {
+  death:                  "Death",
+  specified_injury:       "Specified injury",
+  over_7_day_injury:      "Over-7-day injury",
+  non_worker_hospital:    "Non-worker taken to hospital",
+  occupational_disease:   "Occupational disease",
+  dangerous_occurrence:   "Dangerous occurrence",
+  over_3_day_record_only: "Over-3-day injury (record only)",
+} as const;
+type RiddorCategory = keyof typeof RIDDOR_CATEGORY_LABELS;
+interface RiddorDeadline {
+  category: RiddorCategory;
+  reportBy: string | null;
+  notifyWithoutDelay: boolean;
+  state: "reported" | "overdue" | "due" | "on_diagnosis" | "record_only";
+}
+// Report windows in days from the incident (RIDDOR 2013); mirrors the API.
+const RIDDOR_REPORT_DAYS: Partial<Record<RiddorCategory, number>> = {
+  death: 10, specified_injury: 10, non_worker_hospital: 10, dangerous_occurrence: 10, over_7_day_injury: 15,
+};
+const RIDDOR_NOTIFY_NOW = new Set<RiddorCategory>(["death", "specified_injury", "non_worker_hospital", "dangerous_occurrence", "occupational_disease"]);
+
+/**
+ * Northern Ireland businesses report to HSENI under RIDDOR (Northern Ireland)
+ * 1997, which differs from Great Britain's RIDDOR 2013: injuries keeping
+ * someone off normal work for more than 3 days are still reportable.
+ */
+const NorthernIrelandContext = createContext(false);
+const useNorthernIreland = () => useContext(NorthernIrelandContext);
+const HSENI_REPORT_URL = "https://www.hseni.gov.uk/report-incident";
+const HSENI_PHONE = "0800 032 0121";
+
+/** Plain-English reporting deadline for a category and incident date. */
+function riddorDeadlineText(category: RiddorCategory, incidentDate: string, northernIreland = false): string {
+  if (northernIreland && category === "over_3_day_record_only") return "In Northern Ireland injuries keeping someone off work for more than 3 days must be reported to HSENI, within 10 days of the incident.";
+  if (category === "over_3_day_record_only") return "Record in your accident book; not reportable to the HSE.";
+  if (category === "occupational_disease") return "Report without delay once you receive a written diagnosis.";
+  const days = RIDDOR_REPORT_DAYS[category]!;
+  const reportBy = incidentDate ? new Date(`${incidentDate.slice(0, 10)}T00:00:00Z`) : null;
+  reportBy?.setUTCDate(reportBy.getUTCDate() + days);
+  const by = reportBy ? ` (by ${reportBy.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })})` : "";
+  const regulator = northernIreland ? "HSENI" : "the HSE";
+  return `${RIDDOR_NOTIFY_NOW.has(category) ? `Notify ${regulator} without delay, and report` : "Report"} within ${northernIreland ? 10 : days} days of the incident${by}.`;
+}
+
+// HSE's "How to make a RIDDOR report" page (online forms and phone line).
+const HSE_RIDDOR_REPORT_URL = "https://www.hse.gov.uk/riddor/report.htm";
+
+/** Link to the HSE RIDDOR reporting page, opening in a new tab. */
+function HseRiddorLink({ className, children }: { className?: string; children?: ReactNode }) {
+  const northernIreland = useNorthernIreland();
+  if (northernIreland) children = "Report to HSENI (Northern Ireland)";
+  else children ??= "Report on the HSE RIDDOR website";
+  return (
+    <a href={northernIreland ? HSENI_REPORT_URL : HSE_RIDDOR_REPORT_URL} target="_blank" rel="noopener noreferrer"
+      className={cn("inline-flex items-center gap-1 font-medium underline underline-offset-2", className)}
+      data-testid="link-hse-riddor">
+      {children} <ExternalLink className="w-3 h-3" aria-hidden="true" />
+      <span className="sr-only">(opens in a new tab)</span>
+    </a>
+  );
+}
+
+/** "Speak to your adviser first" note with the HSE link, shown wherever RIDDOR is decided. */
+function RiddorAdviserNote({ className }: { className?: string }) {
+  const { data: managedBy } = useManagedBy();
+  const adviser = managedBy?.practiceName
+    ? <>your health and safety adviser at <strong>{managedBy.practiceName}</strong></>
+    : "your health and safety adviser";
+  return (
+    <div className={cn("text-xs space-y-1", className)} data-testid="riddor-adviser-note">
+      <p>
+        Not sure whether this needs reporting? We recommend you speak to {adviser} before
+        you report. They can help you decide and fill in the {useNorthernIreland() ? "HSENI" : "HSE"} form.
+      </p>
+      <HseRiddorLink />
+    </div>
+  );
+}
 
 interface Incident {
   id: number;
@@ -62,12 +156,17 @@ interface Incident {
   description: string;
   involvedName: string;
   involvedJobTitle: string | null;
+  involvedAddress?: string | null;
+  reporterAddress?: string | null;
   involvedEmploymentType: EmploymentType;
   injuriesSustained: string | null;
   firstAidGiven: boolean;
   firstAiderName: string | null;
   witnesses: string | null;
   riddorReportable: boolean;
+  riddorCategory: RiddorCategory | null;
+  /** Computed by the API from the category and incident date. */
+  riddorDeadline: RiddorDeadline | null;
   reportedToHse: boolean;
   hseReference: string | null;
   hseReportDate: string | null;
@@ -90,12 +189,15 @@ interface Summary {
 
 interface Site { id: number; name: string; }
 interface RiddorHistoryEvent {
-  id: number; eventType: "decision" | "submission"; riddorReportable: boolean;
+  id: number; eventType: "decision" | "submission"; riddorReportable: boolean; riddorCategory: RiddorCategory | null;
   reportedToHse: boolean; rationale: string | null; hseReference: string | null;
   hseReportDate: string | null; decisionMaker: string | null; decisionAt: string;
   submittedAt: string | null; submissionEvidence: string | null;
+  receiptFileName: string | null; receiptContentType: string | null;
+  receiptSource: "upload" | "incident_attachment" | null;
   createdAt: string; actorName: string | null; actorEmail: string | null;
 }
+interface IncidentAttachment { id: number; caption: string | null; created_at: string; object_path?: string; }
 interface IncidentAction {
   id: number; title: string; status: string; ownerName: string;
   correctiveAction: string; evidenceReference: string | null;
@@ -125,7 +227,15 @@ const SEVERITY_LABELS: Record<string, string> = {
   serious:  "Serious",
   fatal:    "Fatal",
 };
-const severityLabel = (v: string) => SEVERITY_LABELS[v] ?? humanize(v);
+/** The first day of this month on this device, as YYYY-MM-DD. */
+function startOfThisMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+/** Severity filter value for the "Serious/Fatal" summary box. */
+const SERIOUS_OR_FATAL = "serious_or_fatal";
+const severityLabel = (v: string) => (v === SERIOUS_OR_FATAL ? "Serious or fatal" : SEVERITY_LABELS[v] ?? humanize(v));
 
 const STATUS_LABELS: Record<Status, string> = {
   open:                "Open",
@@ -242,24 +352,6 @@ function IncidentConfigDialog() {
     );
   };
 
-  const StringListEditor = ({ items, onChange, placeholder }: { items: string[]; onChange: (v: string[]) => void; placeholder: string }) => (
-    <div className="space-y-2">
-      {items.map((item, i) => (
-        <div key={i} className="flex gap-2 items-center">
-          <Input value={item} placeholder={placeholder} className="h-8 text-sm rounded-sm"
-            onChange={e => { const n = [...items]; n[i] = e.target.value; onChange(n); }} />
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0"
-            onClick={() => onChange(items.filter((_, x) => x !== i))}>
-            <X className="w-3.5 h-3.5 text-destructive" />
-          </Button>
-        </div>
-      ))}
-      <Button variant="outline" size="sm" onClick={() => onChange([...items, ""])}>
-        <Plus className="w-3.5 h-3.5 mr-1.5" /> Add
-      </Button>
-    </div>
-  );
-
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -331,23 +423,31 @@ const emptyForm = () => ({
   incidentType: "" as string,
   severity: "" as string,
   status: "open" as Status,
-  incidentDate: new Date().toISOString().slice(0, 10),
+  // Today on this device (not UTC, which is yesterday after midnight in summer).
+  incidentDate: localDate(),
   incidentTime: "",
   location: "",
   description: "",
   involvedName: "",
   involvedJobTitle: "",
+  involvedAddress: "",
+  reporterAddress: "",
   involvedEmploymentType: "employee" as EmploymentType,
   injuriesSustained: "",
   firstAidGiven: false,
   firstAiderName: "",
   witnesses: "",
   riddorReportable: false,
+  riddorCategory: "" as RiddorCategory | "",
   reportedToHse: false,
   hseReference: "",
   hseReportDate: "",
   submittedAt: "",
   submissionEvidence: "",
+  // HSE receipt for the submission being recorded: a new upload, or one of
+  // the incident's attachments (receiptAttachmentId, editing only).
+  receiptUpload: { objectPath: null, fileName: null } as DocumentValue,
+  receiptAttachmentId: "",
   riddorRationale: "",
   immediateActions: "",
   investigationFindings: "",
@@ -360,8 +460,12 @@ const emptyForm = () => ({
 
 export default function IncidentsPage() {
   const { toast } = useToast();
-  const { activeClientId, hasService, client } = useAuth();
+  const { activeClientId, hasService, client, user } = useAuth();
   const canAdmin = useCanAdmin();
+  const clientApi = useActiveClientApi();
+  // Managers read injury details, so they attach and download HSE receipts.
+  const isManager = user?.role === "client_admin" || user?.role === "consultant" || user?.role === "client_manager"
+    || (user?.role === "client_staff" && user.isDepartmentManager === true);
   const qc = useQueryClient();
   const apiFetch = useIncidentsApi();
   const hasIncidentTrack = hasService("incidenttrack");
@@ -369,7 +473,8 @@ export default function IncidentsPage() {
   const [filterStatus, setFilterStatus] = useState<Status | "all">("all");
   const [filterSeverity, setFilterSeverity] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");
-  const [filterSite, setFilterSite] = useState("all");
+  const [filterSite, setFilterSite] = useSiteFilter("all");
+  const workingSiteId = useWorkingSiteId();
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
   const [filterRiddor, setFilterRiddor] = useState(false);
@@ -377,13 +482,18 @@ export default function IncidentsPage() {
   const [showDialog, setShowDialog] = useState(false);
   const [editItem, setEditItem] = useState<Incident | null>(null);
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("incident", { disabled: saving });
   const [historyIncident, setHistoryIncident] = useState<Incident | null>(null);
   const [actionDraft, setActionDraft] = useState({ title: "", ownerName: "", correctiveAction: "" });
+  const [editingActionId, setEditingActionId] = useState<number | null>(null);
+  const canRecordActions = user?.role !== "client_viewer";
+  const actionOwnerGroups = usePeopleAndContractors(canAdmin && !!historyIncident);
   const [savingAction, setSavingAction] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [formSection, setFormSection] = useState<"details" | "actions">("details");
 
-  const { data: incidentConfig } = useGetIncidentConfig();
+  const { data: incidentConfig, isFetched: incidentConfigFetched } = useGetIncidentConfig();
+  const northernIreland = incidentConfig?.regulator_nation === "northern_ireland";
   const { data: formOptions } = useFormOptions();
   const incidentTypeOptions = pickOptions(formOptions, "incident_types");
   const severityOptions: readonly string[] = SEVERITIES;
@@ -444,7 +554,8 @@ export default function IncidentsPage() {
   const filtered = useMemo(() => {
     let rows = incidents;
     if (filterStatus !== "all") rows = rows.filter(r => r.status === filterStatus);
-    if (filterSeverity !== "all") rows = rows.filter(r => r.severity === filterSeverity);
+    if (filterSeverity === SERIOUS_OR_FATAL) rows = rows.filter(r => r.severity === "serious" || r.severity === "fatal");
+    else if (filterSeverity !== "all") rows = rows.filter(r => r.severity === filterSeverity);
     if (filterType !== "all") rows = rows.filter(r => r.incidentType === filterType);
     if (filterSite !== "all") rows = rows.filter(r => String(r.siteId) === filterSite);
     if (filterFrom) rows = rows.filter(r => r.incidentDate.slice(0, 10) >= filterFrom);
@@ -462,7 +573,28 @@ export default function IncidentsPage() {
     return rows;
   }, [incidents, filterStatus, filterSeverity, filterType, filterSite, filterFrom, filterTo, filterRiddor, search]);
 
+  type SummaryFilter = { status?: Status; severity?: string; from?: string; riddor?: boolean };
+  /** Shows the incidents a summary box counts: its filter only, at the chosen site. */
+  function showSummary(show: SummaryFilter) {
+    setFilterStatus(show.status ?? "all");
+    setFilterSeverity(show.severity ?? "all");
+    setFilterType("all");
+    setFilterFrom(show.from ?? "");
+    setFilterTo("");
+    setFilterRiddor(show.riddor ?? false);
+    setSearch("");
+  }
+  function summaryFilterActive(show: SummaryFilter) {
+    const noFilters = filterStatus === "all" && filterSeverity === "all" && filterType === "all"
+      && !filterFrom && !filterTo && !filterRiddor && !search.trim();
+    if (!show.status && !show.severity && !show.from && !show.riddor) return noFilters;
+    return filterStatus === (show.status ?? "all") && filterSeverity === (show.severity ?? "all")
+      && filterType === "all" && filterFrom === (show.from ?? "") && !filterTo
+      && filterRiddor === (show.riddor ?? false) && !search.trim();
+  }
+
   const riddorOutstanding = summary?.riddorOutstanding ?? 0;
+  const riddorOverdue = incidents.filter(r => r.riddorDeadline?.state === "overdue").length;
 
   // ── Export register (for HSE audits / insurance) ─────────────────────────────
 
@@ -538,16 +670,40 @@ ${rows.map(r => `<tr>
 
   // ── Dialog ─────────────────────────────────────────────────────────────────
 
-  function openAdd() {
+  function openAdd(spoken?: Partial<ReturnType<typeof emptyForm>>) {
     setEditItem(null);
     const f = emptyForm();
+    // The person logging it, unless the template names a default reporter.
+    f.reportedBy = user?.name ?? "";
     f.incidentType = incidentTypeOptions[0] ?? "";
     f.severity = severityOptions[0] ?? "";
     if (incidentConfig?.incident_default_reporter) f.reportedBy = incidentConfig.incident_default_reporter;
-    setForm(f);
+    if (workingSiteId) f.siteId = String(workingSiteId);
+    setForm({ ...f, ...spoken });
     setFormSection("details");
+    media.clear();
     setShowDialog(true);
   }
+
+  // Say it: what happened and where opens a new incident with them filled in.
+  useSayItFill(["incident"], fill => {
+    const said = (key: string) => (typeof fill.values[key] === "string" ? fill.values[key] as string : "");
+    openAdd({
+      description: said("description") || fill.text.trim(),
+      location: said("location"),
+      ...(fill.siteId ? { siteId: String(fill.siteId) } : {}),
+    });
+  }, incidentConfigFetched);
+
+  // The "Report an accident or incident" QR label opens a new report, once
+  // the incident settings (the default reporter) have loaded.
+  const reportFromLink = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (reportFromLink.current === null) reportFromLink.current = takeLinkParams(["report"] as const)?.report === "1";
+    if (!reportFromLink.current || !hasIncidentTrack || !incidentConfigFetched) return;
+    reportFromLink.current = false;
+    openAdd();
+  }, [hasIncidentTrack, incidentConfigFetched]);
 
   function openEdit(r: Incident) {
     setEditItem(r);
@@ -561,17 +717,22 @@ ${rows.map(r => `<tr>
       description: r.description,
       involvedName: r.involvedName,
       involvedJobTitle: r.involvedJobTitle ?? "",
+      involvedAddress: r.involvedAddress ?? "",
+      reporterAddress: r.reporterAddress ?? "",
       involvedEmploymentType: r.involvedEmploymentType,
       injuriesSustained: r.injuriesSustained ?? "",
       firstAidGiven: r.firstAidGiven,
       firstAiderName: r.firstAiderName ?? "",
       witnesses: r.witnesses ?? "",
       riddorReportable: r.riddorReportable,
+      riddorCategory: r.riddorCategory ?? "",
       reportedToHse: r.reportedToHse,
       hseReference: r.hseReference ?? "",
       hseReportDate: r.hseReportDate?.slice(0, 10) ?? "",
       submittedAt: "",
       submissionEvidence: "",
+      receiptUpload: { objectPath: null, fileName: null },
+      receiptAttachmentId: "",
       riddorRationale: "",
       immediateActions: r.immediateActions ?? "",
       investigationFindings: r.investigationFindings ?? "",
@@ -580,7 +741,31 @@ ${rows.map(r => `<tr>
       siteId: r.siteId ? String(r.siteId) : "",
     });
     setFormSection("details");
+    media.clear();
     setShowDialog(true);
+  }
+
+  // This save records a new or corrected HSE submission (a new history event).
+  const submissionChanged = form.reportedToHse &&
+    (!editItem?.reportedToHse || form.hseReference.trim() !== (editItem.hseReference ?? "") ||
+      form.hseReportDate !== (editItem.hseReportDate?.slice(0, 10) ?? ""));
+  const receiptChosen = isManager && (!!form.receiptUpload.objectPath || !!form.receiptAttachmentId);
+  const { data: incidentAttachments = [] } = useQuery<IncidentAttachment[]>({
+    queryKey: ["incident-attachments", editItem?.id, activeClientId],
+    // A receipt is a photo, so the incident's videos aren't offered.
+    queryFn: async () => ((await apiFetch(`/photos?entityType=incident&entityId=${editItem!.id}`)) as IncidentAttachment[])
+      .filter(attachment => !VIDEO_PATH.test(attachment.object_path ?? "")),
+    enabled: showDialog && !!editItem && isManager && submissionChanged,
+  });
+
+  async function downloadReceipt(event: RiddorHistoryEvent) {
+    if (!historyIncident) return;
+    try {
+      await downloadRegisterDocument(clientApi, `/incidents/${historyIncident.id}/riddor-history/${event.id}/receipt`,
+        event.receiptFileName ?? "hse-receipt");
+    } catch (e: any) {
+      toast({ title: "Could not download the receipt", description: e.message, variant: "destructive" });
+    }
   }
 
   async function handleSave() {
@@ -590,6 +775,7 @@ ${rows.map(r => `<tr>
     if (!form.description.trim()) { toast({ title: "Description is required", variant: "destructive" }); return; }
     if (!form.reportedBy.trim()) { toast({ title: "Reported by is required", variant: "destructive" }); return; }
     const assessmentChanged = !editItem || form.riddorReportable !== editItem.riddorReportable ||
+      (form.riddorCategory || null) !== (editItem.riddorCategory ?? null) ||
       form.reportedToHse !== editItem.reportedToHse ||
       form.hseReference.trim() !== (editItem.hseReference ?? "") ||
       form.hseReportDate !== (editItem.hseReportDate?.slice(0, 10) ?? "");
@@ -598,13 +784,11 @@ ${rows.map(r => `<tr>
       toast({ title: "Explain the RIDDOR decision", variant: "destructive" });
       return;
     }
-    const submissionChanged = form.reportedToHse &&
-      (!editItem?.reportedToHse || form.hseReference.trim() !== (editItem.hseReference ?? "") ||
-        form.hseReportDate !== (editItem.hseReportDate?.slice(0, 10) ?? ""));
     if (submissionChanged &&
-      (!form.hseReference.trim() || !form.hseReportDate || !form.submittedAt || !form.submissionEvidence.trim())) {
+      (!form.hseReference.trim() || !form.hseReportDate || !form.submittedAt ||
+        (!form.submissionEvidence.trim() && !receiptChosen))) {
       setFormSection("actions");
-      toast({ title: "Record the HSE reference, date, time and submission evidence", variant: "destructive" });
+      toast({ title: "Record the HSE reference, date, time and submission evidence or receipt", variant: "destructive" });
       return;
     }
     setSaving(true);
@@ -619,12 +803,15 @@ ${rows.map(r => `<tr>
         description: form.description.trim(),
         involvedName: form.involvedName.trim(),
         involvedJobTitle: form.involvedJobTitle.trim() || null,
+        involvedAddress: form.involvedAddress.trim() || null,
+        reporterAddress: form.reporterAddress.trim() || null,
         involvedEmploymentType: form.involvedEmploymentType,
         injuriesSustained: form.injuriesSustained.trim() || null,
         firstAidGiven: form.firstAidGiven,
         firstAiderName: form.firstAiderName.trim() || null,
         witnesses: form.witnesses.trim() || null,
         riddorReportable: form.riddorReportable,
+        riddorCategory: form.riddorCategory || null,
         reportedToHse: form.reportedToHse,
         hseReference: form.hseReference.trim() || null,
         hseReportDate: form.hseReportDate || null,
@@ -632,6 +819,11 @@ ${rows.map(r => `<tr>
         // not a request to overwrite an earlier decision or submission.
         submittedAt: form.submittedAt ? new Date(form.submittedAt).toISOString() : undefined,
         submissionEvidence: form.submissionEvidence.trim() || (editItem ? undefined : null),
+        // Bound to the submission event this save records; never changed later.
+        submissionReceipt: !submissionChanged || !isManager ? undefined
+          : form.receiptUpload.objectPath
+            ? { objectPath: form.receiptUpload.objectPath, fileName: form.receiptUpload.fileName ?? "HSE receipt" }
+            : form.receiptAttachmentId ? { attachmentId: Number(form.receiptAttachmentId) } : undefined,
         riddorRationale: form.riddorRationale.trim() || undefined,
         immediateActions: form.immediateActions.trim() || null,
         investigationFindings: form.investigationFindings.trim() || null,
@@ -643,7 +835,8 @@ ${rows.map(r => `<tr>
         await apiFetch(`/incidents/${editItem.id}`, { method: "PUT", body: JSON.stringify(body) });
         toast({ title: "Record updated" });
       } else {
-        await apiFetch("/incidents", { method: "POST", body: JSON.stringify(body) });
+        const created = await apiFetch("/incidents", { method: "POST", body: JSON.stringify(body) });
+        await media.attach(created?.id);
         toast({ title: "Incident recorded" });
       }
       invalidate();
@@ -692,7 +885,7 @@ ${rows.map(r => `<tr>
                 <Lock className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h2 className="text-2xl font-display font-medium text-foreground mb-2">IncidentTrack</h2>
+                <h2 className="text-2xl font-display font-bold text-foreground mb-2">IncidentTrack</h2>
                 <p className="text-muted-foreground mb-1">
                   Digital accident and incident logbook — record investigation, reportability decisions, HSE references and follow-up actions. Confirm RIDDOR duties for each event.
                 </p>
@@ -717,14 +910,15 @@ ${rows.map(r => `<tr>
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
+    <NorthernIrelandContext.Provider value={northernIreland}>
     <AppLayout title="IncidentTrack">
 
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <p className="text-sm text-muted-foreground mt-1">
           Accident & incident logbook — accidents, near misses, dangerous occurrences and RIDDOR reporting
         </p>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex flex-wrap items-center gap-2 sm:flex-shrink-0">
           <Button variant="outline" size="sm" className="gap-2 rounded-sm"
             onClick={handleExportRegister}
             title="Print or save the incident register for HSE audits / insurance">
@@ -737,7 +931,7 @@ ${rows.map(r => `<tr>
             triggerLabel="Customise types"
             labelFor={typeLabel}
           />
-          <Button onClick={openAdd} className="gap-2 rounded-sm">
+          <Button onClick={() => openAdd()} className="gap-2 rounded-sm">
             <Plus className="w-4 h-4" /> Log Incident
           </Button>
         </div>
@@ -749,7 +943,10 @@ ${rows.map(r => `<tr>
           <ShieldAlert className="w-4 h-4 mt-0.5 flex-shrink-0" />
           <span>
             <strong>{riddorOutstanding} RIDDOR-reportable incident{riddorOutstanding !== 1 ? "s have" : " has"} not yet been reported to the HSE.</strong>{" "}
-            RIDDOR reports must be submitted within the statutory timeframe.
+            {riddorOverdue > 0
+              ? <><strong>{riddorOverdue} {riddorOverdue === 1 ? "is" : "are"} past the RIDDOR reporting deadline.</strong> Report now.</>
+              : "RIDDOR reports must be submitted within the statutory timeframe."}{" "}
+            <HseRiddorLink className="text-rose-900" />
           </span>
         </div>
       )}
@@ -757,24 +954,36 @@ ${rows.map(r => `<tr>
       {/* Summary stats */}
       {summary && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          {[
-            { label: "Total",         value: summary.total,              icon: Activity,     color: "text-slate-600" },
-            { label: "Open",          value: summary.openCount,          icon: AlertOctagon, color: "text-rose-600" },
-            { label: "Investigating", value: summary.investigatingCount, icon: Clock,        color: "text-amber-600" },
-            { label: "This Month",    value: summary.thisMonth,          icon: AlertTriangle, color: "text-sky-600" },
-            { label: "RIDDOR",        value: summary.riddorCount,        icon: ShieldAlert,  color: "text-orange-600" },
-            { label: "Serious/Fatal", value: summary.seriousCount,       icon: UserX,        color: "text-rose-700" },
-          ].map(({ label, value, icon: Icon, color }) => (
-            <Card key={label} className="rounded-sm">
-              <CardContent className="p-4">
+          {([
+            { label: "Total",         value: summary.total,              icon: Activity,     color: "text-slate-600", show: {} },
+            { label: "Open",          value: summary.openCount,          icon: AlertOctagon, color: "text-rose-600", show: { status: "open" as const } },
+            { label: "Investigating", value: summary.investigatingCount, icon: Clock,        color: "text-amber-600", show: { status: "under_investigation" as const } },
+            { label: "This Month",    value: summary.thisMonth,          icon: AlertTriangle, color: "text-sky-600", show: { from: startOfThisMonth() } },
+            { label: "RIDDOR",        value: summary.riddorCount,        icon: ShieldAlert,  color: "text-orange-600", show: { riddor: true } },
+            { label: "Serious/Fatal", value: summary.seriousCount,       icon: UserX,        color: "text-rose-700", show: { severity: SERIOUS_OR_FATAL } },
+          ] as { label: string; value: number; icon: typeof Activity; color: string; show: SummaryFilter }[]).map(({ label, value, icon: Icon, color, show }) => {
+            const active = summaryFilterActive(show);
+            return (
+              // Each box lists the incidents it counts (Total clears the filters).
+              <button
+                key={label}
+                type="button"
+                aria-pressed={active}
+                aria-label={`${label}: ${value}. Show ${label === "Total" ? "all incidents" : `${label.toLowerCase()} incidents`}`}
+                onClick={() => showSummary(show)}
+                className={cn(
+                  "rounded-sm border bg-card text-left shadow-sm p-4 transition-colors hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  active && "border-primary ring-1 ring-primary bg-primary/5",
+                )}
+              >
                 <div className={cn("flex items-center gap-1.5 mb-1", color)}>
                   <Icon className="w-3.5 h-3.5" />
                   <span className="text-xs font-medium">{label}</span>
                 </div>
                 <div className="text-2xl font-semibold">{value}</div>
-              </CardContent>
-            </Card>
-          ))}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -782,7 +991,7 @@ ${rows.map(r => `<tr>
       <div className="flex flex-wrap gap-2 items-center">
         {sites.length > 0 && (
           <Select value={filterSite} onValueChange={setFilterSite}>
-            <SelectTrigger className="w-44 rounded-sm">
+            <SelectTrigger aria-label="Filter incidents by site" className="w-44 rounded-sm">
               <SelectValue placeholder="All sites" />
             </SelectTrigger>
             <SelectContent>
@@ -792,7 +1001,7 @@ ${rows.map(r => `<tr>
           </Select>
         )}
         <Select value={filterStatus} onValueChange={v => setFilterStatus(v as Status | "all")}>
-          <SelectTrigger className="w-44 rounded-sm">
+          <SelectTrigger aria-label="Filter incidents by status" className="w-44 rounded-sm">
             <Filter className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
             <SelectValue placeholder="All statuses" />
           </SelectTrigger>
@@ -802,21 +1011,22 @@ ${rows.map(r => `<tr>
           </SelectContent>
         </Select>
         <Select value={filterSeverity} onValueChange={v => setFilterSeverity(v)}>
-          <SelectTrigger className="w-36 rounded-sm">
+          <SelectTrigger aria-label="Filter incidents by severity" className="w-36 rounded-sm">
             <SelectValue placeholder="All severities" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All severities</SelectItem>
             {severityOptions.map(s => <SelectItem key={s} value={s}>{severityLabel(s)}</SelectItem>)}
+            <SelectItem value={SERIOUS_OR_FATAL}>{severityLabel(SERIOUS_OR_FATAL)}</SelectItem>
           </SelectContent>
         </Select>
         <Select value={filterType} onValueChange={v => setFilterType(v)}>
-          <SelectTrigger className="w-48 rounded-sm">
+          <SelectTrigger aria-label="Filter incidents by type" className="w-48 rounded-sm">
             <SelectValue placeholder="All types" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All types</SelectItem>
-            {incidentTypeOptions.map(t => <SelectItem key={t} value={t}>{typeLabel(t)}</SelectItem>)}
+            {sortByLabel(incidentTypeOptions, typeLabel).map(t => <SelectItem key={t} value={t}>{typeLabel(t)}</SelectItem>)}
           </SelectContent>
         </Select>
         <Input
@@ -834,6 +1044,8 @@ ${rows.map(r => `<tr>
           className="w-40 rounded-sm"
         />
         <button
+          type="button"
+          aria-pressed={filterRiddor}
           onClick={() => setFilterRiddor(r => !r)}
           className={cn(
             "flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-sm border transition-colors",
@@ -867,7 +1079,7 @@ ${rows.map(r => `<tr>
               : "No records match the current filters."}
           </p>
           {incidents.length === 0 && (
-            <Button onClick={openAdd} variant="outline" size="sm" className="mt-4 rounded-sm gap-2">
+            <Button onClick={() => openAdd()} variant="outline" size="sm" className="mt-4 rounded-sm gap-2">
               <Plus className="w-4 h-4" /> Log Incident
             </Button>
           )}
@@ -889,7 +1101,15 @@ ${rows.map(r => `<tr>
             </thead>
             <tbody className="divide-y divide-border">
               {filtered.map(r => (
-                <tr key={r.id} className="bg-white hover:bg-muted/20 transition-colors group">
+                <tr
+                  key={r.id}
+                  className="bg-white hover:bg-muted/20 transition-colors group cursor-pointer"
+                  // The whole row opens the incident; its own buttons and photo box keep their clicks.
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest("button, a, input, label, [role='dialog']")) return;
+                    openEdit(r);
+                  }}
+                >
                   <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
                     {fmt(r.incidentDate)}
                     {r.incidentTime && <div className="text-xs text-muted-foreground/60">{r.incidentTime}</div>}
@@ -925,8 +1145,19 @@ ${rows.map(r => `<tr>
                           <CheckCircle2 className="w-3.5 h-3.5" /> Reported
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-xs text-rose-700 font-medium">
-                          <ShieldAlert className="w-3.5 h-3.5" /> Outstanding
+                        <span className="inline-flex flex-col text-xs text-rose-700 font-medium">
+                          <span className="inline-flex items-center gap-1">
+                            <ShieldAlert className="w-3.5 h-3.5" />
+                            {r.riddorDeadline?.state === "overdue" ? "Overdue" : "Outstanding"}
+                          </span>
+                          {r.riddorDeadline?.reportBy && (
+                            <span className={cn("font-normal", r.riddorDeadline.state === "overdue" ? "text-rose-700" : "text-muted-foreground")}>
+                              Report by {fmt(r.riddorDeadline.reportBy)}
+                            </span>
+                          )}
+                          {r.riddorDeadline?.state === "on_diagnosis" && (
+                            <span className="font-normal text-muted-foreground">Report on diagnosis</span>
+                          )}
                         </span>
                       )
                     ) : (
@@ -935,11 +1166,12 @@ ${rows.map(r => `<tr>
                   </td>
                   <td className="px-4 py-3">
                     <CheckPhotoUploader entityType="incident" entityId={r.id} compact />
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mt-1">
-                      <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm" title="View RIDDOR history" onClick={() => setHistoryIncident(r)}>
+                    {/* Always shown: phones and tablets have no hover to reveal them. */}
+                    <div className="flex items-center gap-1 mt-1">
+                      <Button variant="ghost" size="icon" className="h-8 w-8 rounded-sm" title="View RIDDOR history" aria-label="View RIDDOR history" onClick={() => setHistoryIncident(r)}>
                         <Activity className="w-3.5 h-3.5" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm" onClick={() => openEdit(r)}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 rounded-sm" title="Open incident" aria-label="Open incident" onClick={() => openEdit(r)}>
                         <Pencil className="w-3.5 h-3.5" />
                       </Button>
                     </div>
@@ -956,12 +1188,21 @@ ${rows.map(r => `<tr>
 
       {/* Legal footer */}
       <div className="bg-rose-50 border border-rose-200 rounded-sm p-4 text-xs text-rose-900">
-        <p className="font-semibold mb-1">RIDDOR 2013 — Reporting requirements</p>
+        <p className="font-semibold mb-1">{northernIreland ? "RIDDOR (Northern Ireland) 1997 — Reporting requirements" : "RIDDOR 2013 — Reporting requirements"}</p>
+        {northernIreland ? (
+        <p>
+          Your business is in Northern Ireland, so incidents are reported to the Health and Safety Executive for Northern Ireland (HSENI), not the HSE.
+          This includes: deaths, specified major injuries, injuries that keep someone off normal work for more than 3 days, members of the public taken to hospital, occupational diseases, and dangerous occurrences.
+          Reports must be made within 10 days; deaths and major injuries must also be notified straight away. Report online through the HSENI website or call the HSENI helpline on {HSENI_PHONE}.
+        </p>
+        ) : (
         <p>
           Under the Reporting of Injuries, Diseases and Dangerous Occurrences Regulations 2013 you must report certain workplace incidents to the HSE.
           This includes: deaths, specified injuries (fractures, amputations, loss of sight, crush injuries), over-7-day incapacitation, occupational diseases, and dangerous occurrences.
-          Most reports must be submitted within 10 days (15 days for over-7-day injuries). Report online at <span className="font-medium">riddor.hse.gov.uk</span> or by phone on 0345 300 9923.
+          Most reports must be submitted within 10 days (15 days for over-7-day injuries). Report online through the HSE website; deaths and specified injuries can also be reported by phone on 0345 300 9923.
         </p>
+        )}
+        <RiddorAdviserNote className="mt-2" />
       </div>
 
       {/* Add / Edit dialog */}
@@ -1003,7 +1244,7 @@ ${rows.map(r => `<tr>
                     <Select value={form.incidentType} onValueChange={v => setForm(f => ({ ...f, incidentType: v }))}>
                       <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {formTypeOptions.map(t => <SelectItem key={t} value={t}>{typeLabel(t)}</SelectItem>)}
+                        {sortByLabel(formTypeOptions, typeLabel).map(t => <SelectItem key={t} value={t}>{typeLabel(t)}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1064,10 +1305,10 @@ ${rows.map(r => `<tr>
                   {sites.length > 0 && (
                     <div>
                       <Label>Site</Label>
-                      <Select value={form.siteId} onValueChange={v => setForm(f => ({ ...f, siteId: v }))}>
+                      <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                         <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">No specific site</SelectItem>
+                          <SelectItem value="none">No specific site</SelectItem>
                           {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                         </SelectContent>
                       </Select>
@@ -1104,11 +1345,19 @@ ${rows.map(r => `<tr>
                     </div>
                   </div>
                   <div>
+                    <Label htmlFor="incident-involved-address">Home address</Label>
+                    <Textarea id="incident-involved-address" placeholder="Needed for the accident book. Only managers can see it once saved."
+                      value={form.involvedAddress}
+                      onChange={e => setForm(f => ({ ...f, involvedAddress: e.target.value }))}
+                      autoComplete="off" spellCheck={false}
+                      className="mt-1 rounded-sm" rows={2} />
+                  </div>
+                  <div>
                     <Label>Employment Status *</Label>
                     <Select value={form.involvedEmploymentType} onValueChange={v => setForm(f => ({ ...f, involvedEmploymentType: v as EmploymentType }))}>
                       <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {EMPLOYMENT_TYPES.map(t => <SelectItem key={t} value={t}>{EMPLOYMENT_LABELS[t]}</SelectItem>)}
+                        {sortByLabel(EMPLOYMENT_TYPES, t => EMPLOYMENT_LABELS[t]).map(t => <SelectItem key={t} value={t}>{EMPLOYMENT_LABELS[t]}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1156,6 +1405,16 @@ ${rows.map(r => `<tr>
                     onChange={e => setForm(f => ({ ...f, reportedBy: e.target.value }))}
                     className="mt-1 rounded-sm" />
                 </div>
+                <div>
+                  <Label htmlFor="incident-reporter-address">Address of the person reporting (if not the injured person)</Label>
+                  <Textarea id="incident-reporter-address" placeholder="Leave blank if the injured person reported it or a member of staff is reporting at work"
+                    value={form.reporterAddress}
+                    onChange={e => setForm(f => ({ ...f, reporterAddress: e.target.value }))}
+                    autoComplete="off" spellCheck={false}
+                    className="mt-1 rounded-sm" rows={2} />
+                </div>
+
+                {editItem ? <CheckPhotoUploader entityType="incident" entityId={editItem.id} /> : media.picker}
               </>
             )}
 
@@ -1192,19 +1451,53 @@ ${rows.map(r => `<tr>
                   <p className="text-xs font-semibold text-orange-800 uppercase tracking-wider flex items-center gap-1.5">
                     <ShieldAlert className="w-3.5 h-3.5" /> RIDDOR Reporting
                   </p>
+                  <RiddorAdviserNote className="text-orange-900" />
                   <div className="flex items-start gap-3">
                     <Checkbox id="riddor" checked={form.riddorReportable}
                       onCheckedChange={v => setForm(f => ({
                         ...f, riddorReportable: !!v, reportedToHse: !!v ? f.reportedToHse : false,
+                        // Drop a category that no longer matches the reportability decision.
+                        riddorCategory: f.riddorCategory && (northernIreland || f.riddorCategory !== "over_3_day_record_only") !== !!v ? "" : f.riddorCategory,
                         hseReference: !!v ? f.hseReference : "", hseReportDate: !!v ? f.hseReportDate : "",
                       }))}
                       className="mt-0.5" />
                     <div>
                       <Label htmlFor="riddor" className="cursor-pointer">This incident is RIDDOR reportable</Label>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Deaths, specified injuries, over-7-day incapacitation, occupational diseases, dangerous occurrences
+                        {northernIreland
+                          ? "Deaths, major injuries, over-3-day incapacitation, members of the public taken to hospital, occupational diseases, dangerous occurrences (RIDDOR (NI) 1997)"
+                          : "Deaths, specified injuries, over-7-day incapacitation, occupational diseases, dangerous occurrences"}
                       </p>
                     </div>
+                  </div>
+                  <div>
+                    <Label>RIDDOR category <span className="text-muted-foreground text-xs">optional</span></Label>
+                    <Select
+                      value={form.riddorCategory || "none"}
+                      onValueChange={v => setForm(f => {
+                        const riddorCategory = v === "none" ? "" : v as RiddorCategory;
+                        // A category decides reportability; keep the tick box consistent with it.
+                        if (!riddorCategory) return { ...f, riddorCategory };
+                        // In Northern Ireland over-3-day injuries are reportable too.
+                        const reportable = northernIreland || riddorCategory !== "over_3_day_record_only";
+                        return {
+                          ...f, riddorCategory, riddorReportable: reportable,
+                          reportedToHse: reportable ? f.reportedToHse : false,
+                          hseReference: reportable ? f.hseReference : "", hseReportDate: reportable ? f.hseReportDate : "",
+                        };
+                      })}
+                    >
+                      <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Not categorised" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Not categorised</SelectItem>
+                        {(Object.keys(RIDDOR_CATEGORY_LABELS) as RiddorCategory[]).map(c => (
+                          <SelectItem key={c} value={c}>{northernIreland && c === "over_3_day_record_only" ? "Over-3-day injury (reportable in Northern Ireland)" : RIDDOR_CATEGORY_LABELS[c]}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {form.riddorCategory && (
+                      <p className="mt-1 text-xs text-orange-800">{riddorDeadlineText(form.riddorCategory, form.incidentDate, northernIreland)}</p>
+                    )}
                   </div>
                   <div>
                     <Label>RIDDOR decision rationale *</Label>
@@ -1223,7 +1516,7 @@ ${rows.map(r => `<tr>
                         <Checkbox id="hseReported" checked={form.reportedToHse}
                           onCheckedChange={v => setForm(f => ({ ...f, reportedToHse: !!v }))}
                           className="mt-0.5" />
-                        <Label htmlFor="hseReported" className="cursor-pointer">Reported to HSE (riddor.hse.gov.uk)</Label>
+                        <Label htmlFor="hseReported" className="cursor-pointer">Reported to HSE</Label>
                       </div>
 
                       {form.reportedToHse && (
@@ -1251,22 +1544,63 @@ ${rows.map(r => `<tr>
                               className="mt-1 rounded-sm" />
                           </div>
                           <div>
-                            <Label>Submission evidence / secure location *</Label>
+                            <Label>Submission evidence / secure location{receiptChosen ? "" : " *"}</Label>
                             <Input placeholder="Receipt ID, document reference or secure URL"
                               value={form.submissionEvidence}
                               onChange={e => setForm(f => ({ ...f, submissionEvidence: e.target.value }))}
                               className="mt-1 rounded-sm" />
                           </div>
                         </div>
+                        {submissionChanged && isManager && (
+                          <div className="space-y-2">
+                            <DocumentField
+                              label="HSE receipt (PDF, JPEG or PNG)"
+                              requestUrlPath="/incidents/riddor-receipts/request-upload"
+                              value={form.receiptUpload}
+                              disabled={saving}
+                              onChange={receiptUpload => setForm(f => ({
+                                ...f, receiptUpload, receiptAttachmentId: receiptUpload.objectPath ? "" : f.receiptAttachmentId,
+                              }))}
+                            />
+                            {editItem && incidentAttachments.length > 0 && !form.receiptUpload.objectPath && (
+                              <div>
+                                <Label>Or use one of this incident's attachments</Label>
+                                <Select value={form.receiptAttachmentId || "none"}
+                                  onValueChange={v => setForm(f => ({ ...f, receiptAttachmentId: v === "none" ? "" : v }))}>
+                                  <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="No attachment" /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="none">No attachment</SelectItem>
+                                    {incidentAttachments.map((a, i) => (
+                                      <SelectItem key={a.id} value={String(a.id)}>
+                                        {a.caption?.trim() || `Attachment ${i + 1}`} · added {fmtDateTime(a.created_at)}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            )}
+                            <p className="text-xs text-muted-foreground">The receipt is saved with this submission in the history and can't be changed or removed afterwards.</p>
+                          </div>
+                        )}
                         </>
                       )}
 
                       {!form.reportedToHse && (
                         <div className="flex items-start gap-2 text-xs text-orange-800 bg-orange-100 rounded-sm px-3 py-2">
                           <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                          {northernIreland ? (
                           <span>
-                            This incident must be reported to the HSE. Most reports must be submitted within 10 days (15 days for over-7-day injuries). Report at <strong>riddor.hse.gov.uk</strong> or call 0345 300 9923.
+                            This incident must be reported to HSENI within 10 days.{" "}
+                            <HseRiddorLink />{" "}
+                            (or call the HSENI helpline on {HSENI_PHONE}).
                           </span>
+                          ) : (
+                          <span>
+                            This incident must be reported to the HSE. Most reports must be submitted within 10 days (15 days for over-7-day injuries).{" "}
+                            <HseRiddorLink>Report it on the HSE website</HseRiddorLink>{" "}
+                            (deaths and specified injuries can also be phoned in on 0345 300 9923).
+                          </span>
+                          )}
                         </div>
                       )}
                     </>
@@ -1302,36 +1636,60 @@ ${rows.map(r => `<tr>
               riddorHistory.map(event => (
                 <div key={event.id} className="border rounded-sm p-3 text-sm space-y-1">
                   <div className="flex justify-between gap-2 font-medium">
-                    <span>{event.eventType === "submission" ? "HSE submission" : "RIDDOR decision"}: {event.riddorReportable ? "Reportable" : "Not reportable"}</span>
+                    <span>{event.eventType === "submission" ? "HSE submission" : "RIDDOR decision"}: {event.riddorReportable ? "Reportable" : "Not reportable"}{event.riddorCategory ? ` · ${RIDDOR_CATEGORY_LABELS[event.riddorCategory]}` : ""}</span>
                     <span className="text-xs text-muted-foreground whitespace-nowrap">{fmtDateTime(event.decisionAt)}</span>
                   </div>
                   <p className="text-muted-foreground">{event.reportedToHse ? "Reported to HSE" : "Not reported to HSE"}{event.hseReference ? ` · ${event.hseReference}` : ""}</p>
                   <p className="text-xs text-muted-foreground">Decision by {event.decisionMaker ?? event.actorName ?? event.actorEmail ?? "System"} · {fmtDateTime(event.decisionAt)}</p>
                   {event.rationale && <p>{event.rationale}</p>}
                   {event.submittedAt && <p className="text-xs text-muted-foreground">Submitted {fmtDateTime(event.submittedAt)}{event.submissionEvidence ? ` · Evidence: ${event.submissionEvidence}` : ""}</p>}
+                  {event.receiptFileName && (
+                    <div className="flex items-center gap-2 text-xs">
+                      <FileText className="w-3.5 h-3.5 text-primary shrink-0" aria-hidden="true" />
+                      <span className="truncate">HSE receipt: {event.receiptFileName}{event.receiptSource === "incident_attachment" ? " (from incident attachments)" : ""}</span>
+                      {isManager ? (
+                        <Button type="button" variant="outline" size="sm" className="h-6 text-xs gap-1"
+                          onClick={() => downloadReceipt(event)}>
+                          <Download className="w-3 h-3" aria-hidden="true" /> Download
+                        </Button>
+                      ) : <span className="text-muted-foreground">Managers can download it.</span>}
+                    </div>
+                  )}
                 </div>
               ))}
             <div className="border-t pt-3 space-y-2 text-sm">
-              <h3 className="font-semibold">Investigation & evidence</h3>
+              <h3 className="font-bold">Investigation & evidence</h3>
               <p>{historyIncident?.investigationFindings || "No investigation findings recorded yet."}</p>
               {historyIncident?.correctiveActions && <p className="text-muted-foreground">Proposed actions: {historyIncident.correctiveActions}</p>}
               {historyIncident && <CheckPhotoUploader entityType="incident" entityId={historyIncident.id} compact />}
-              <h3 className="font-semibold pt-2">Linked corrective actions</h3>
+              <h3 className="font-bold pt-2">Linked corrective actions</h3>
               {isLoadingActions ? <p>Loading actions…</p> : linkedActions.length === 0 ?
                 <p className="text-muted-foreground">No linked corrective actions yet.</p> :
                 linkedActions.map(action => (
                   <div key={action.id} className="rounded-sm border p-3 space-y-1">
-                    <p className="font-medium">{action.title} · {action.status.replaceAll("_", " ")}</p>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <p className="font-medium">{action.title} · {action.status.replaceAll("_", " ")}</p>
+                      {canRecordActions && action.status !== "verified" && editingActionId !== action.id && (
+                        <Button variant="outline" size="sm" onClick={() => setEditingActionId(action.id)}>Update / verify</Button>
+                      )}
+                    </div>
                     <p>{action.correctiveAction} · Owner: {action.ownerName}</p>
                     {action.evidenceReference && <p>Evidence: {action.evidenceReference}</p>}
                     {action.verifiedAt && <p className="text-emerald-700">Verified closed {fmtDateTime(action.verifiedAt)}{action.verificationNotes ? ` · ${action.verificationNotes}` : ""}</p>}
+                    {editingActionId === action.id && (
+                      <CorrectiveActionUpdate action={action} onCancel={() => setEditingActionId(null)} onSaved={async () => {
+                        setEditingActionId(null);
+                        await qc.invalidateQueries({ queryKey: ["incident-actions", historyIncident?.id, activeClientId] });
+                      }} />
+                    )}
                   </div>
                 ))}
-              <Link href="/compliance-hub"><Button variant="outline" size="sm">Review and verify actions in Compliance Hub</Button></Link>
               {canAdmin && <div className="space-y-2 border-t pt-3">
-                <h4 className="font-medium">Add a linked action</h4>
-                <Input aria-label="Action title" placeholder="Action title" value={actionDraft.title} onChange={e => setActionDraft(d => ({ ...d, title: e.target.value }))} />
-                <Input aria-label="Action owner" placeholder="Action owner" value={actionDraft.ownerName} onChange={e => setActionDraft(d => ({ ...d, ownerName: e.target.value }))} />
+                <h4 className="font-bold">Add a linked action</h4>
+                <Input aria-label="Action title" dictation placeholder="Action title" value={actionDraft.title} onChange={e => setActionDraft(d => ({ ...d, title: e.target.value }))} />
+                <PickOrTypeSelect value={actionDraft.ownerName} groups={actionOwnerGroups} placeholder="Action owner"
+                  otherLabel="Someone else (type the name)" typedPlaceholder="Action owner"
+                  onChange={ownerName => setActionDraft(d => ({ ...d, ownerName }))} />
                 <Textarea aria-label="Corrective action" placeholder="Corrective action to complete" value={actionDraft.correctiveAction} onChange={e => setActionDraft(d => ({ ...d, correctiveAction: e.target.value }))} />
                 <Button size="sm" disabled={savingAction} onClick={createIncidentAction}>Link corrective action</Button>
               </div>}
@@ -1341,5 +1699,6 @@ ${rows.map(r => `<tr>
       </Dialog>
 
     </AppLayout>
+    </NorthernIrelandContext.Provider>
   );
 }

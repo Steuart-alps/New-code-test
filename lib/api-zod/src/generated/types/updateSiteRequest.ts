@@ -12,4 +12,8 @@ export interface UpdateSiteRequest {
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;
+  /** Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation. */
+  sleepingAccommodation?: boolean | null;
+  /** A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists. */
+  nightPorter?: boolean | null;
 }

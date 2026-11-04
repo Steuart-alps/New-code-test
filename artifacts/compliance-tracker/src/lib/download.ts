@@ -1,3 +1,17 @@
+export const DOWNLOAD_UNAVAILABLE_MESSAGE =
+  "Downloads are temporarily unavailable. Your file is safe; please try again in a few minutes.";
+
+/**
+ * Message for a failed download-link or file request. A storage outage (the
+ * API's 503 OBJECT_STORAGE_UNAVAILABLE contract) gets retry guidance; anything
+ * else shows the API's own error or the caller's fallback.
+ */
+export async function getDownloadErrorMessage(response: Response, fallback: string): Promise<string> {
+  const body = await response.clone().json().catch(() => null) as { error?: unknown; code?: unknown } | null;
+  if (response.status === 503 && body?.code === "OBJECT_STORAGE_UNAVAILABLE") return DOWNLOAD_UNAVAILABLE_MESSAGE;
+  return typeof body?.error === "string" && body.error.length > 0 ? body.error : fallback;
+}
+
 /**
  * Downloads a file without opening a new browser tab. Fetching into a Blob also
  * makes this work for signed inspection-document URLs when pop-ups are blocked.
@@ -5,7 +19,7 @@
 export async function downloadFile(url: string, filename: string): Promise<void> {
   const response = await fetch(url, { credentials: "include" });
   if (!response.ok) {
-    throw new Error(`Download failed (${response.status})`);
+    throw new Error(await getDownloadErrorMessage(response, `Download failed (${response.status})`));
   }
 
   const blob = await response.blob();

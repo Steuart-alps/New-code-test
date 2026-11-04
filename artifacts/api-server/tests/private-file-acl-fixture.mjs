@@ -50,6 +50,13 @@ export class File {
     };
   }
   createReadStream() { return Readable.from([this.bytes]); }
+  // DocTrack registration reads the first bytes to check the file signature.
+  async download(options = {}) {
+    if (this.bytes === null) throw new Error("Object does not exist");
+    const start = options.start ?? 0;
+    const end = options.end ?? this.bytes.length - 1;
+    return [Buffer.from(this.bytes.subarray(start, end + 1))];
+  }
 }
 export class Storage {
   bucket(name) {
@@ -92,6 +99,11 @@ export const db = {
     // photo references exist in this fixture.
     if (/^SELECT \(SELECT count\(\*\) FROM check_photos\b/.test(text)) {
       return { rows: [{ pat_refs: 0, visible_refs: 0 }] };
+    }
+    // Every read runs the RIDDOR receipt boundary check; no incident in this
+    // fixture references a receipt.
+    if (/^SELECT \(SELECT count\(\*\) FROM incident_riddor_events\b/.test(text)) {
+      return { rows: [{ refs: 0, visible_refs: 0, attachment: false }] };
     }
     throw new Error(`Unexpected fixture query: ${text.slice(0, 80)}`);
   },

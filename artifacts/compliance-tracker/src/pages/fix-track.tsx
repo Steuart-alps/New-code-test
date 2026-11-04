@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import { AssigneeField, assigneeFields } from "@/components/assignee-field";
+import { takeLinkParams } from "@/lib/deep-link";
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
@@ -14,7 +16,8 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Link, useLocation } from "wouter";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
+import { Link, useLocation, useSearch } from "wouter";
 import {
   Lock, Plus, Pencil, Trash2, Search, Wrench, AlertTriangle, CheckCircle2,
   Clock, Loader2, ImagePlus, X, ImageOff, Send, UserCog, BarChart3, LayoutGrid,
@@ -24,6 +27,14 @@ import { cn } from "@/lib/utils";
 import { getApiErrorMessage } from "@/lib/api";
 import { format } from "date-fns";
 import { elapsedBoardDays, FixTrackBoard, type FixTrackBoardIssue } from "@/components/fix-track-board";
+import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
+import { AssignContractorDialog } from "@/components/assign-contractor-dialog";
+import { MEDIA_INPUT_ACCEPT, VIDEO_PATH, mediaContentType, mediaFileProblem, privateObjectUrl } from "@/lib/media-upload";
+import { useFileDrop } from "@/hooks/use-file-drop";
+import { PendingMediaPicker } from "@/components/pending-media-picker";
+import { tradeLabel } from "@/lib/contractor-trades";
+import { sortByLabel } from "@/lib/sort-options";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -93,6 +104,7 @@ interface Issue extends FixTrackBoardIssue {
   reportedBy: string;
   reportedDate: string;
   assignedTo?: string | null;
+  assigneeUserId?: number | null;
   contractorId?: number | null;
   contractorEmail?: string | null;
   resolvedDate?: string | null;
@@ -101,6 +113,9 @@ interface Issue extends FixTrackBoardIssue {
   emailRequestMode?: string | null;
   emailRequestStatus?: string | null;
   emailRequestedAt?: string | null;
+  emailSentAt?: string | null;
+  contractorVisitDate?: string | null;
+  contractorCompletedAt?: string | null;
   quote?: {
     id: number;
     status: string;
@@ -119,18 +134,22 @@ function F({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="space-y-1.5"><Label>{label}</Label>{children}</div>;
 }
 
-function MediaThumb({ path, onRemove }: { path: string; onRemove?: () => void }) {
-  const isVideo = /\.(mp4|mov|webm|avi)$/i.test(path);
-  const src = `/api/storage/objects/${path}`;
+function MediaThumb({ path, clientId, previewSrc, onRemove }: { path: string; clientId: number | null; previewSrc?: string; onRemove?: () => void }) {
+  const isVideo = VIDEO_PATH.test(path);
+  // Stored paths already start with /objects/; a consultant's tenant goes in
+  // the URL because media elements cannot send the active-client query. A file
+  // uploaded in this form isn't attached until the issue is saved, and storage
+  // refuses unattached files, so it shows from the browser's copy until then.
+  const src = previewSrc ?? privateObjectUrl(path, clientId);
   return (
     <div className="relative w-20 h-20 rounded-lg overflow-hidden border border-border bg-muted group flex-shrink-0">
       {isVideo
-        ? <video src={src} className="w-full h-full object-cover" />
+        ? <video src={src} className="w-full h-full object-cover" muted playsInline preload="metadata" />
         : <img src={src} alt="" className="w-full h-full object-cover"
             onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />}
       {onRemove && (
-        <button type="button" onClick={onRemove}
-          className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+        <button type="button" onClick={onRemove} aria-label="Remove this photo or video"
+          className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100 transition-opacity">
           <X className="w-3 h-3" />
         </button>
       )}
@@ -204,36 +223,54 @@ function IssueForm({ form, setForm, issueId, isNew }: {
     Array.isArray(c.trades) && c.trades.some(t => matchingTrades.includes(t)),
   );
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    if (files.length === 0) return;
+  // Browser copies of files uploaded in this form, shown until the issue is saved.
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const previewsRef = useRef(previews);
+  previewsRef.current = previews;
+  useEffect(() => () => { Object.values(previewsRef.current).forEach(url => URL.revokeObjectURL(url)); }, []);
+
+  async function uploadFiles(files: File[]) {
+    if (files.length === 0 || uploading) return;
     if (!issueId) {
       toast({ title: "Save the issue first to attach media", variant: "destructive" });
       return;
     }
     setUploading(true);
     const newPaths: string[] = [];
+    const newPreviews: Record<string, string> = {};
     for (const file of files) {
       try {
+        const problem = mediaFileProblem(file);
+        if (problem) throw new Error(problem);
+        assertWithinUploadLimit(file);
+        const contentType = mediaContentType(file);
         const res = await clientApiFetch(`/fix-track/issues/${issueId}/request-upload`, {
           method: "POST",
-          body: JSON.stringify({ name: file.name, contentType: file.type }),
+          body: JSON.stringify({ name: file.name, contentType }),
         });
         if (!res.ok) {
           throw new Error(await getApiErrorMessage(res, "Could not get upload URL"));
         }
         const { uploadUrl, objectPath } = await res.json();
-        const up = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
+        const up = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": contentType } });
         if (!up.ok) throw new Error("Upload failed");
         newPaths.push(objectPath);
+        newPreviews[objectPath] = URL.createObjectURL(file);
       } catch (err: any) {
-        toast({ title: "Upload failed", description: err?.message, variant: "destructive" });
+        toast({ title: `${file.name} wasn't uploaded`, description: err?.message, variant: "destructive" });
       }
     }
+    setPreviews(prev => ({ ...prev, ...newPreviews }));
     setForm((prev: any) => ({ ...prev, mediaUrls: [...(prev.mediaUrls ?? []), ...newPaths] }));
     setUploading(false);
-    if (fileRef.current) fileRef.current.value = "";
   }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    void uploadFiles(files);
+  }
+  const mediaDrop = useFileDrop(files => { void uploadFiles(files); }, !!issueId && !uploading);
 
   function removeMedia(path: string) {
     setForm({ ...form, mediaUrls: mediaUrls.filter(p => p !== path) });
@@ -242,7 +279,7 @@ function IssueForm({ form, setForm, issueId, isNew }: {
   return (
     <div className="space-y-4">
       <F label="Title *">
-        <Input value={form.title ?? ""} onChange={e => setForm({ ...form, title: e.target.value })}
+        <Input dictation value={form.title ?? ""} onChange={e => setForm({ ...form, title: e.target.value })}
           placeholder="e.g. Leaking pipe in kitchen, Broken window latch" autoFocus />
       </F>
 
@@ -251,7 +288,7 @@ function IssueForm({ form, setForm, issueId, isNew }: {
           <Select value={form.issueType ?? ""} onValueChange={handleTypeChange}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              {formIssueTypeOptions.map(k => (
+              {sortByLabel(formIssueTypeOptions, k => issueTypeMeta(k).label).map(k => (
                 <SelectItem key={k} value={k}>{issueTypeMeta(k).label}</SelectItem>
               ))}
             </SelectContent>
@@ -336,8 +373,12 @@ function IssueForm({ form, setForm, issueId, isNew }: {
 
       <div className="grid grid-cols-2 gap-4">
         <F label="Assigned To (internal)">
-          <Input value={form.assignedTo ?? ""} onChange={e => setForm({ ...form, assignedTo: e.target.value })}
-            placeholder="Internal person responsible" />
+          <AssigneeField
+            id="fix-track-assignee"
+            siteId={form.siteId ? Number(form.siteId) : null}
+            value={{ assigneeUserId: form.assigneeUserId ?? null, name: form.assignedTo ?? "" }}
+            onChange={value => setForm({ ...form, assigneeUserId: value.assigneeUserId, assignedTo: value.name })}
+          />
         </F>
         <F label="Target Date">
           <Input type="date" value={form.targetDate ?? ""} onChange={e => setForm({ ...form, targetDate: e.target.value })} />
@@ -362,21 +403,26 @@ function IssueForm({ form, setForm, issueId, isNew }: {
       </F>
 
       {/* Media attachments */}
-      <div className="space-y-2">
-        <Label>Photos / Videos</Label>
+      <div
+        {...mediaDrop.dropZoneProps}
+        className={cn("space-y-2 rounded-lg transition-colors", mediaDrop.isDragging && "bg-primary/5 ring-2 ring-primary ring-offset-2")}
+        data-testid="dropzone-issue-form-media"
+      >
+        {issueId && <Label>Photos / Videos</Label>}
         {!issueId && (
-          <p className="text-xs text-muted-foreground">Create the issue first, then re-open it to attach photos and videos.</p>
+          <PendingMediaPicker files={form._pendingMedia ?? []} onChange={files => setForm({ ...form, _pendingMedia: files })}
+            label="Photos and videos" testId="new-issue-media" />
         )}
         {mediaUrls.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {mediaUrls.map(path => (
-              <MediaThumb key={path} path={path} onRemove={() => removeMedia(path)} />
+              <MediaThumb key={path} path={path} clientId={activeClientId} previewSrc={previews[path]} onRemove={() => removeMedia(path)} />
             ))}
           </div>
         )}
         {issueId && (
-          <div>
-            <input ref={fileRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={handleFileChange} />
+          <div className="flex flex-wrap items-center gap-2">
+            <input ref={fileRef} type="file" accept={MEDIA_INPUT_ACCEPT} multiple className="hidden" onChange={handleFileChange} />
             <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()}
               disabled={uploading} className="gap-1.5">
               {uploading
@@ -384,6 +430,7 @@ function IssueForm({ form, setForm, issueId, isNew }: {
                 : <ImagePlus className="w-3.5 h-3.5" />}
               {uploading ? "Uploading…" : "Attach Photo / Video"}
             </Button>
+            <span className="hidden text-xs text-muted-foreground sm:inline">or drag them here</span>
           </div>
         )}
       </div>
@@ -465,7 +512,7 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Status breakdown */}
         <div className="bg-card border rounded-xl p-5 space-y-3">
-          <h3 className="font-semibold text-sm">By status</h3>
+          <h3 className="font-bold text-sm">By status</h3>
           {byStatus.map(({ key, meta, count }) => {
             const Icon = meta.icon;
             return (
@@ -482,7 +529,7 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
 
         {/* Priority (open only) */}
         <div className="bg-card border rounded-xl p-5 space-y-3">
-          <h3 className="font-semibold text-sm">Open issues by priority</h3>
+          <h3 className="font-bold text-sm">Open issues by priority</h3>
           {byPriority.length === 0
             ? <p className="text-sm text-muted-foreground italic">No open issues</p>
             : byPriority.map(({ key, meta, count }) => (
@@ -500,7 +547,7 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
         {/* By type */}
         {byType.length > 0 && (
           <div className="bg-card border rounded-xl p-5 space-y-3">
-            <h3 className="font-semibold text-sm">Open issues by type</h3>
+            <h3 className="font-bold text-sm">Open issues by type</h3>
             {byType.map(({ key, meta, count }) => (
               <div key={key} className="flex items-center gap-3">
                 <span className="text-xs text-muted-foreground w-24 flex-shrink-0 truncate">{meta.label}</span>
@@ -514,7 +561,7 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
         {/* By site */}
         {bySite.length > 0 && (
           <div className="bg-card border rounded-xl p-5 space-y-3">
-            <h3 className="font-semibold text-sm">Open issues by site</h3>
+            <h3 className="font-bold text-sm">Open issues by site</h3>
             {bySite.map(([site, count]) => (
               <div key={site} className="flex items-center gap-3">
                 <span className="text-xs text-muted-foreground w-24 flex-shrink-0 truncate">{site}</span>
@@ -531,7 +578,7 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
         <div className="bg-card border rounded-xl overflow-hidden">
           <div className="px-5 py-4 border-b flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-500" />
-            <h3 className="font-semibold text-sm">Oldest unactioned — awaiting first response</h3>
+            <h3 className="font-bold text-sm">Oldest unactioned — awaiting first response</h3>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -591,6 +638,7 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
 
 export default function FixTrackPage() {
   const { hasService, user, activeClientId } = useAuth();
+  const workingSiteId = useWorkingSiteId();
   const clientApiFetch = useActiveClientApi();
   const clientCanAdmin = useCanAdmin();
   const canAdmin = clientCanAdmin || useIsMaintenanceManager();
@@ -614,12 +662,16 @@ export default function FixTrackPage() {
   const [saving, setSaving]         = useState(false);
   const [notifying, setNotifying]         = useState<Record<number, boolean>>({});
   const [renotifyIssue, setRenotifyIssue] = useState<Issue | null>(null);
+  const [assigningIssue, setAssigningIssue] = useState<Issue | null>(null);
+  const [signingIssue, setSigningIssue]   = useState<Issue | null>(null);
+  const [signingBusy, setSigningBusy]     = useState(false);
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<"timing" | "audit">("timing");
   const [staleDays, setStaleDays] = useState(7);
   const [savingAlertSettings, setSavingAlertSettings] = useState(false);
 
   const [, setLocation] = useLocation();
+  const linkSearch = useSearch();
 
   useEffect(() => {
     if (!dialogOpen || editing) return;
@@ -679,7 +731,7 @@ export default function FixTrackPage() {
     }
   }
 
-  function openCreate() {
+  function openCreate(prefill: { title?: string; location?: string; siteId?: number } = {}) {
     const today = new Date().toISOString().slice(0, 10);
     setEditing(null);
     setForm({
@@ -689,9 +741,25 @@ export default function FixTrackPage() {
       reportedDate: today,
       reportedBy:   user?.name ?? "",
       mediaUrls:    [],
+      // A new report starts on the user's working site.
+      ...(workingSiteId ? { siteId: workingSiteId } : {}),
+      ...prefill,
     });
     setDialogOpen(true);
   }
+
+  // "Report a fault" on a scanned QR label, or "Report it in FixTrack" in
+  // Say it (which can be opened on this page too): a new report naming the item.
+  useEffect(() => {
+    const link = takeLinkParams(["report", "title", "location", "siteId"] as const);
+    if (link?.report !== "1" || !hasFixtrack) return;
+    const siteId = Number(link.siteId);
+    openCreate({
+      title: link.title?.slice(0, 200),
+      location: link.location?.slice(0, 300),
+      ...(Number.isSafeInteger(siteId) && siteId > 0 ? { siteId } : {}),
+    });
+  }, [linkSearch]);
 
   function openEdit(issue: Issue) {
     setEditing(issue);
@@ -703,6 +771,33 @@ export default function FixTrackPage() {
     setLocation(`/fix-track/${issue.id}`);
   }
 
+  // Upload photos and videos picked before the issue was created, attaching
+  // each one straight away. Returns the issue's media list, or null if none was added.
+  async function attachNewIssueMedia(issueId: number, files: File[]): Promise<string[] | null> {
+    let mediaUrls: string[] | null = null;
+    const failures: string[] = [];
+    for (const file of files) {
+      try {
+        assertWithinUploadLimit(file);
+        const contentType = mediaContentType(file);
+        const reserved = await clientApiFetch(`/fix-track/issues/${issueId}/request-upload`, {
+          method: "POST", body: JSON.stringify({ name: file.name.slice(0, 200), contentType }),
+        });
+        if (!reserved.ok) throw new Error(await getApiErrorMessage(reserved, "Could not get upload URL"));
+        const { uploadUrl, objectPath } = await reserved.json();
+        const put = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": contentType } });
+        if (!put.ok) throw new Error("Upload failed");
+        const attached = await clientApiFetch(`/fix-track/issues/${issueId}/media`, { method: "POST", body: JSON.stringify({ objectPath }) });
+        if (!attached.ok) throw new Error(await getApiErrorMessage(attached, "The file uploaded but couldn't be added to the issue"));
+        mediaUrls = (await attached.json()).mediaUrls ?? mediaUrls;
+      } catch (err: any) {
+        failures.push(`${file.name}: ${err?.message ?? "Upload failed"}`);
+      }
+    }
+    if (failures.length > 0) toast({ title: "Some files weren't added", description: failures.join("\n"), variant: "destructive" });
+    return mediaUrls;
+  }
+
   async function handleSave() {
     setSaving(true);
     try {
@@ -710,7 +805,7 @@ export default function FixTrackPage() {
         ...form,
         siteId:        form.siteId        || null,
         contractorId:  form.contractorId  ? Number(form.contractorId) : null,
-        assignedTo:    form.assignedTo    || null,
+        ...assigneeFields({ assigneeUserId: form.assigneeUserId ?? null, name: form.assignedTo ?? "" }, "assignedTo"),
         targetDate:    form.targetDate    || null,
         description:   form.description   || null,
         solutionNotes: form.solutionNotes || null,
@@ -724,18 +819,29 @@ export default function FixTrackPage() {
       delete payload.createdBy;
       delete payload.isOverdue;
       delete payload.resolvedDate;
+      // Sign-off fields are set only through the resolve-with-signature flow,
+      // and the edit dialog never changes the status.
+      delete payload.resolvedByName;
+      delete payload.resolverSignature;
+      // Chosen in the new-issue form; uploaded once the issue exists.
+      const pendingMedia: File[] = form._pendingMedia ?? [];
+      delete payload._pendingMedia;
 
       if (editing) {
+        delete payload.status;
         const res = await clientApiFetch(`/fix-track/issues/${editing.id}`, { method: "PUT", body: JSON.stringify(payload) });
         if (!res.ok) throw new Error((await res.json()).error ?? "Save failed");
       } else {
         const res = await clientApiFetch("/fix-track/issues", { method: "POST", body: JSON.stringify(payload) });
         if (!res.ok) throw new Error((await res.json()).error ?? "Create failed");
         const created = await res.json();
+        const mediaUrls = pendingMedia.length > 0 ? await attachNewIssueMedia(created.id, pendingMedia) : null;
         setEditing(created);
-        setForm({ ...created });
+        setForm({ ...created, ...(mediaUrls ? { mediaUrls } : {}) });
         await load();
         setSaving(false);
+        // The box stays open (now as "Edit Issue"), so say the issue is saved.
+        toast({ title: "Issue reported", description: "It's saved. Add photos or videos now, or close this box." });
         return; // keep dialog open so media can be attached
       }
       setDialogOpen(false);
@@ -768,13 +874,24 @@ export default function FixTrackPage() {
     toast({ title: "Issue deleted" });
   }
 
-  async function quickStatus(issue: Issue, newStatus: string) {
-    await clientApiFetch(`/fix-track/issues/${issue.id}`, {
+  async function quickStatus(issue: Issue, newStatus: string, resolverSignature?: string) {
+    // Resolving needs the resolver's drawn signature, as on the detail page.
+    if (newStatus === "resolved" && !resolverSignature) {
+      setSigningIssue(issue);
+      return;
+    }
+    const res = await clientApiFetch(`/fix-track/issues/${issue.id}`, {
       method: "PUT",
       body: JSON.stringify({
         status: newStatus,
+        ...(resolverSignature ? { resolverSignature } : {}),
       }),
     });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      toast({ title: "Error updating status", description: body?.error ?? "Failed to update status", variant: "destructive" });
+      return;
+    }
     await load();
   }
 
@@ -877,7 +994,7 @@ export default function FixTrackPage() {
               <Lock className="w-8 h-8 text-primary" />
             </div>
             <div>
-              <h2 className="text-2xl font-display font-medium mb-2">FixTrack</h2>
+              <h2 className="text-2xl font-display font-bold mb-2">FixTrack</h2>
               <p className="text-muted-foreground mb-1">Staff maintenance issue reporting — log faults, attach photos, track resolution.</p>
               <p className="font-medium text-primary">£10 per site per month</p>
             </div>
@@ -917,7 +1034,7 @@ export default function FixTrackPage() {
             </div>
             <p className="text-sm text-muted-foreground">Report and track maintenance issues across your sites</p>
           </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
             {clientCanAdmin && (
               <Button type="button" variant="outline" onClick={openAlertSettings} className="gap-1.5">
                 <Settings2 className="w-4 h-4" /> Alert timing
@@ -933,11 +1050,13 @@ export default function FixTrackPage() {
               optionKey="fixtrack_trades"
               title="Contractor trades"
               triggerLabel="Customise trades"
-              labelFor={humanizeType}
+              labelFor={tradeLabel}
             />
-            <Button onClick={openCreate} className="shadow-lg shadow-primary/20 gap-1.5 flex-1 sm:flex-none">
-              <Plus className="w-4 h-4" /> Report Issue
-            </Button>
+            {canEdit && (
+              <Button onClick={() => openCreate()} className="shadow-lg shadow-primary/20 gap-1.5 flex-1 sm:flex-none">
+                <Plus className="w-4 h-4" /> Report Issue
+              </Button>
+            )}
           </div>
         </div>
 
@@ -1053,7 +1172,7 @@ export default function FixTrackPage() {
             <SelectTrigger className="bg-card"><SelectValue placeholder="All types" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All types</SelectItem>
-              {issueTypeOptions.map(k => <SelectItem key={k} value={k}>{issueTypeMeta(k).label}</SelectItem>)}
+              {sortByLabel(issueTypeOptions, k => issueTypeMeta(k).label).map(k => <SelectItem key={k} value={k}>{issueTypeMeta(k).label}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={filterPriority || "all"} onValueChange={v => setFilterPriority(v === "all" ? "" : v)}>
@@ -1074,7 +1193,7 @@ export default function FixTrackPage() {
           <div className="py-16 text-center text-muted-foreground bg-card rounded-xl border border-dashed">
             <Wrench className="w-12 h-12 mx-auto mb-3 opacity-20" />
             <p className="text-sm font-medium mb-1">{issues.length === 0 ? "No issues reported yet" : "No issues match your filters"}</p>
-            {issues.length === 0 && <p className="text-xs">Click 'Report Issue' to log your first maintenance fault.</p>}
+            {issues.length === 0 && canEdit && <p className="text-xs">Click 'Report Issue' to log your first maintenance fault.</p>}
           </div>
         ) : (
           <div className="space-y-3">
@@ -1120,6 +1239,8 @@ export default function FixTrackPage() {
                             </Badge>
                           )}
                           {issue.assignedTo && <span>Assigned: <span className="font-medium">{issue.assignedTo}</span></span>}
+                          {issue.contractorVisitDate && <span>Contractor visit: <span className="font-medium">{format(new Date(issue.contractorVisitDate), "dd/MM/yyyy")}</span></span>}
+                          {issue.contractorCompletedAt && <span className="text-emerald-700">Contractor marked done {format(new Date(issue.contractorCompletedAt), "dd/MM/yyyy")}</span>}
                           {issue.targetDate && <span>Target: {format(new Date(issue.targetDate), "dd/MM/yyyy")}</span>}
                           {issue.resolvedDate && <span>Resolved: {format(new Date(issue.resolvedDate), "dd/MM/yyyy")}</span>}
                         </div>
@@ -1130,7 +1251,7 @@ export default function FixTrackPage() {
                         )}
                         {issue.completionDocumentPath && (
                           <a
-                            href={`/api/storage/objects/${issue.completionDocumentPath}`}
+                            href={`/api/storage${issue.completionDocumentPath.startsWith("/objects/") ? issue.completionDocumentPath : `/objects/${issue.completionDocumentPath.replace(/^\/+/, "")}`}${activeClientId ? `?clientId=${encodeURIComponent(activeClientId)}` : ""}`}
                             target="_blank"
                             rel="noreferrer"
                             className="inline-flex items-center gap-1 mt-1 text-xs text-blue-700 hover:underline"
@@ -1142,7 +1263,7 @@ export default function FixTrackPage() {
 
                       {issue.mediaUrls?.length > 0 && (
                         <div className="flex gap-2 flex-wrap pt-1">
-                          {issue.mediaUrls.map(path => <MediaThumb key={path} path={path} />)}
+                          {issue.mediaUrls.map(path => <MediaThumb key={path} path={path} clientId={activeClientId} />)}
                         </div>
                       )}
                     </div>
@@ -1224,20 +1345,25 @@ export default function FixTrackPage() {
                             </Button>
                         </>
                       )}
-                      {canEdit && issue.contractorId && canAdmin && !["pending", "approved", "sent", "sending"].includes(issue.emailRequestStatus ?? "") && (
+                      {/* A manager's own choice of contractor is the approval,
+                          so the job is emailed straight away. */}
+                      {canEdit && canAdmin && ["reported", "in_progress"].includes(issue.status) && !["pending", "approved", "sent", "sending"].includes(issue.emailRequestStatus ?? "") && (
                         <>
                           <Button variant="outline" size="sm"
-                            onClick={() => handleRequestSend(issue, "assign")}
+                            onClick={() => setAssigningIssue(issue)}
                             disabled={notifying[issue.id]}
-                            className="text-xs h-7 px-2 whitespace-nowrap text-blue-700 border-blue-300 hover:bg-blue-50">
-                            Request assign
+                            className="text-xs h-7 px-2 whitespace-nowrap text-blue-700 border-blue-300 hover:bg-blue-50 gap-1"
+                            data-testid={`button-assign-contractor-${issue.id}`}>
+                            <Send className="w-3 h-3" /> Assign contractor
                           </Button>
-                          <Button variant="outline" size="sm"
-                            onClick={() => handleRequestSend(issue, "quote")}
-                            disabled={notifying[issue.id]}
-                            className="text-xs h-7 px-2 whitespace-nowrap text-violet-700 border-violet-300 hover:bg-violet-50">
-                            Request quote
-                          </Button>
+                          {issue.contractorId && (
+                            <Button variant="outline" size="sm"
+                              onClick={() => handleRequestSend(issue, "quote")}
+                              disabled={notifying[issue.id]}
+                              className="text-xs h-7 px-2 whitespace-nowrap text-violet-700 border-violet-300 hover:bg-violet-50">
+                              Request quote
+                            </Button>
+                          )}
                         </>
                       )}
                       {issue.contractorId && canAdmin && issue.emailRequestStatus === "approved" && (
@@ -1299,6 +1425,13 @@ export default function FixTrackPage() {
       </div>
 
       {/* Re-notify confirmation dialog */}
+      <AssignContractorDialog
+        issue={assigningIssue}
+        open={!!assigningIssue}
+        onOpenChange={open => !open && setAssigningIssue(null)}
+        onAssigned={load}
+      />
+
       <Dialog open={!!renotifyIssue} onOpenChange={open => !open && setRenotifyIssue(null)}>
         <DialogContent className="sm:max-w-[420px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -1326,7 +1459,7 @@ export default function FixTrackPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-display">{editing ? "Edit Issue" : "Report Maintenance Issue"}</DialogTitle>
+            <DialogTitle className="font-display font-bold">{editing ? "Edit Issue" : "Report Maintenance Issue"}</DialogTitle>
             <DialogDescription>
               {editing ? "Update the maintenance issue details." : "Record a maintenance issue for manager review."}
             </DialogDescription>
@@ -1344,6 +1477,12 @@ export default function FixTrackPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <DrawnSignatureDialog open={!!signingIssue} busy={signingBusy} onCancel={() => setSigningIssue(null)} onConfirm={async signature => {
+        if (!signingIssue) return;
+        setSigningBusy(true);
+        try { await quickStatus(signingIssue, "resolved", signature); }
+        finally { setSigningBusy(false); setSigningIssue(null); }
+      }} />
     </AppLayout>
   );
 }

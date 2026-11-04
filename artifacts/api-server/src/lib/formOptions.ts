@@ -21,7 +21,21 @@ import { eq, and } from "drizzle-orm";
 export const DEFAULT_FIXTRACK_TRADES = [
   "electrical", "plumbing",
   "gas_kitchen", "gas_fireplace", "gas_heating",
-  "structural", "equipment", "hvac", "it_comms",
+  "structural", "equipment", "hvac",
+  // Fire safety trades (October 2026). Several are linked to FireTrack's
+  // contractor visits (CONTRACTOR_VISIT_TYPES in lib/contractorVisits.ts).
+  "fire_alarm", "emergency_lighting", "fire_extinguishers",
+  "kitchen_fire_suppression", "sprinkler_systems", "aov_smoke_vents",
+  "dry_wet_risers", "fire_doors", "fire_shutters_curtains", "fire_dampers",
+  "fire_stopping", "kitchen_extract_cleaning", "fire_risk_assessor",
+  // Security trades (October 2026).
+  "intruder_alarm", "cctv", "access_control",
+  // Specialist services (October 2026), linked to the tracks' contractor visits.
+  "legionella_water_hygiene", "pest_control", "pat_testing", "loler_puwer_inspection",
+  "lev_testing", "asbestos", "tree_surgeon_arborist", "pool_spa_maintenance", "waste_collection",
+  // Grounds machinery dealers and engineers, for GreenTrack's machine servicing.
+  "grounds_machinery",
+  "it_comms",
   "safety_hazard", "cleaning", "general",
 ] as const;
 
@@ -65,6 +79,7 @@ export const DEFAULT_TRAINTRACK_TYPES = [
   "RIDDOR Awareness",
   "Asbestos Awareness",
   "Display Screen Equipment (DSE)",
+  "Toolbox Talk",
   // DBS / PVG disclosure checks
   "DBS Check (Basic)",
   "DBS Check (Standard)",
@@ -92,6 +107,24 @@ export const FORM_OPTION_DEFAULTS: Record<string, readonly string[]> = {
   pest_types:                DEFAULT_PEST_TYPES,
   pest_evidence_types:       DEFAULT_PEST_EVIDENCE_TYPES,
   bike_types:                DEFAULT_BIKE_TYPES,
+};
+
+/**
+ * Defaults added after businesses could already have saved their own list.
+ * A saved list that names one of these neither as active nor as disabled was
+ * saved before it existed, so it is offered as active rather than treated as
+ * removed. Once the business saves the list again the choice is theirs.
+ */
+export const DEFAULTS_ADDED_LATER: Partial<Record<string, readonly string[]>> = {
+  fixtrack_trades: [
+    "fire_alarm", "emergency_lighting", "fire_extinguishers",
+    "kitchen_fire_suppression", "sprinkler_systems", "aov_smoke_vents",
+    "dry_wet_risers", "fire_doors", "fire_shutters_curtains", "fire_dampers",
+    "fire_stopping", "kitchen_extract_cleaning", "fire_risk_assessor",
+    "intruder_alarm", "cctv", "access_control",
+    "legionella_water_hygiene", "pest_control", "pat_testing", "loler_puwer_inspection",
+    "lev_testing", "asbestos", "tree_surgeon_arborist", "pool_spa_maintenance", "waste_collection",
+  ],
 };
 
 export type FormOptionKey = keyof typeof FORM_OPTION_DEFAULTS;
@@ -160,19 +193,21 @@ function validateDisabledList(input: unknown): { ok: true; value: string[] } | {
 export function parseStoredOptionState(
   input: unknown,
   defaults: readonly string[],
+  addedLater: readonly string[] = [],
 ): { ok: true; value: StoredOptionState } | { ok: false; error: string } {
+  const has = (list: readonly string[], item: string) =>
+    list.some((candidate) => candidate.toLowerCase() === item.toLowerCase());
+  // Defaults the saved list has never seen join the end of the active list.
+  const withAddedLater = (active: string[], disabled: string[]) => [
+    ...active,
+    ...addedLater.filter((item) => !has(active, item) && !has(disabled, item)),
+  ].slice(0, Math.max(active.length, MAX_OPTIONS));
+
   if (Array.isArray(input)) {
     const active = validateOptionList(input);
     if (!active.ok) return active;
-    return {
-      ok: true,
-      value: {
-        active: active.value,
-        disabled: defaults.filter((item) =>
-          !active.value.some((candidate) => candidate.toLowerCase() === item.toLowerCase()),
-        ),
-      },
-    };
+    const disabled = defaults.filter((item) => !has(active.value, item) && !has(addedLater, item));
+    return { ok: true, value: { active: withAddedLater(active.value, disabled), disabled } };
   }
 
   if (!input || typeof input !== "object") {
@@ -181,14 +216,18 @@ export function parseStoredOptionState(
   const state = input as { active?: unknown; disabled?: unknown };
   const active = validateOptionList(state.active);
   if (!active.ok) return active;
-  const disabled = validateDisabledList(state.disabled ?? []);
+  // Lists saved before the disabled history was capped can hold more than
+  // the limit; keep the most recent entries rather than rejecting the list.
+  const disabled = validateDisabledList(
+    Array.isArray(state.disabled) ? state.disabled.slice(-MAX_OPTIONS) : state.disabled ?? [],
+  );
   if (!disabled.ok) return disabled;
 
   const activeKeys = new Set(active.value.map((item) => item.toLowerCase()));
   if (disabled.value.some((item) => activeKeys.has(item.toLowerCase()))) {
     return { ok: false, error: "an option cannot be active and disabled" };
   }
-  return { ok: true, value: { active: active.value, disabled: disabled.value } };
+  return { ok: true, value: { active: withAddedLater(active.value, disabled.value), disabled: disabled.value } };
 }
 
 export function serialiseOptionState(state: StoredOptionState): string {
@@ -196,10 +235,10 @@ export function serialiseOptionState(state: StoredOptionState): string {
 }
 
 /**
- * Load the effective list for one option key for a client: the saved custom
- * list if present and valid, otherwise the hardcoded default.
+ * Load the active and disabled options for one key for a client: the saved
+ * custom list if present and valid, otherwise the hardcoded default.
  */
-export async function getEffectiveOptionList(clientId: number, key: FormOptionKey): Promise<string[]> {
+export async function getEffectiveOptionState(clientId: number, key: FormOptionKey): Promise<StoredOptionState> {
   const rows = await db.select({ value: appSettingsTable.value })
     .from(appSettingsTable)
     .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, settingKey(key))))
@@ -207,9 +246,14 @@ export async function getEffectiveOptionList(clientId: number, key: FormOptionKe
   const raw = rows[0]?.value;
   if (raw) {
     try {
-      const check = parseStoredOptionState(JSON.parse(raw), FORM_OPTION_DEFAULTS[key]);
-      if (check.ok) return check.value.active;
+      const check = parseStoredOptionState(JSON.parse(raw), FORM_OPTION_DEFAULTS[key], DEFAULTS_ADDED_LATER[key]);
+      if (check.ok) return check.value;
     } catch { /* fall through to default */ }
   }
-  return [...FORM_OPTION_DEFAULTS[key]];
+  return { active: [...FORM_OPTION_DEFAULTS[key]], disabled: [] };
+}
+
+/** The active options only: what a new record may use. */
+export async function getEffectiveOptionList(clientId: number, key: FormOptionKey): Promise<string[]> {
+  return (await getEffectiveOptionState(clientId, key)).active;
 }

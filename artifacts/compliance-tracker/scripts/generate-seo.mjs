@@ -11,6 +11,7 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveBaseUrl, assertCanonicalForProduction } from "./site-url.mjs";
+import { publicPages } from "./seo-pages.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, "..", "public");
@@ -21,15 +22,6 @@ const { baseUrl, source } = resolveBaseUrl();
 // publish broken sitemap/llms URLs. Fail loudly so the deployment is corrected.
 assertCanonicalForProduction(baseUrl, source);
 const today = new Date().toISOString().slice(0, 10);
-
-// Public, indexable pages. Everything else is behind auth.
-const publicPages = [
-  { path: "/", changefreq: "weekly", priority: "1.0" },
-  { path: "/signup", changefreq: "monthly", priority: "0.8" },
-  { path: "/login", changefreq: "monthly", priority: "0.5" },
-  { path: "/terms", changefreq: "yearly", priority: "0.3" },
-  { path: "/privacy", changefreq: "yearly", priority: "0.3" },
-];
 
 // Authenticated app sections — keep crawlers out (they only get the SPA shell).
 const privatePaths = [
@@ -63,8 +55,8 @@ ${publicPages
     return `  <url>
     <loc>${loc}</loc>
     <lastmod>${today}</lastmod>
-    <changefreq>${page.changefreq}</changefreq>
-    <priority>${page.priority}</priority>
+    <changefreq>${page.sitemap.changefreq}</changefreq>
+    <priority>${page.sitemap.priority}</priority>
   </url>`;
   })
   .join("\n")}
@@ -81,11 +73,14 @@ ComplyTrack is a multi-tenant SaaS platform for UK businesses managing their own
 - [Home](${baseUrl}/): What ComplyTrack does, who it serves, and key features.
 - [Sign up](${baseUrl}/signup): Create an account and start tracking compliance.
 - [Log in](${baseUrl}/login): Access for existing customers.
+- [Modules](${baseUrl}/features): Every ComplyTrack module, what it records and the UK rules behind it.
+- [Pricing](${baseUrl}/pricing): Core £10 per site per month, £10 per module, capped at £50 per site per month.
+- [Free templates](${baseUrl}/templates): Printable fire, water, hot tub, kitchen and sprayer logs.
 
 ## Notes for AI crawlers
 - The home page is the canonical reference for what the product is and who it serves.
 - All other application routes (dashboard, sites, contractors, settings, etc.) sit behind authentication and are not part of the public, indexable surface.
-- For the most accurate, current information about features and pricing, use the home page.
+- For the most accurate, current information about features and pricing, use the modules and pricing pages.
 `;
 
 mkdirSync(publicDir, { recursive: true });

@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { sitesTable, trackControlProfilesTable, auditEventsTable } from "@workspace/db/schema";
 import { and, eq } from "drizzle-orm";
 import { getActiveDepartmentId, getClientId, requireAuth, requireClientAdmin } from "../middleware/requireAuth";
+import { siteVisibleToDepartment } from "./departmentSites";
 
 type Unit = "frequencyDays" | "frequencyHours";
 type Plan = Record<string, any>;
@@ -44,11 +45,11 @@ export function createMonitoringPlanRouter(module: string, checkTypes: readonly 
     if (!clientId || typeof raw !== "string" || !/^[1-9]\d*$/.test(raw) ||
         !Number.isSafeInteger(Number(raw))) return { error: 400 as const };
     const siteId = Number(raw);
-    const [site] = await db.select({ departmentId: sitesTable.departmentId }).from(sitesTable)
+    const [site] = await db.select({ id: sitesTable.id, departmentId: sitesTable.departmentId }).from(sitesTable)
       .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId))).limit(1);
     if (!site) return { error: 404 as const };
     const deptId = getActiveDepartmentId(req);
-    if (deptId !== null && site.departmentId !== null && site.departmentId !== deptId) return { error: 403 as const };
+    if (!(await siteVisibleToDepartment(site, deptId))) return { error: 403 as const };
     return { clientId, siteId };
   }
 

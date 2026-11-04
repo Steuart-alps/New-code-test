@@ -50,6 +50,8 @@ assert.match(login, /setPendingVia\('passkey'\)/);
 assert.match(login, /testID="totp-input"/);
 const auth = await readFile(new URL('../lib/auth.tsx', import.meta.url), 'utf8');
 const loginWithPasskey = auth.slice(auth.indexOf('const loginWithPasskey'), auth.indexOf('const logout'));
-assert.doesNotMatch(loginWithPasskey, /SecureStore|applyToken|setUser/, 'a passkey alone must never sign in');
+// A passkey answer goes through the same session handling as a password.
+assert.match(loginWithPasskey, /completeSignIn\(signInWithPasskey\)/);
+assert.doesNotMatch(loginWithPasskey, /SecureStore|applyToken|setUser/);
 
 console.log('Mobile passkey error handling passed.');

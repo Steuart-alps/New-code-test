@@ -16,9 +16,18 @@ import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
 import { setBaseUrl } from '@workspace/api-client-react';
 import { AuthProvider, useAuth } from '@/lib/auth';
+import { apiBaseUrl } from '@/lib/api';
+import { resolveNotificationRoute } from '@/lib/notificationRoutes';
+import { ConfigurationError } from '@/components/ConfigurationError';
 
-// Set API base URL at module load time (Expo bundles need absolute URLs)
-setBaseUrl(`https://${process.env.EXPO_PUBLIC_DOMAIN}`);
+// Set API base URL at module load time (Expo bundles need absolute URLs).
+// A build without EXPO_PUBLIC_DOMAIN has no API to talk to: release builds
+// show a configuration error instead of a login screen that cannot work.
+const API_BASE_URL = apiBaseUrl();
+setBaseUrl(API_BASE_URL);
+if (!API_BASE_URL) {
+  console.warn('[config] EXPO_PUBLIC_DOMAIN is not set; API requests have no server to reach.');
+}
 
 SplashScreen.preventAutoHideAsync();
 
@@ -43,19 +52,18 @@ function RootLayoutNav() {
     }
   }, [isAuthenticated, isLoading, segments]);
 
-  // Notification taps: navigate to a route hint carried in the payload's data.
+  // Notification taps: navigate to the screen for the payload's route hint.
+  // Hints for web-only pages map to the nearest mobile screen, else home.
   useEffect(() => {
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data as
-        | { route?: string }
+        | { route?: unknown }
         | undefined;
-      const route = data?.route;
-      if (route && typeof route === 'string' && isAuthenticated) {
-        try {
-          router.push(route as any);
-        } catch {
-          // Ignore invalid route hints.
-        }
+      if (!isAuthenticated) return;
+      try {
+        router.push(resolveNotificationRoute(data?.route) as any);
+      } catch {
+        // Ignore navigation failures; the app stays on the current screen.
       }
     });
     return () => sub.remove();
@@ -124,6 +132,13 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="account/delete"
+        options={{
+          title: 'Delete my account',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
         name="issues/new"
         options={{
           title: 'Report Issue',
@@ -160,6 +175,14 @@ export default function RootLayout() {
   }, [fontsLoaded, fontError]);
 
   if (!fontsLoaded && !fontError) return null;
+
+  if (!API_BASE_URL && !__DEV__) {
+    return (
+      <SafeAreaProvider>
+        <ConfigurationError />
+      </SafeAreaProvider>
+    );
+  }
 
   return (
     <SafeAreaProvider>

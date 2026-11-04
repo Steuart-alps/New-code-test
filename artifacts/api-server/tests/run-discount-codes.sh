@@ -15,6 +15,8 @@ _free_port() {
   python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); p=s.getsockname()[1]; s.close(); print(p)' 2>/dev/null || echo 19090
 }
 TEST_PORT="${TEST_PORT:-$(_free_port)}"
+# A unique platform-operator address for this run (see discount-codes.mjs).
+export DISCOUNT_OPERATOR_EMAIL="discount-operator-$(date +%s%N)@test.local"
 export API_BASE="${API_BASE:-http://localhost:${TEST_PORT}/api}"
 
 healthy() {
@@ -33,7 +35,7 @@ trap cleanup EXIT
 if ! healthy; then
   echo "No API server responding at ${API_BASE} — starting a test instance..."
   pnpm run build
-  NODE_ENV=test PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
+  NODE_ENV=test PORT="$TEST_PORT" PLATFORM_ADMIN_EMAILS="$DISCOUNT_OPERATOR_EMAIL" node --enable-source-maps ./dist/index.mjs &
   SERVER_PID=$!
   for _ in $(seq 1 30); do
     if healthy; then break; fi

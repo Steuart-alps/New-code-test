@@ -26,6 +26,7 @@ try {
   const {
     ObjectNotFoundError,
     fitsAttachmentExportCap,
+    planExportParts,
     getAttachmentOmissionReason,
     getAttachmentZipPath,
     isExportAttachmentAuthorized,
@@ -52,6 +53,9 @@ try {
   const cap = 500 * 1024 * 1024;
   assert.equal(fitsAttachmentExportCap("1048576", cap - 1048576, cap), true, "metadata byte size is included in cap calculation");
   assert.equal(fitsAttachmentExportCap("1048577", cap - 1048576, cap), false, "metadata size cannot exceed the attachment cap");
+  assert.deepEqual(planExportParts([400, 300, 300, 200, 100, 800, 50], 700), { parts: [1, 1, 2, 2, 2, 3, 4], count: 4 },
+    "files fill each part in order; a file bigger than a part gets its own");
+  assert.deepEqual(planExportParts([], 700), { parts: [], count: 1 }, "an export with no files is one part");
   const objectPath = "/objects/uploads/tenant-42/certificate.pdf";
   const csv = rawToCsv([{ object_path: objectPath, media_urls: [objectPath, "/objects/missing"], external_url: "https://example.test/doc" }],
     new Map([[objectPath, first]]));

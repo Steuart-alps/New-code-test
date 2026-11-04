@@ -87,7 +87,7 @@ async function main() {
   })).status === 200);
 
   const fireFailure = await request("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: date,
     result: "fail",
     siteId,

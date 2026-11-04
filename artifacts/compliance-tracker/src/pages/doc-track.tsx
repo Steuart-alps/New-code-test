@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
-import { downloadFile } from "@/lib/download";
+import { downloadFile, getDownloadErrorMessage } from "@/lib/download";
 import { useAuth } from "@/context/auth-context";
 import { AuditLog } from "@/components/audit-log";
+import { PublicLinkAccessHistory } from "@/components/public-link-access-history";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,15 +17,20 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Upload, FolderOpen, FileText, FileSpreadsheet, FileImage, FileVideo, File,
   Download, Trash2, Search, Plus, Loader2, Presentation, CheckSquare, Users,
-  CheckCircle2, Clock, Link2, Copy, Check, Printer, BookOpen,
+  CheckCircle2, Clock, Link2, Copy, Check, BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MyDocumentsView } from "@/components/my-documents-view";
+import { DepartmentNameSelect } from "@/components/department-name-select";
+import { AcknowledgementsDialog, type StaffMember } from "@/components/acknowledgements-dialog";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
+import { sortByLabel } from "@/lib/sort-options";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,30 +59,12 @@ interface Doc {
   updated_at: string;
 }
 
-interface StaffMember {
-  id: number;
-  name: string;
-  job_title: string | null;
-  department: string | null;
-  active: boolean;
-}
-
-interface Acknowledgement {
-  id: number;
-  staff_roster_id: number;
-  staff_name: string;
-  signature: string | null;
-  acknowledged_at: string;
-  expiry_date?: string | null;
-  acknowledgement_status?: "pending" | "acknowledged" | "expired";
-}
-
 interface Site {
   id: number;
   name: string;
 }
 
-type Category = "risk_assessment" | "sop" | "handbook" | "policy" | "procedure" | "other";
+type Category = "risk_assessment" | "sop" | "handbook" | "policy" | "procedure" | "other" | "haccp" | "recipe_spec";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -88,7 +76,28 @@ const CATEGORY_TABS = [
   { key: "policy",          label: "Policies" },
   { key: "procedure",       label: "Procedures" },
   { key: "other",           label: "Other" },
+  { key: "haccp",           label: "HACCP" },
+  { key: "recipe_spec",     label: "Recipe specs" },
 ] as const;
+
+// KitchenTrack shows only its HACCP plans and recipe spec sheets.
+const KITCHEN_CATEGORY_TABS = [
+  { key: "all",         label: "All" },
+  { key: "haccp",       label: "HACCP plans" },
+  { key: "recipe_spec", label: "Recipe spec sheets" },
+] as const;
+const KITCHEN_CATEGORIES: Category[] = ["haccp", "recipe_spec"];
+
+const UPLOAD_CATEGORY_LABELS: Record<Category, string> = {
+  risk_assessment: "Risk Assessment (including COSHH)",
+  sop: "SOP (Standard Operating Procedure)",
+  handbook: "Staff Handbook",
+  policy: "Policy",
+  procedure: "Procedure",
+  other: "Other",
+  haccp: "HACCP plan",
+  recipe_spec: "Recipe spec sheet",
+};
 
 const CATEGORY_META: Record<string, { label: string; color: string; bg: string }> = {
   risk_assessment: { label: "Risk Assessment", color: "text-red-700",    bg: "bg-red-50 border-red-200" },
@@ -97,6 +106,8 @@ const CATEGORY_META: Record<string, { label: string; color: string; bg: string }
   policy:          { label: "Policy",          color: "text-purple-700", bg: "bg-purple-50 border-purple-200" },
   procedure:       { label: "Procedure",       color: "text-teal-700",   bg: "bg-teal-50 border-teal-200" },
   other:           { label: "Other",           color: "text-gray-600",   bg: "bg-gray-100 border-gray-200" },
+  haccp:           { label: "HACCP plan",      color: "text-emerald-700", bg: "bg-emerald-50 border-emerald-200" },
+  recipe_spec:     { label: "Recipe spec sheet", color: "text-amber-700", bg: "bg-amber-50 border-amber-200" },
 };
 
 const ACCEPTED_TYPES = ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.avi,.mkv,.webm";
@@ -138,250 +149,6 @@ function titleFromFileName(name: string): string {
 
 // ─── Acknowledgements Dialog ──────────────────────────────────────────────────
 
-function AcknowledgementsDialog({ doc, open, onClose, canExport }: { doc: Doc; open: boolean; onClose: () => void; canExport: boolean }) {
-  const { toast } = useToast();
-  const [staff, setStaff] = useState<StaffMember[]>([]);
-  const [acks, setAcks] = useState<Acknowledgement[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [checked, setChecked] = useState<Record<number, boolean>>({});
-  const [sigs, setSigs] = useState<Record<number, string>>({});
-  const [saving, setSaving] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [deptFilter, setDeptFilter] = useState("all");
-
-  async function handleExportRegister() {
-    setExporting(true);
-    try {
-      const response = await apiFetch(`/doc-track/documents/${doc.id}/acknowledgements/export`);
-      if (!response.ok) throw new Error("Export failed");
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${doc.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "document"}-acknowledgements.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } catch {
-      toast({ title: "PDF export failed", description: "Please try again.", variant: "destructive" });
-    } finally {
-      setExporting(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!open) return;
-    setLoading(true);
-    setDeptFilter("all");
-    Promise.all([
-      apiFetch("/staff-roster").then(r => r.ok ? r.json() : []),
-      apiFetch(`/doc-track/documents/${doc.id}/acknowledgements`).then(r => r.ok ? r.json() : []),
-    ]).then(([s, a]) => {
-      setStaff(s);
-      setAcks(a);
-      setChecked({});
-      setSigs({});
-    }).finally(() => setLoading(false));
-  }, [open, doc.id]);
-
-  const ackedIds = new Set(acks.map((a: Acknowledgement) => a.staff_roster_id));
-  const ackedMap = Object.fromEntries(acks.map(a => [a.staff_roster_id, a]));
-
-  // Department filter
-  const departments = ["all", ...Array.from(new Set(staff.map(s => s.department).filter(Boolean) as string[])).sort()];
-  const visibleStaff = deptFilter === "all" ? staff : staff.filter(s => s.department === deptFilter);
-  const unacked = visibleStaff.filter(s => !ackedIds.has(s.id));
-  const acked   = visibleStaff.filter(s => ackedIds.has(s.id));
-
-  // Counts across ALL staff (for the footer summary)
-  const totalAcked = staff.filter(s => ackedIds.has(s.id)).length;
-
-  const anyChecked = Object.values(checked).some(Boolean);
-
-  async function handleSave() {
-    const toSave = staff.filter(s => checked[s.id] && !ackedIds.has(s.id));
-    if (!toSave.length) return;
-    setSaving(true);
-    try {
-      const res = await apiFetch(`/doc-track/documents/${doc.id}/acknowledge`, {
-        method: "POST",
-        body: JSON.stringify({
-          acknowledgements: toSave.map(s => ({
-            staffRosterId: s.id,
-            staffName: s.name,
-            signature: sigs[s.id]?.trim() || null,
-          })),
-        }),
-      });
-      if (!res.ok) throw new Error("Failed");
-      const data = await res.json();
-      toast({ title: `${data.created} acknowledgement${data.created === 1 ? "" : "s"} recorded`, description: "TrainTrack sign-off records created automatically." });
-      const fresh = await apiFetch(`/doc-track/documents/${doc.id}/acknowledgements`);
-      if (fresh.ok) setAcks(await fresh.json());
-      setChecked({});
-      setSigs({});
-    } catch {
-      toast({ title: "Save failed", variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function toggleAll() {
-    if (unacked.every(s => checked[s.id])) {
-      const cleared = { ...checked };
-      unacked.forEach(s => { delete cleared[s.id]; });
-      setChecked(cleared);
-    } else {
-      setChecked(prev => ({ ...prev, ...Object.fromEntries(unacked.map(s => [s.id, true])) }));
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={v => { if (!v && !saving) onClose(); }}>
-      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <CheckSquare className="w-4 h-4" /> Acknowledgements — {doc.title}
-          </DialogTitle>
-        </DialogHeader>
-
-        {loading ? (
-          <div className="flex items-center justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
-        ) : staff.length === 0 ? (
-          <div className="py-8 text-center text-muted-foreground">
-            <Users className="w-10 h-10 mx-auto mb-3 opacity-30" />
-            <p className="font-medium">No staff in roster</p>
-            <p className="text-sm mt-1">Add staff members in <strong>Staff Roster</strong> before recording acknowledgements.</p>
-          </div>
-        ) : (
-          <>
-            {/* Department filter */}
-            {departments.length > 2 && (
-              <div className="flex flex-wrap gap-1.5 pb-1">
-                {departments.map(d => (
-                  <button
-                    key={d}
-                    onClick={() => { setDeptFilter(d); setChecked({}); }}
-                    className={cn(
-                      "px-3 py-1 rounded-full text-xs font-medium transition-colors border",
-                      deptFilter === d
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-muted/40 text-muted-foreground border-border hover:bg-muted",
-                    )}
-                  >
-                    {d === "all" ? "All departments" : d}
-                    {d !== "all" && (
-                      <span className="ml-1.5 opacity-60">
-                        {staff.filter(s => s.department === d && ackedIds.has(s.id)).length}/
-                        {staff.filter(s => s.department === d).length}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-              {/* Pending */}
-              {unacked.length > 0 && (
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-sm font-medium text-muted-foreground">Pending ({unacked.length})</p>
-                    <button onClick={toggleAll} className="text-xs text-primary hover:underline">
-                      {unacked.every(s => checked[s.id]) ? "Deselect all" : "Select all"}
-                    </button>
-                  </div>
-                  <div className="space-y-2">
-                    {unacked.map(s => (
-                      <div key={s.id} className={cn("border rounded-lg p-3 transition-colors", checked[s.id] ? "bg-primary/5 border-primary/30" : "")}>
-                        <div className="flex items-center gap-3">
-                          <Checkbox
-                            checked={!!checked[s.id]}
-                            onCheckedChange={v => setChecked(prev => ({ ...prev, [s.id]: !!v }))}
-                          />
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-sm">{s.name}</p>
-                            {(s.job_title || s.department) && (
-                              <p className="text-xs text-muted-foreground">{[s.job_title, s.department].filter(Boolean).join(" · ")}</p>
-                            )}
-                          </div>
-                        </div>
-                        {checked[s.id] && (
-                          <div className="mt-2 ml-7">
-                            <Input
-                              placeholder="Signature (typed name) — optional"
-                              value={sigs[s.id] ?? ""}
-                              onChange={e => setSigs(prev => ({ ...prev, [s.id]: e.target.value }))}
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Acknowledged */}
-              {acked.length > 0 && (
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground mb-2">Acknowledged ({acked.length})</p>
-                  <div className="space-y-1.5">
-                    {acked.map(s => {
-                      const a = ackedMap[s.id];
-                      return (
-                        <div key={s.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-green-50 border border-green-100">
-                          <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-sm">{s.name}</p>
-                            {(s.job_title || s.department) && (
-                              <p className="text-xs text-muted-foreground">{[s.job_title, s.department].filter(Boolean).join(" · ")}</p>
-                            )}
-                            {a?.signature && <p className="text-xs text-muted-foreground">Signed: {a.signature}</p>}
-                          </div>
-                          <span className="text-xs text-muted-foreground whitespace-nowrap flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {new Date(a.acknowledged_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {unacked.length === 0 && acked.length === 0 && (
-                <p className="text-sm text-muted-foreground text-center py-6">No staff in this department.</p>
-              )}
-            </div>
-          </>
-        )}
-
-        <DialogFooter className="pt-3 border-t mt-2 gap-2 sm:gap-0">
-          <span className="text-xs text-muted-foreground mr-auto">
-            {totalAcked}/{staff.length} acknowledged overall · TrainTrack records created automatically
-          </span>
-          {canExport && !loading && staff.length > 0 && (
-            <Button variant="outline" size="sm" onClick={handleExportRegister} className="gap-1.5" disabled={saving || exporting}>
-              {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Printer className="w-3.5 h-3.5" />}
-              Export PDF
-            </Button>
-          )}
-          <Button variant="outline" onClick={onClose} disabled={saving}>Close</Button>
-          {unacked.length > 0 && (
-            <Button onClick={handleSave} disabled={!anyChecked || saving}>
-              {saving && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />}
-              Record Acknowledgements
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // ─── Document card ────────────────────────────────────────────────────────────
 
 function DocCard({
@@ -406,11 +173,11 @@ function DocCard({
     setDownloading(true);
     try {
       const res = await apiFetch(`/doc-track/documents/${doc.id}/download-url`);
-      if (!res.ok) throw new Error("Failed to get download URL");
+      if (!res.ok) throw new Error(await getDownloadErrorMessage(res, "Please try again."));
       const { downloadUrl } = await res.json();
       await downloadFile(downloadUrl, doc.file_name);
-    } catch {
-      toast({ title: "Download failed", description: "Please try again.", variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Download failed", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
     } finally {
       setDownloading(false);
     }
@@ -523,12 +290,14 @@ function UploadDialog({
   onUploaded,
   sites,
   existingDepts,
+  categories,
 }: {
   open: boolean;
   onClose: () => void;
   onUploaded: () => void;
   sites: Site[];
   existingDepts: string[];
+  categories: Category[];
 }) {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -536,12 +305,19 @@ function UploadDialog({
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [title, setTitle] = useState("");
-  const [category, setCategory] = useState<Category>("risk_assessment");
+  const [category, setCategory] = useState<Category>(categories[0]);
   const [description, setDescription] = useState("");
   const [siteId, setSiteId] = useState<string>("none");
+  // A new document starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
+  useEffect(() => { if (open) setSiteId(workingSiteId ? String(workingSiteId) : "none"); }, [open]);
   const [department, setDepartment] = useState("");
-  const [requiresAcknowledgement, setRequiresAcknowledgement] = useState(false);
+  // Risk assessments (COSHH included), SOPs, policies and the like become a
+  // read-and-sign task for staff unless the uploader unticks it.
+  const [requiresAcknowledgement, setRequiresAcknowledgement] = useState(true);
+  const [ackChosen, setAckChosen] = useState(false);
   const [annualAcknowledgement, setAnnualAcknowledgement] = useState(false);
+  const [roster, setRoster] = useState<StaffMember[] | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<"idle" | "requesting" | "uploading" | "saving">("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -549,15 +325,41 @@ function UploadDialog({
   function reset() {
     setFile(null);
     setTitle("");
-    setCategory("risk_assessment");
+    setCategory(categories[0]);
     setDescription("");
     setSiteId("none");
     setDepartment("");
-    setRequiresAcknowledgement(false);
+    setRequiresAcknowledgement(true);
+    setAckChosen(false);
     setAnnualAcknowledgement(false);
+    setRoster(null);
     setUploading(false);
     setProgress("idle");
   }
+
+  // The staff list, to suggest departments and say who will be asked to sign.
+  useEffect(() => {
+    if (!open || roster) return;
+    apiFetch("/staff-roster")
+      .then(r => (r.ok ? r.json() : []))
+      .then((rows: StaffMember[]) => setRoster(rows.filter(m => m.active)))
+      .catch(() => setRoster([]));
+  }, [open, roster]);
+
+  function changeCategory(next: Category) {
+    setCategory(next);
+    if (!ackChosen) {
+      setRequiresAcknowledgement(next !== "other");
+      if (next === "other") setAnnualAcknowledgement(false);
+    }
+  }
+
+  // Departments not set up in Settings but already on documents or the roster.
+  const departmentsUsedBefore = [...existingDepts, ...(roster ?? []).map(m => m.department)];
+  // Same rule as the server: active staff in the department and at the site, when set.
+  const signers = (roster ?? []).filter(m =>
+    (!department.trim() || m.department === department.trim())
+    && (siteId === "none" || m.site_id === Number(siteId)));
 
   function handleFileChange(f: File) {
     setFile(f);
@@ -576,6 +378,7 @@ function UploadDialog({
     setUploading(true);
 
     try {
+      assertWithinUploadLimit(file);
       // 1. Request presigned PUT URL
       setProgress("requesting");
       const urlRes = await apiFetch("/doc-track/documents/request-upload", {
@@ -682,31 +485,12 @@ function UploadDialog({
           {/* Category */}
           <div className="space-y-1.5">
             <Label>Category</Label>
-            <Select value={category} onValueChange={v => setCategory(v as Category)}>
+            <Select value={category} onValueChange={v => changeCategory(v as Category)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="risk_assessment">Risk Assessment</SelectItem>
-                <SelectItem value="sop">SOP (Standard Operating Procedure)</SelectItem>
-                <SelectItem value="handbook">Staff Handbook</SelectItem>
-                <SelectItem value="policy">Policy</SelectItem>
-                <SelectItem value="procedure">Procedure</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
+                {sortByLabel(categories, c => UPLOAD_CATEGORY_LABELS[c]).map(c => <SelectItem key={c} value={c}>{UPLOAD_CATEGORY_LABELS[c]}</SelectItem>)}
               </SelectContent>
             </Select>
-          </div>
-
-          {/* Department */}
-          <div className="space-y-1.5">
-            <Label>Department <span className="text-muted-foreground text-xs">(optional — leave blank for all staff)</span></Label>
-            <Input
-              value={department}
-              onChange={e => setDepartment(e.target.value)}
-              placeholder="e.g. Kitchen, Front of House, All Staff"
-              list="upload-dept-list"
-            />
-            <datalist id="upload-dept-list">
-              {existingDepts.map(d => <option key={d} value={d} />)}
-            </datalist>
           </div>
 
           {/* Site */}
@@ -722,6 +506,19 @@ function UploadDialog({
               </Select>
             </div>
           )}
+
+          {/* Department */}
+          <div className="space-y-1.5">
+            <Label htmlFor="upload-department">Department</Label>
+            <DepartmentNameSelect
+              id="upload-department"
+              value={department}
+              onChange={setDepartment}
+              siteId={siteId !== "none" ? Number(siteId) : null}
+              usedBefore={departmentsUsedBefore}
+              noneLabel="All departments"
+            />
+          </div>
 
           {/* Description */}
           <div className="space-y-1.5">
@@ -739,12 +536,22 @@ function UploadDialog({
             <Checkbox
               id="requires-ack"
               checked={requiresAcknowledgement}
-              onCheckedChange={v => { setRequiresAcknowledgement(!!v); if (!v) setAnnualAcknowledgement(false); }}
+              onCheckedChange={v => { setAckChosen(true); setRequiresAcknowledgement(!!v); if (!v) setAnnualAcknowledgement(false); }}
               className="mt-0.5"
             />
             <div className="flex-1">
-              <Label htmlFor="requires-ack" className="cursor-pointer">Requires staff acknowledgement</Label>
-              <p className="text-xs text-muted-foreground mt-0.5">Staff must sign off that they have read this document. Creates TrainTrack records automatically.</p>
+              <Label htmlFor="requires-ack" className="cursor-pointer">Staff must read and sign</Label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Asks every member of staff on the Staff Roster {department.trim() ? <>in <strong>{department.trim()}</strong></> : "in the business"}
+                {siteId !== "none" ? " at this site" : ""} to read and sign it. Each signature is saved in their training record, and anyone still to sign is listed in the Monday email.
+              </p>
+              {requiresAcknowledgement && roster && (
+                <p className={cn("text-xs mt-1", signers.length ? "text-foreground" : "text-amber-700")} data-testid="upload-signers">
+                  {signers.length
+                    ? `${signers.length} member${signers.length === 1 ? "" : "s"} of staff will be asked to sign.`
+                    : "No active staff on the Staff Roster match yet. Staff added to this department later will be asked to sign."}
+                </p>
+              )}
 
               {requiresAcknowledgement && (
                 <div className="flex items-start gap-2.5 mt-3 pl-0.5">
@@ -785,7 +592,22 @@ function UploadDialog({
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+const DOC_TRACK_CATEGORIES: Category[] = ["risk_assessment", "sop", "handbook", "policy", "procedure", "other", "haccp", "recipe_spec"];
+
 export default function DocTrackPage() {
+  return (
+    <AppLayout title="DocTrack">
+      <DocTrackLibrary />
+    </AppLayout>
+  );
+}
+
+/**
+ * The document library with staff read-and-sign. `kitchen` shows only
+ * KitchenTrack's HACCP plans and recipe spec sheets, without the DocTrack
+ * heading, audit log or link history.
+ */
+export function DocTrackLibrary({ kitchen = false }: { kitchen?: boolean }) {
   const { activeClientId, user } = useAuth();
   const { toast } = useToast();
 
@@ -797,7 +619,7 @@ export default function DocTrackPage() {
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("all");
-  const [pageView, setPageView] = useState<"library" | "my-docs" | "audit">(
+  const [pageView, setPageView] = useState<"library" | "my-docs" | "audit" | "link-access">(
     user?.role === "client_admin" || user?.role === "consultant" ? "library" : "my-docs",
   );
   const [search, setSearch] = useState("");
@@ -815,11 +637,14 @@ export default function DocTrackPage() {
     setLoading(true);
     try {
       const res = await apiFetch("/doc-track/documents");
-      if (res.ok) setDocs(await res.json());
+      if (res.ok) {
+        const rows: Doc[] = await res.json();
+        setDocs(kitchen ? rows.filter(d => KITCHEN_CATEGORIES.includes(d.category)) : rows);
+      }
     } finally {
       setLoading(false);
     }
-  }, [activeClientId]);
+  }, [activeClientId, kitchen]);
 
   useEffect(() => {
     if (!activeClientId) return;
@@ -920,11 +745,17 @@ export default function DocTrackPage() {
     return acc;
   }, {});
 
+  const categoryTabs = kitchen ? KITCHEN_CATEGORY_TABS : CATEGORY_TABS;
+
   return (
-    <AppLayout title="DocTrack">
+    <>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-        <div>
+        {kitchen ? (
+          <p className="text-sm text-muted-foreground max-w-xl">
+            Upload your HACCP plan and recipe spec sheets. Staff on the Staff Roster are asked to read and sign each one, and every signature is saved in their training record.
+          </p>
+        ) : <div>
           <div className="flex items-center gap-2 mb-1">
             <div className="p-2 bg-cyan-50 rounded-lg">
               <FolderOpen className="w-5 h-5 text-cyan-600" />
@@ -934,7 +765,7 @@ export default function DocTrackPage() {
           <p className="text-sm text-muted-foreground">
             Document library — risk assessments, SOPs, policies &amp; more
           </p>
-        </div>
+        </div>}
         <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
           {isManager && (
             <Button variant="outline" onClick={() => setOutstandingOpen(true)} className="gap-1.5">
@@ -950,7 +781,7 @@ export default function DocTrackPage() {
       </div>
 
       {/* Personal sign-offs are available to every account with a roster match. */}
-      <div className="flex gap-1 mb-6 border-b border-border">
+      <div className="flex gap-1 mb-6 border-b border-border overflow-x-auto">
           <button
             onClick={() => { setPageView("library"); load(); }}
             className={cn(
@@ -973,9 +804,11 @@ export default function DocTrackPage() {
           >
             <BookOpen className="w-4 h-4" /> My Documents
           </button>
-          {isManager && <button type="button" data-testid="tab-doc-audit" onClick={() => setPageView("audit")} className={cn("flex items-center px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px", pageView === "audit" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>Audit log</button>}
+          {isManager && !kitchen && <button type="button" data-testid="tab-doc-audit" onClick={() => setPageView("audit")} className={cn("flex items-center px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px", pageView === "audit" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>Audit log</button>}
+          {isManager && !kitchen && <button type="button" data-testid="tab-doc-link-access" onClick={() => setPageView("link-access")} className={cn("flex items-center px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px", pageView === "link-access" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>Sign-off link access</button>}
       </div>
       {isManager && pageView === "audit" && <AuditLog module="doc" />}
+      {isManager && pageView === "link-access" && <PublicLinkAccessHistory linkType="sign_off" />}
 
       {/* My Documents personal view */}
       {pageView === "my-docs" && (
@@ -1055,7 +888,7 @@ export default function DocTrackPage() {
           <div className="flex flex-col sm:flex-row gap-3 mb-6">
             {/* Category tabs */}
             <div className="flex overflow-x-auto gap-1 pb-1 flex-shrink-0">
-              {CATEGORY_TABS.map(tab => (
+              {categoryTabs.map(tab => (
                 <button
                   key={tab.key}
                   onClick={() => setActiveTab(tab.key)}
@@ -1107,7 +940,7 @@ export default function DocTrackPage() {
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">
                   {docs.length === 0
-                    ? "Upload your first risk assessment, SOP, or policy to get started."
+                    ? kitchen ? "Upload your HACCP plan or a recipe spec sheet to get started." : "Upload your first risk assessment, SOP, or policy to get started."
                     : "Try a different category or clear the search."}
                 </p>
               </div>
@@ -1141,6 +974,7 @@ export default function DocTrackPage() {
         onUploaded={load}
         sites={sites}
         existingDepts={existingDepts}
+        categories={kitchen ? KITCHEN_CATEGORIES : DOC_TRACK_CATEGORIES}
       />
 
       {/* Acknowledgements dialog */}
@@ -1149,7 +983,8 @@ export default function DocTrackPage() {
       )}
 
       {/* Outstanding acknowledgements overview */}
-      <OutstandingDialog open={outstandingOpen} onClose={() => setOutstandingOpen(false)} canExport={isManager} />
+      <OutstandingDialog open={outstandingOpen} onClose={() => setOutstandingOpen(false)} canExport={isManager}
+        categories={kitchen ? KITCHEN_CATEGORIES : null} />
 
       {/* Delete confirm */}
       <AlertDialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null); }}>
@@ -1173,7 +1008,7 @@ export default function DocTrackPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </AppLayout>
+    </>
   );
 }
 
@@ -1190,7 +1025,11 @@ interface OutstandingDoc {
   acknowledged: { name: string; acknowledgedAt: string | null; signed: boolean }[];
 }
 
-function OutstandingDialog({ open, onClose, canExport }: { open: boolean; onClose: () => void; canExport: boolean }) {
+function OutstandingDialog({ open, onClose, canExport, categories = null }: {
+  open: boolean; onClose: () => void; canExport: boolean;
+  /** Only documents in these categories (KitchenTrack); null for all. */
+  categories?: Category[] | null;
+}) {
   const { activeClientId } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -1205,9 +1044,9 @@ function OutstandingDialog({ open, onClose, canExport }: { open: boolean; onClos
     setView("outstanding");
     apiFetch(`/doc-track/acknowledgements/outstanding${clientScope}`)
       .then(r => (r.ok ? r.json() : { documents: [] }))
-      .then(d => setDocs(d.documents ?? []))
+      .then(d => setDocs(((d.documents ?? []) as OutstandingDoc[]).filter(doc => !categories || categories.includes(doc.category as Category))))
       .finally(() => setLoading(false));
-  }, [open, clientScope]);
+  }, [open, clientScope, categories]);
 
   async function handleExportCombinedRegister() {
     setExporting(true);
@@ -1281,7 +1120,7 @@ function OutstandingDialog({ open, onClose, canExport }: { open: boolean; onClos
             </div>
           ) : docs.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4">
-              No documents require acknowledgement yet. Mark a document as &ldquo;Acknowledgement required&rdquo; when uploading to track staff sign-off here.
+              No documents require acknowledgement yet. Tick &ldquo;Staff must read and sign&rdquo; when uploading to track staff sign-off here.
             </p>
           ) : view === "outstanding" ? (
             withOutstanding.length === 0 ? (

@@ -31,6 +31,8 @@ export const AppState = {
 export const foreground = () => { for (const listener of listeners) listener('active'); };
 export const kitchenOutbox = { updateToken() {}, suspend() {}, async activate() {} };
 export const startKitchenReplay = () => () => {};
+export const checkOutbox = { updateToken() {}, suspend() {}, async activate() {} };
+export const startCheckReplay = () => () => {};
 export const clearPendingIssueUploadRecovery = async () => {};
 export const clearOtherPendingIssueUploadRecovery = async () => {};
 export const registerForPushNotifications = async () => {};

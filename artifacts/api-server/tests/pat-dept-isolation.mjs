@@ -19,10 +19,10 @@ function expectStatus(name, response, expected) {
 }
 function session() {
   let cookie = "";
-  const request = async (method, path, body) => {
+  const request = async (method, path, body, extraHeaders = {}) => {
     const response = await fetch(`${BASE}${path}`, {
       method,
-      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
+      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}), ...extraHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const setCookie = response.headers.get("set-cookie");
@@ -37,6 +37,9 @@ function session() {
 
 async function main() {
   const stamp = Date.now();
+  // Department staff mutate these records and expect 403/200 results. Keep the
+  // date relative to today: a fixed day ages past the 24-hour correction window
+  // and turns those authorization checks into 423 record-lock responses.
   const fixtureDate = new Date().toISOString().slice(0, 10);
   const admin = session();
   const email = `pat-dept-admin-${stamp}@test.local`;
@@ -63,6 +66,16 @@ async function main() {
   const betaTemplate = await admin("POST", "/pat-track/equipment-templates", { siteId: betaSite.data.id, name: "Beta template" });
   const alphaRoom = await admin("POST", "/pat-track/rooms", { siteId: alphaSite.data.id, templateId: alphaTemplate.data.id, name: "Alpha room" });
   const betaRoom = await admin("POST", "/pat-track/rooms", { siteId: betaSite.data.id, templateId: betaTemplate.data.id, name: "Beta room" });
+
+  // A room template carries an area type, and a save that leaves it out keeps it.
+  const guestTemplate = await admin("POST", "/pat-track/equipment-templates", { siteId: alphaSite.data.id, name: "Guest room template", areaType: " Guest room " });
+  expectStatus("create template with area type", guestTemplate, [200, 201]);
+  check("template stores area type", guestTemplate.data?.area_type === "Guest room", JSON.stringify(guestTemplate.data?.area_type));
+  const renamedGuest = await admin("PUT", `/pat-track/equipment-templates/${guestTemplate.data?.id}`, { siteId: alphaSite.data.id, name: "Guest room template (renamed)" });
+  check("save without area type keeps it", renamedGuest.data?.area_type === "Guest room", JSON.stringify(renamedGuest.data?.area_type));
+  const clearedGuest = await admin("PUT", `/pat-track/equipment-templates/${guestTemplate.data?.id}`, { siteId: alphaSite.data.id, name: "Guest room template", areaType: null });
+  check("area type can be cleared", clearedGuest.data?.area_type === null, JSON.stringify(clearedGuest.data?.area_type));
+  expectStatus("delete area type template", await admin("DELETE", `/pat-track/equipment-templates/${guestTemplate.data?.id}`), [200]);
   const certificateBody = (siteId, roomId, ref) => ({
     siteId, roomIds: [roomId], visitDate: fixtureDate, certificateRef: ref,
   });
@@ -336,9 +349,10 @@ async function main() {
   const previousAppliance = await admin("POST", "/pat-track/appliances", {
     siteId: alphaSite.data.id, name: "Previous-month appliance", location: "Previous-month location",
   });
+  // Backfilling a past test needs an owner's reason.
   expectStatus("admin records previous-month evidence", await admin("POST", "/pat-track/tests", {
     applianceId: previousAppliance.data.id, testDate: previousTestDate, result: "pass",
-  }), [201]);
+  }, { "X-Override-Reason": encodeURIComponent("PAT isolation fixture: previous-month test") }), [201]);
   await admin("PUT", `/pat-track/appliances/${previousAppliance.data.id}`, {
     siteId: betaSite.data.id, name: "Previous-month appliance", location: "Moved",
   });

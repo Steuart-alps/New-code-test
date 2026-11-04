@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Text, TouchableOpacity, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -6,6 +6,8 @@ import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
 import { apiFetch } from '@/lib/api';
 import { useStagedPhotoEvidence } from '@/hooks/useStagedPhotoEvidence';
+import { newCheckEntryId } from '@/lib/checkOutbox';
+import { nextEntryAttempt, type EntryAttempt } from './client-entry-logic';
 import { RequiredPhotoEvidence } from './RequiredPhotoEvidence';
 import { AquaChoiceRow, AquaEmptyState, AquaField, AquaInput, aquaUiStyles as styles } from './aqua-track-ui';
 import {
@@ -61,7 +63,12 @@ export function Sessions({
     enabled: canUseSite && siteId !== null,
   });
 
+  // Recording again with unchanged details reuses the device entry ID, so a
+  // resend after a lost response never records the session twice.
+  const entryAttempt = useRef<EntryAttempt | null>(null);
+
   function resetDraft(photos: 'consume' | 'cancel') {
+    entryAttempt.current = null;
     setSessionDate(localDateString());
     setOpenTime(localTimeString());
     setCloseTime('');
@@ -140,7 +147,10 @@ export function Sessions({
       result: preSessionResult,
       notes: notes.trim() || null,
     });
-    if (payload) mutation.mutate(payload);
+    if (!payload) return;
+    const attempt = nextEntryAttempt(entryAttempt.current, payload, () => newCheckEntryId('swim'));
+    entryAttempt.current = attempt;
+    mutation.mutate({ ...payload, clientEntryId: attempt.id });
   }
 
   function toggleForm() {

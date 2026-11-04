@@ -109,7 +109,7 @@ export default function ContractorQuotePage() {
 
         <div className="bg-card border rounded-xl overflow-hidden shadow-sm">
           <div className="p-5 border-b bg-muted/10">
-            <h2 className="font-semibold text-lg flex items-center gap-2 mb-3">
+            <h2 className="font-bold text-lg flex items-center gap-2 mb-3">
               <Briefcase className="w-5 h-5 text-muted-foreground" />
               {data.jobTitle || data.job?.title || "Job Request"}
             </h2>

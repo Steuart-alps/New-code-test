@@ -1,58 +1,62 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { fireSafetyChecksTable, sitesTable, appSettingsTable, trackControlProfilesTable } from "@workspace/db/schema";
+import { fireSafetyChecksTable, fireCallPointsTable, sitesTable, appSettingsTable, trackControlProfilesTable } from "@workspace/db/schema";
+import type { FireSafetyCheck } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
-import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
+import { requireAuth, denyViewers, requireClientAdmin, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { appendAuditEvent } from "../lib/audit";
+import { siteVisibleToDepartment, sitesTableVisibleTo } from "../lib/departmentSites";
+import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { ACTIVE_FIRE_CHECK_TYPES, FIRE_CHECK_TYPES, FIRE_FREQUENCY_DAYS, RETIRED_FIRE_CHECK_TYPES, effectiveFireFrequencies, getFireSiteStatuses, worstFireStatusByType } from "../lib/checkReminders";
+import { getAccountToday } from "../lib/accountClock";
+import { callPointLabel, callPointRotation } from "../lib/fireCallPointRotation";
+import { SOUND_LEVEL_METHODS } from "../lib/fireSoundLevel";
+import {
+  DRILL_ATTENDANCE_MONTHS, listDrillAttendees, resolveDrillAttendees, saveDrillAttendees, staffDrillStatuses,
+} from "../lib/fireDrillAttendance";
+import {
+  checkWalkRoutes, duplicateRouteName, escapeRouteListSchema, loadEscapeRoutes, parseWalkNotes, saveEscapeRoutes, walkFound,
+} from "../lib/fireEscapeRoutes";
+import {
+  NIGHT_WALK_EARLY_MINUTES, NIGHT_WALK_GRACE_MINUTES, NIGHT_WALK_TIMES, nightWalkSites, walkInstant,
+} from "../lib/nightFireWalks";
+import { getAccountTimezone } from "../lib/accountClock";
 
 const router = Router();
 
-const CHECK_TYPES = ["alarm", "emergency_lights", "extinguishers", "fire_doors", "fire_drill", "fire_walk", "alarm_panel"] as const;
+const CHECK_TYPES = FIRE_CHECK_TYPES;
+// Everything that can be recorded: the due-date checks plus the night
+// porter's fire walks, which have their own nightly schedule (lib/nightFireWalks).
+const RECORD_TYPES = [...FIRE_CHECK_TYPES, "night_walk"] as const;
+/** Checks that tick each of the site's escape routes. */
+const ROUTE_WALK_TYPES = new Set<string>(["fire_walk", "night_walk"]);
 
 // Default check frequencies, in days
-const FREQUENCY_DAYS: Record<(typeof CHECK_TYPES)[number], number> = {
-  alarm: 7,
-  emergency_lights: 30,
-  extinguishers: 7,
-  fire_doors: 90,
-  fire_drill: 180,
-  fire_walk: 7,
-  alarm_panel: 7,
-};
+const FREQUENCY_DAYS = FIRE_FREQUENCY_DAYS;
 
 const FIRE_PROFILE_MODULE = "fire";
+// The Template form sends "" for an untouched date or nation; store that as "not set".
+const blankAsNull = <T extends z.ZodTypeAny>(schema: T) => z.preprocess(v => (v === "" ? null : v), schema);
 const fireProfileSchema = z.object({
   riskAssessmentReference: z.string().trim().max(2000).nullable().optional(),
-  riskAssessmentDate: z.string().date().nullable().optional(),
-  nextReviewDate: z.string().date().nullable().optional(),
+  riskAssessmentDate: blankAsNull(z.string().date().nullable().optional()),
+  nextReviewDate: blankAsNull(z.string().date().nullable().optional()),
   responsiblePerson: z.string().trim().max(500).nullable().optional(),
-  ukNation: z.enum(["england", "scotland", "wales", "northern_ireland"]).nullable().optional(),
+  ukNation: blankAsNull(z.enum(["england", "scotland", "wales", "northern_ireland"]).nullable().optional()),
   evacuationPeepArrangements: z.string().trim().max(10000).nullable().optional(),
   maintenanceEvidenceReference: z.string().trim().max(2000).nullable().optional(),
   defectClosureVerification: z.string().trim().max(10000).nullable().optional(),
   frequencyDays: z.record(z.string(), z.number().int().min(1).max(3650)).optional(),
 }).strict();
 
-function effectiveFireFrequencies(raw: unknown, profile: unknown = null) {
-  const result = { ...FREQUENCY_DAYS };
-  const apply = (value: unknown) => {
-    if (!value || typeof value !== "object") return;
-    for (const key of CHECK_TYPES) {
-      const days = (value as Record<string, unknown>)[key];
-      if (typeof days === "number" && Number.isInteger(days) && days > 0 && days <= 3650) result[key] = days;
-    }
-  };
-  if (typeof raw === "string") {
-    try { apply(JSON.parse(raw)); } catch { /* use defaults */ }
-  }
-  if (profile && typeof profile === "object") apply((profile as Record<string, unknown>).frequencyDays);
-  return result;
-}
+/** Whether night staff took part in a fire drill. */
+const NIGHT_STAFF_VALUES = ["included", "not_included", "no_night_staff"] as const;
 
 const createSchema = z.object({
-  checkType: z.enum(CHECK_TYPES),
+  checkType: z.enum(RECORD_TYPES),
   checkDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   result: z.enum(["pass", "fail"]),
   siteId: z.number().int().nullable().optional(),
@@ -60,9 +64,131 @@ const createSchema = z.object({
   notes: z.string().max(5000).nullable().optional(),
   performedBy: z.string().max(200).nullable().optional(),
   staffRosterId: z.number().int().positive().nullable().optional(),
+  // Weekly alarm tests: a call point from the site's list, or its name typed
+  // in when the site has no list yet.
+  callPointId: z.number().int().positive().nullable().optional(),
+  callPoint: z.string().trim().max(200).nullable().optional(),
+  // Fire drills only: night staff, the time of the drill ("HH:MM"), how long
+  // the evacuation took in seconds, and the roster ids of the staff present.
+  nightStaff: z.enum(NIGHT_STAFF_VALUES).nullable().optional(),
+  drillTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullable().optional(),
+  evacuationSeconds: z.number().int().min(1).max(24 * 60 * 60).nullable().optional(),
+  staffPresentIds: z.array(z.number().int().positive()).max(2000).optional(),
+  // Weekly alarm tests, optional: the sound level heard (lib/fireSoundLevel).
+  soundLevelDb: z.number().min(20).max(140).nullable().optional(),
+  soundLevelMethod: z.enum(SOUND_LEVEL_METHODS).nullable().optional(),
+  soundLevelBedhead: z.boolean().nullable().optional(),
+  // Night fire walks: which of the night's walks. Like every FireTrack
+  // record, the walker signs it on saving (lib/recordSignatures.ts).
+  walkTime: z.enum(NIGHT_WALK_TIMES).nullable().optional(),
 });
 
-const updateSchema = createSchema.partial().omit({ checkType: true });
+const updateSchema = partialUpdate(createSchema).omit({ checkType: true });
+
+type FireDetails = Pick<FireSafetyCheck,
+  "callPointId" | "callPoint" | "nightStaff" | "drillTime" | "evacuationSeconds"
+  | "soundLevelDb" | "soundLevelMethod" | "soundLevelBedhead" | "walkTime">;
+type FireDetailInput = {
+  callPointId?: number | null; callPoint?: string | null; nightStaff?: FireDetails["nightStaff"];
+  drillTime?: string | null; evacuationSeconds?: number | null; notes?: string | null;
+  soundLevelDb?: number | null; soundLevelMethod?: FireDetails["soundLevelMethod"]; soundLevelBedhead?: boolean | null;
+  walkTime?: string | null; performedBy?: string | null;
+};
+
+/**
+ * The call point and drill fields a check stores. A weekly alarm test must say
+ * which call point was used. A drill must say whether night staff took part,
+ * the time of the drill, how long the evacuation took, and the improvements
+ * required (the notes). Other check types store none of these. On an edit,
+ * `existing` is the stored record: older records saved before these fields
+ * existed may stay blank, but a recorded answer cannot be removed.
+ */
+async function resolveFireDetails(
+  clientId: number, checkType: string, siteId: number | null, input: FireDetailInput,
+  existing?: FireSafetyCheck,
+): Promise<FireDetails | { error: string }> {
+  const details: FireDetails = {
+    callPointId: null, callPoint: null, nightStaff: null, drillTime: null, evacuationSeconds: null,
+    soundLevelDb: null, soundLevelMethod: null, soundLevelBedhead: null, walkTime: null,
+  };
+  if (checkType === "alarm") {
+    let callPointId = existing?.callPointId ?? null;
+    let callPoint = existing?.callPoint ?? null;
+    if (input.callPointId !== undefined || input.callPoint !== undefined) {
+      callPointId = input.callPointId ?? null;
+      callPoint = callPointId == null ? (input.callPoint?.trim() || null) : null;
+    }
+    if (callPointId != null) {
+      const [point] = await db.select().from(fireCallPointsTable)
+        .where(and(eq(fireCallPointsTable.id, callPointId), eq(fireCallPointsTable.clientId, clientId)))
+        .limit(1);
+      // An archived call point can stay on the test that already names it,
+      // but is not offered for new tests.
+      const kept = existing?.callPointId === callPointId;
+      if (!point || (point.archivedAt && !kept)) return { error: "Choose a call point from this site's list" };
+      if ((point.siteId ?? null) !== siteId) return { error: "That call point is at a different site" };
+      callPoint = kept && existing?.callPoint ? existing.callPoint : callPointLabel(point);
+    }
+    if (!callPoint && (!existing || existing.callPoint)) return { error: "Say which call point was tested" };
+    details.callPointId = callPointId;
+    details.callPoint = callPoint;
+    // The sound level is optional. Sending a blank level clears all three.
+    const soundLevelDb = input.soundLevelDb !== undefined ? input.soundLevelDb : existing?.soundLevelDb ?? null;
+    if (soundLevelDb != null) {
+      details.soundLevelDb = Math.round(soundLevelDb * 10) / 10;
+      details.soundLevelMethod = (input.soundLevelMethod !== undefined ? input.soundLevelMethod : existing?.soundLevelMethod) ?? "meter";
+      details.soundLevelBedhead = (input.soundLevelBedhead !== undefined ? input.soundLevelBedhead : existing?.soundLevelBedhead) ?? false;
+    }
+  }
+  if (checkType === "fire_drill") {
+    const nightStaff = input.nightStaff !== undefined ? input.nightStaff : existing?.nightStaff ?? null;
+    if (!nightStaff && (!existing || existing.nightStaff)) return { error: "Say whether night staff took part in the drill" };
+    details.nightStaff = nightStaff;
+    const drillTime = input.drillTime !== undefined ? input.drillTime : existing?.drillTime ?? null;
+    if (!drillTime && (!existing || existing.drillTime)) return { error: "Give the time of the drill" };
+    details.drillTime = drillTime;
+    const evacuationSeconds = input.evacuationSeconds !== undefined ? input.evacuationSeconds : existing?.evacuationSeconds ?? null;
+    if (evacuationSeconds == null && (!existing || existing.evacuationSeconds != null)) {
+      return { error: "Give the time taken to evacuate" };
+    }
+    details.evacuationSeconds = evacuationSeconds;
+    const notes = input.notes !== undefined ? input.notes : existing?.notes ?? null;
+    if (!notes?.trim() && (!existing || existing.notes?.trim())) {
+      return { error: "Write the improvements required, or notes, for the drill" };
+    }
+  }
+  if (checkType === "night_walk") {
+    // A night walk is at a site, at one of the night's walk times, in the
+    // name of the person who walked.
+    if (siteId == null) return { error: "Choose the site of the night fire walk" };
+    const walkTime = input.walkTime !== undefined ? input.walkTime : existing?.walkTime ?? null;
+    if (!walkTime) return { error: "Choose which night walk this is: 22:00, 02:00 or 06:00" };
+    details.walkTime = walkTime;
+    const performedBy = input.performedBy !== undefined ? input.performedBy : existing?.performedBy ?? null;
+    if (!performedBy?.trim()) return { error: "Say who did the night fire walk" };
+  }
+  return details;
+}
+
+/**
+ * The escape routes a new walk must answer, then its answers checked against
+ * them. On an edit, the routes recorded on the walk stay the ones it covers.
+ * Returns the result to store: any route not clear makes the walk a fail.
+ */
+async function resolveWalkRoutes(
+  clientId: number, checkType: string, siteId: number | null, notes: string | null | undefined,
+  result: "pass" | "fail", existing?: FireSafetyCheck,
+): Promise<{ result: "pass" | "fail" } | { error: string }> {
+  if (!ROUTE_WALK_TYPES.has(checkType)) return { result };
+  const required = existing
+    ? parseWalkNotes(existing.notes)?.routes.map(route => route.name) ?? []
+    : (await loadEscapeRoutes(clientId, siteId)).routes.map(route => route.name);
+  const checked = checkWalkRoutes(notes, required);
+  if ("error" in checked) return checked;
+  return { result: walkFound(checked.walk) ? "fail" : result };
+}
+// Creation only: the mobile outbox's device entry ID (see clientEntryReplay).
+const postSchema = createSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 /** Returns the site row if it belongs to the tenant, or null. */
 async function fetchClientSite(siteId: number | null | undefined, clientId: number) {
@@ -90,7 +216,7 @@ async function checkSiteAccess(
   if (siteId == null) return null;
   const site = await fetchClientSite(siteId, clientId);
   if (!site) return "not_found";
-  if (deptId !== null && site.departmentId !== null && site.departmentId !== deptId) return "forbidden";
+  if (!(await siteVisibleToDepartment(site, deptId))) return "forbidden";
   return "ok";
 }
 
@@ -101,7 +227,7 @@ function allowedSitesSubquery(clientId: number, deptId: number) {
     .from(sitesTable)
     .where(and(
       eq(sitesTable.clientId, clientId),
-      or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+      sitesTableVisibleTo(deptId),
     ));
 }
 
@@ -112,7 +238,7 @@ router.get("/", requireAuth, async (req, res) => {
 
   const conditions = [eq(fireSafetyChecksTable.clientId, clientId)];
   const { checkType, siteId } = req.query as { checkType?: string; siteId?: string };
-  if (checkType && (CHECK_TYPES as readonly string[]).includes(checkType)) {
+  if (checkType && (RECORD_TYPES as readonly string[]).includes(checkType)) {
     conditions.push(eq(fireSafetyChecksTable.checkType, checkType));
   }
   if (siteId && !isNaN(parseInt(siteId))) {
@@ -134,7 +260,108 @@ router.get("/", requireAuth, async (req, res) => {
     .where(and(...conditions))
     .orderBy(desc(fireSafetyChecksTable.checkDate), desc(fireSafetyChecksTable.id));
 
-  res.json(rows);
+  const attendees = await listDrillAttendees(clientId, rows.filter(row => row.checkType === "fire_drill").map(row => row.id));
+  res.json(rows.map(row => ({ ...row, staffPresent: attendees.get(row.id) ?? [] })));
+});
+
+/**
+ * A night walk can't be recorded more than an hour before its time, and each
+ * walk of a night is recorded once per site. A device replay of the same
+ * entry is let through to be recognised as a replay.
+ */
+async function refuseNightWalk(
+  clientId: number, siteId: number, checkDate: string, walkTime: (typeof NIGHT_WALK_TIMES)[number],
+  clientEntryId?: string, exceptId?: number,
+): Promise<{ status: number; error: string } | null> {
+  const timeZone = await getAccountTimezone(clientId);
+  if (walkInstant(checkDate, walkTime, timeZone).getTime() - NIGHT_WALK_EARLY_MINUTES * 60_000 > Date.now()) {
+    return { status: 400, error: `The ${walkTime} walk on that day hasn't come round yet` };
+  }
+  const [already] = await db.select({ id: fireSafetyChecksTable.id, clientEntryId: fireSafetyChecksTable.clientEntryId })
+    .from(fireSafetyChecksTable)
+    .where(and(
+      eq(fireSafetyChecksTable.clientId, clientId), eq(fireSafetyChecksTable.siteId, siteId),
+      eq(fireSafetyChecksTable.checkType, "night_walk"), eq(fireSafetyChecksTable.checkDate, checkDate),
+      eq(fireSafetyChecksTable.walkTime, walkTime),
+      ...(exceptId ? [sql`${fireSafetyChecksTable.id} <> ${exceptId}`] : []),
+    )).limit(1);
+  if (already && !(clientEntryId && already.clientEntryId === clientEntryId)) {
+    return { status: 409, error: `The ${walkTime} night walk on that day is already recorded for this site` };
+  }
+  return null;
+}
+
+// GET /api/fire-safety/escape-routes?siteId=
+// The site's escape routes, ticked on each escape route sign-off and night walk.
+router.get("/escape-routes", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const siteId = parseSiteId(req.query.siteId);
+  if (siteId === undefined) return res.status(400).json({ error: "Invalid site" });
+  const access = await checkSiteAccess(siteId, clientId, getActiveDepartmentId(req));
+  if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  const { routes, shared } = await loadEscapeRoutes(clientId, siteId);
+  res.json({ siteId, routes, shared });
+});
+
+// PUT /api/fire-safety/escape-routes?siteId= — replace the site's list (managers).
+// Walks already recorded keep the routes they ticked.
+router.put("/escape-routes", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const siteId = parseSiteId(req.query.siteId);
+  if (siteId === undefined) return res.status(400).json({ error: "Invalid site" });
+  const access = await checkSiteAccess(siteId, clientId, getActiveDepartmentId(req));
+  if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  const parsed = escapeRouteListSchema.safeParse(req.body?.routes);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid routes" });
+  const duplicate = duplicateRouteName(parsed.data);
+  if (duplicate) return res.status(400).json({ error: `Two routes are called "${duplicate}". Give each route its own name.` });
+  const before = await loadEscapeRoutes(clientId, siteId);
+  await saveEscapeRoutes(clientId, siteId, parsed.data);
+  await appendAuditEvent(req, {
+    clientId, entityType: "fire_escape_routes", entityId: siteId ?? 0, action: "updated",
+    before: { siteId, routes: before.routes }, after: { siteId, routes: parsed.data },
+  });
+  res.json({ siteId, routes: parsed.data, shared: false });
+});
+
+// GET /api/fire-safety/night-walks?siteId=
+// The night porter's 22:00, 02:00 and 06:00 walks at each site with a night
+// porter: tonight (or the night now ending) and the six nights before.
+router.get("/night-walks", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const siteId = parseSiteId(req.query.siteId);
+  if (siteId === undefined) return res.status(400).json({ error: "Invalid site" });
+  const deptId = getActiveDepartmentId(req);
+  const access = await checkSiteAccess(siteId, clientId, deptId);
+  if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  const accessibleSiteIds = deptId === null ? null : (await allowedSitesSubquery(clientId, deptId)).map(site => site.id);
+  const sites = await nightWalkSites(clientId, { siteId, accessibleSiteIds });
+  res.json({ walkTimes: NIGHT_WALK_TIMES, graceMinutes: NIGHT_WALK_GRACE_MINUTES, sites });
+});
+
+// GET /api/fire-safety/drill-attendance?siteId=
+// Each active roster member with the latest fire drill they were ticked
+// present at, so FireTrack and TrainTrack can show who has not taken part in
+// one in the last 12 months. Viewers see only their own training, so not this.
+router.get("/drill-attendance", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (req.currentUser!.role === "client_viewer") return res.status(403).json({ error: "Forbidden" });
+  const selectedSiteId = parseSiteId(req.query.siteId);
+  if (selectedSiteId === undefined) return res.status(400).json({ error: "Invalid site" });
+  const deptId = getActiveDepartmentId(req);
+  const siteAccess = await checkSiteAccess(selectedSiteId, clientId, deptId);
+  if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  const today = await getAccountToday(clientId);
+  const staff = await staffDrillStatuses(clientId, deptId, selectedSiteId, today);
+  res.json({ periodMonths: DRILL_ATTENDANCE_MONTHS, staff });
 });
 
 // GET /api/fire-safety/status?siteId=
@@ -142,68 +369,30 @@ router.get("/status", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const { siteId } = req.query as { siteId?: string };
-  const conditions = [eq(fireSafetyChecksTable.clientId, clientId)];
-  if (siteId && !isNaN(parseInt(siteId))) {
-    conditions.push(eq(fireSafetyChecksTable.siteId, parseInt(siteId)));
-  }
+  const selectedSiteId = parseSiteId(req.query.siteId);
+  if (selectedSiteId === undefined) return res.status(400).json({ error: "Invalid site" });
+  // The site's control profile sets the cadence, so the caller must be able to
+  // see that site before any of it is returned.
+  const siteAccess = await checkSiteAccess(selectedSiteId, clientId, getActiveDepartmentId(req));
+  if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
 
-  // Department scoping: status should only reflect checks visible to this user.
+  // Each site is judged on its own checks and risk-assessed frequencies. The
+  // all-sites view shows the worst site per check type and how many sites are
+  // not up to date, so one site's check cannot make another look compliant.
   const deptId = getActiveDepartmentId(req);
-  if (deptId !== null) {
-    conditions.push(
-      or(isNull(fireSafetyChecksTable.siteId), inArray(fireSafetyChecksTable.siteId, allowedSitesSubquery(clientId, deptId))) as any,
-    );
+  const accessibleSiteIds = deptId === null ? null
+    : (await allowedSitesSubquery(clientId, deptId)).map(site => site.id);
+  const statuses = worstFireStatusByType(
+    await getFireSiteStatuses(clientId, { siteId: selectedSiteId, accessibleSiteIds }),
+  );
+  if (statuses.length === 0) {
+    // No site is visible to this user, so nothing has been recorded for them.
+    return res.json(ACTIVE_FIRE_CHECK_TYPES.map(checkType => ({
+      checkType, frequencyDays: FREQUENCY_DAYS[checkType], lastDate: null, lastResult: null, dueDate: null,
+      status: "never" as const, siteId: null, siteName: null, siteCount: 0, sitesAffected: 0,
+    })));
   }
-
-  // Latest check per type, including its result (DISTINCT ON keeps the newest row per check_type)
-  const lastChecks = await db
-    .selectDistinctOn([fireSafetyChecksTable.checkType], {
-      checkType: fireSafetyChecksTable.checkType,
-      lastDate: fireSafetyChecksTable.checkDate,
-      lastResult: fireSafetyChecksTable.result,
-    })
-    .from(fireSafetyChecksTable)
-    .where(and(...conditions))
-    .orderBy(fireSafetyChecksTable.checkType, desc(fireSafetyChecksTable.checkDate), desc(fireSafetyChecksTable.id));
-
-  const lastByType = new Map(lastChecks.map((r) => [r.checkType, { lastDate: r.lastDate, lastResult: r.lastResult }]));
-  const MS_DAY = 24 * 60 * 60 * 1000;
-  // Date-only arithmetic in UTC to avoid local-timezone drift
-  const toUtcDays = (isoDate: string) => Math.floor(Date.parse(`${isoDate}T00:00:00Z`) / MS_DAY);
-  const now = new Date();
-  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  const todayDays = toUtcDays(todayIso);
-
-  const settings = await db.select({ key: appSettingsTable.key, value: appSettingsTable.value })
-    .from(appSettingsTable).where(eq(appSettingsTable.clientId, clientId));
-  const frequencySetting = settings.find(row => row.key === "fire_frequency_days")?.value;
-  let siteProfile: unknown = null;
-  if (siteId && !isNaN(parseInt(siteId))) {
-    const [profile] = await db.select({ profile: trackControlProfilesTable.profile })
-      .from(trackControlProfilesTable)
-      .where(and(
-        eq(trackControlProfilesTable.clientId, clientId),
-        eq(trackControlProfilesTable.siteId, parseInt(siteId)),
-        eq(trackControlProfilesTable.module, FIRE_PROFILE_MODULE),
-      )).limit(1);
-    siteProfile = profile?.profile ?? null;
-  }
-  const frequencies = effectiveFireFrequencies(frequencySetting, siteProfile);
-  const statuses = CHECK_TYPES.map((checkType) => {
-    const frequencyDays = frequencies[checkType];
-    const last = lastByType.get(checkType) ?? null;
-    if (!last) {
-      return { checkType, frequencyDays, lastDate: null, lastResult: null, dueDate: null, status: "never" as const };
-    }
-    const dueDays = toUtcDays(last.lastDate) + frequencyDays;
-    const dueDate = new Date(dueDays * MS_DAY).toISOString().slice(0, 10);
-    const daysUntilDue = dueDays - todayDays;
-    const dueSoonWindow = Math.max(1, Math.ceil(frequencyDays * 0.2));
-    const status = daysUntilDue < 0 ? "overdue" : daysUntilDue <= dueSoonWindow ? "due_soon" : "ok";
-    return { checkType, frequencyDays, lastDate: last.lastDate, lastResult: last.lastResult, dueDate, status };
-  });
-
   res.json(statuses);
 });
 
@@ -212,9 +401,18 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const parsed = createSchema.safeParse(req.body);
+  const parsed = postSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
+  // Older records of a retired check stay editable, but no new ones are made.
+  if ((RETIRED_FIRE_CHECK_TYPES as readonly string[]).includes(data.checkType)) {
+    return res.status(400).json({
+      error: data.checkType === "alarm_panel"
+        ? "The alarm panel is now checked on the premises opening and closing checks."
+        : "Contractor services are now recorded on their compliance check (Compliance Checks), which FireTrack shows.",
+      code: "FIRE_CHECK_TYPE_RETIRED",
+    });
+  }
   const performer = await resolveStaffPerformer(clientId, data.staffRosterId, data.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
@@ -223,24 +421,60 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
   if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
 
-  const [inserted] = await db
-    .insert(fireSafetyChecksTable)
-    .values({
-      clientId,
-      checkType: data.checkType,
-      checkDate: data.checkDate,
-      result: data.result,
-      siteId: data.siteId ?? null,
-      location: data.location ?? null,
-      notes: data.notes ?? null,
-       performedBy: performer.performedBy,
-       staffRosterId: performer.staffRosterId,
-      createdBy: req.currentUser!.id,
-    })
-    .returning();
+  const details = await resolveFireDetails(clientId, data.checkType, data.siteId ?? null, { ...data, performedBy: performer.performedBy });
+  if ("error" in details) return res.status(400).json({ error: details.error });
+  const walk = await resolveWalkRoutes(clientId, data.checkType, data.siteId ?? null, data.notes, data.result);
+  if ("error" in walk) return res.status(400).json({ error: walk.error });
+  if (data.checkType === "night_walk") {
+    const refused = await refuseNightWalk(clientId, data.siteId!, data.checkDate, details.walkTime as (typeof NIGHT_WALK_TIMES)[number], data.clientEntryId);
+    if (refused) return res.status(refused.status).json({ error: refused.error });
+  }
+  const isDrill = data.checkType === "fire_drill";
+  const present = isDrill ? await resolveDrillAttendees(clientId, deptId, data.staffPresentIds ?? []) : { attendees: [] };
+  if ("error" in present) return res.status(400).json({ error: present.error });
 
-  await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: inserted.id, action: "created", after: inserted });
-  res.status(201).json(inserted);
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(data);
+  const storedEntry = async () => entry && (await db.select().from(fireSafetyChecksTable)
+    .where(and(eq(fireSafetyChecksTable.clientId, clientId), eq(fireSafetyChecksTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
+
+  let inserted;
+  try {
+    inserted = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(fireSafetyChecksTable)
+        .values({
+          clientId,
+          checkType: data.checkType,
+          checkDate: data.checkDate,
+          result: walk.result,
+          siteId: data.siteId ?? null,
+          location: data.location ?? null,
+          notes: data.notes ?? null,
+          performedBy: performer.performedBy,
+          staffRosterId: performer.staffRosterId,
+          ...details,
+          createdBy: userId,
+          clientEntryId: entry?.id ?? null,
+          clientEntryHash: entry?.hash ?? null,
+        })
+        .returning();
+      if (isDrill) await saveDrillAttendees(tx, clientId, row.id, present.attendees);
+      return row;
+    });
+  } catch (err) {
+    // A concurrent replay of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
+
+  const staffPresent = isDrill ? (await listDrillAttendees(clientId, [inserted.id])).get(inserted.id) ?? [] : [];
+  await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: inserted.id, action: "created", after: { ...inserted, staffPresent } });
+  res.status(201).json({ ...inserted, staffPresent });
 });
 
 // PUT /api/fire-safety/:id
@@ -278,16 +512,52 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   const performer = await resolveStaffPerformerUpdate(clientId, parsed.data.staffRosterId, parsed.data.performedBy,
     existing.staffRosterId, existing.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
+  const {
+    callPointId, callPoint, nightStaff, drillTime, evacuationSeconds, staffPresentIds,
+    soundLevelDb, soundLevelMethod, soundLevelBedhead, walkTime, ...changes
+  } = parsed.data;
+  const siteId = "siteId" in parsed.data ? parsed.data.siteId ?? null : existing.siteId;
+  const details = await resolveFireDetails(clientId, existing.checkType, siteId, {
+    callPointId, callPoint, nightStaff, drillTime, evacuationSeconds, notes: changes.notes,
+    soundLevelDb, soundLevelMethod, soundLevelBedhead, walkTime,
+    performedBy: performer ? performer.performedBy : undefined,
+  }, existing);
+  if ("error" in details) return res.status(400).json({ error: details.error });
+  if (changes.notes !== undefined || changes.result !== undefined) {
+    const walk = await resolveWalkRoutes(clientId, existing.checkType, siteId,
+      changes.notes !== undefined ? changes.notes : existing.notes, changes.result ?? existing.result as "pass" | "fail", existing);
+    if ("error" in walk) return res.status(400).json({ error: walk.error });
+    changes.result = walk.result;
+  }
+  if (existing.checkType === "night_walk" && (details.walkTime !== existing.walkTime || changes.checkDate !== undefined || siteId !== existing.siteId)) {
+    const refused = await refuseNightWalk(clientId, siteId!, changes.checkDate ?? existing.checkDate,
+      details.walkTime as (typeof NIGHT_WALK_TIMES)[number], undefined, id);
+    if (refused) return res.status(refused.status).json({ error: refused.error });
+  }
+  const isDrill = existing.checkType === "fire_drill";
+  // Leaving the list out keeps who was present as recorded.
+  const present = isDrill && staffPresentIds !== undefined
+    ? await resolveDrillAttendees(clientId, deptId, staffPresentIds, id) : null;
+  if (present && "error" in present) return res.status(400).json({ error: present.error });
 
-  const [updated] = await db
-    .update(fireSafetyChecksTable)
-    .set({ ...parsed.data, ...(performer ?? {}), updatedAt: new Date() })
-    .where(and(eq(fireSafetyChecksTable.id, id), eq(fireSafetyChecksTable.clientId, clientId)))
-    .returning();
+  const before = isDrill ? (await listDrillAttendees(clientId, [id])).get(id) ?? [] : [];
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(fireSafetyChecksTable)
+      .set({ ...changes, ...(performer ?? {}), ...details, updatedAt: new Date() })
+      .where(and(eq(fireSafetyChecksTable.id, id), eq(fireSafetyChecksTable.clientId, clientId)))
+      .returning();
+    if (row && present) await saveDrillAttendees(tx, clientId, id, present.attendees);
+    return row;
+  });
 
   if (!updated) return res.status(404).json({ error: "Not found" });
-  await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: id, action: "updated", before: existing, after: updated });
-  res.json(updated);
+  const staffPresent = isDrill ? (await listDrillAttendees(clientId, [id])).get(id) ?? [] : [];
+  await appendAuditEvent(req, {
+    clientId, entityType: "fire_safety_check", entityId: id, action: "updated",
+    before: { ...existing, staffPresent: before }, after: { ...updated, staffPresent },
+  });
+  res.json({ ...updated, staffPresent });
 });
 
 // DELETE /api/fire-safety/:id
@@ -315,6 +585,246 @@ router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
 
   await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: id, action: "deleted", before: existing });
   res.status(204).end();
+});
+
+// ── Call points ───────────────────────────────────────────────────────────────
+// Managers list each site's manual call points once; weekly alarm tests pick
+// the one they used. Call points are archived rather than deleted so the
+// tests that name them keep their link (records are kept for five years).
+
+const callPointNameSchema = z.string().trim().min(1).max(200);
+const callPointLocationSchema = z.string().trim().max(200).nullable().optional()
+  .transform(value => value === undefined ? undefined : value || null);
+const createCallPointSchema = z.object({
+  siteId: z.number().int().positive().nullable(),
+  name: callPointNameSchema,
+  location: callPointLocationSchema,
+  sleepingArea: z.boolean().optional(),
+}).strict();
+const updateCallPointSchema = z.object({
+  name: callPointNameSchema.optional(),
+  location: callPointLocationSchema,
+  sleepingArea: z.boolean().optional(),
+  archived: z.boolean().optional(),
+}).strict();
+const orderCallPointsSchema = z.object({
+  siteId: z.number().int().positive().nullable(),
+  ids: z.array(z.number().int().positive()).min(1).max(1000),
+}).strict();
+
+/**
+ * Call points in rotation order, with when each was last used for an alarm
+ * test, which one is next in turn at its site, and which have not been tested
+ * within one full round (see fireCallPointRotation).
+ */
+async function listCallPoints(clientId: number, conditions: ReturnType<typeof eq>[]) {
+  const lastTest = db.select({
+    callPointId: fireSafetyChecksTable.callPointId,
+    lastTestedDate: sql<string>`max(${fireSafetyChecksTable.checkDate})`.as("last_tested_date"),
+  }).from(fireSafetyChecksTable)
+    .where(and(eq(fireSafetyChecksTable.clientId, clientId), eq(fireSafetyChecksTable.checkType, "alarm")))
+    .groupBy(fireSafetyChecksTable.callPointId)
+    .as("last_test");
+  const rows = await db.select({
+    id: fireCallPointsTable.id,
+    siteId: fireCallPointsTable.siteId,
+    name: fireCallPointsTable.name,
+    location: fireCallPointsTable.location,
+    sortOrder: fireCallPointsTable.sortOrder,
+    sleepingArea: fireCallPointsTable.sleepingArea,
+    archivedAt: fireCallPointsTable.archivedAt,
+    createdAt: fireCallPointsTable.createdAt,
+    lastTestedDate: lastTest.lastTestedDate,
+  }).from(fireCallPointsTable)
+    .leftJoin(lastTest, eq(lastTest.callPointId, fireCallPointsTable.id))
+    .where(and(eq(fireCallPointsTable.clientId, clientId), ...conditions))
+    .orderBy(fireCallPointsTable.sortOrder, fireCallPointsTable.name, fireCallPointsTable.id);
+  if (!rows.length) return [];
+
+  // The rotation is worked out over each site's whole list, whatever the
+  // filter, so a single call point still knows whether it is next in turn.
+  const siteIds = [...new Set(rows.map(row => row.siteId).filter((id): id is number => id != null))];
+  const siteCondition = siteIds.length
+    ? sql`(p.site_id IS NULL OR p.site_id IN (${sql.join(siteIds.map(id => sql`${id}`), sql`, `)}))`
+    : sql`p.site_id IS NULL`;
+  const [pointRows, latestRows, settingRows, profileRows, today] = await Promise.all([
+    db.execute(sql`
+      SELECT p.id, p.site_id, p.sort_order, p.archived_at IS NOT NULL AS archived,
+             (SELECT max(c.check_date)::text FROM fire_safety_checks c
+              WHERE c.client_id = p.client_id AND c.check_type = 'alarm' AND c.call_point_id = p.id) AS last_tested_date
+      FROM fire_call_points p WHERE p.client_id = ${clientId} AND ${siteCondition}
+    `),
+    db.execute(sql`
+      SELECT DISTINCT ON (p.site_id) p.site_id, c.call_point_id
+      FROM fire_safety_checks c JOIN fire_call_points p ON p.id = c.call_point_id AND p.client_id = c.client_id
+      WHERE c.client_id = ${clientId} AND c.check_type = 'alarm' AND ${siteCondition}
+      ORDER BY p.site_id, c.check_date DESC, c.id DESC
+    `),
+    db.select({ value: appSettingsTable.value }).from(appSettingsTable)
+      .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, "fire_frequency_days"))).limit(1),
+    siteIds.length ? db.select({ siteId: trackControlProfilesTable.siteId, profile: trackControlProfilesTable.profile })
+      .from(trackControlProfilesTable)
+      .where(and(eq(trackControlProfilesTable.clientId, clientId), eq(trackControlProfilesTable.module, FIRE_PROFILE_MODULE),
+        inArray(trackControlProfilesTable.siteId, siteIds)))
+      : Promise.resolve([]),
+    getAccountToday(clientId),
+  ]);
+  const profiles = new Map(profileRows.map(row => [row.siteId, row.profile]));
+  const lastPointBySite = new Map(((latestRows.rows ?? []) as { site_id: number | null; call_point_id: number }[])
+    .map(row => [row.site_id == null ? null : Number(row.site_id), Number(row.call_point_id)]));
+  const rotation = callPointRotation(
+    ((pointRows.rows ?? []) as { id: number; site_id: number | null; sort_order: number; archived: boolean; last_tested_date: string | null }[])
+      .map(row => ({
+        id: Number(row.id), siteId: row.site_id == null ? null : Number(row.site_id), sortOrder: Number(row.sort_order),
+        archived: Boolean(row.archived), lastTestedDate: row.last_tested_date ? String(row.last_tested_date).slice(0, 10) : null,
+      })),
+    lastPointBySite,
+    siteId => effectiveFireFrequencies(settingRows[0]?.value ?? null, siteId == null ? null : profiles.get(siteId) ?? null).alarm,
+    today,
+  );
+  return rows.map(row => ({
+    ...row,
+    lastTestedDate: row.lastTestedDate ? String(row.lastTestedDate).slice(0, 10) : null,
+    nextInTurn: rotation.nextIds.has(row.id),
+    notTestedThisRound: rotation.notTestedThisRound.has(row.id),
+  }));
+}
+
+/** The next free place at the end of a site's rotation. */
+async function nextSortOrder(clientId: number, siteId: number | null) {
+  const [row] = await db.select({ highest: sql<number>`coalesce(max(${fireCallPointsTable.sortOrder}), 0)` })
+    .from(fireCallPointsTable)
+    .where(and(eq(fireCallPointsTable.clientId, clientId),
+      siteId == null ? isNull(fireCallPointsTable.siteId) : eq(fireCallPointsTable.siteId, siteId)));
+  return Number(row?.highest ?? 0) + 1;
+}
+
+async function duplicateCallPoint(clientId: number, siteId: number | null, name: string, exceptId?: number) {
+  const [row] = await db.select({ id: fireCallPointsTable.id }).from(fireCallPointsTable).where(and(
+    eq(fireCallPointsTable.clientId, clientId),
+    siteId == null ? isNull(fireCallPointsTable.siteId) : eq(fireCallPointsTable.siteId, siteId),
+    isNull(fireCallPointsTable.archivedAt),
+    sql`lower(${fireCallPointsTable.name}) = lower(${name})`,
+    ...(exceptId ? [sql`${fireCallPointsTable.id} <> ${exceptId}`] : []),
+  )).limit(1);
+  return Boolean(row);
+}
+
+// GET /api/fire-safety/call-points?siteId=&includeArchived=true
+router.get("/call-points", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const noSite = req.query.siteId === "none";
+  const siteId = noSite ? null : parseSiteId(req.query.siteId);
+  if (siteId === undefined) return res.status(400).json({ error: "Invalid site" });
+  const deptId = getActiveDepartmentId(req);
+  const conditions = [];
+  if (siteId != null) {
+    const access = await checkSiteAccess(siteId, clientId, deptId);
+    if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
+    if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+    conditions.push(eq(fireCallPointsTable.siteId, siteId));
+  } else if (noSite) {
+    conditions.push(isNull(fireCallPointsTable.siteId));
+  } else if (deptId !== null) {
+    conditions.push(or(isNull(fireCallPointsTable.siteId), inArray(fireCallPointsTable.siteId, allowedSitesSubquery(clientId, deptId))) as any);
+  }
+  if (req.query.includeArchived !== "true") conditions.push(isNull(fireCallPointsTable.archivedAt) as any);
+  res.json(await listCallPoints(clientId, conditions));
+});
+
+// POST /api/fire-safety/call-points — added at the end of the site's rotation.
+router.post("/call-points", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const parsed = createCallPointSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Give the call point a name" });
+  const { siteId, name, location, sleepingArea } = parsed.data;
+  const access = await checkSiteAccess(siteId, clientId, getActiveDepartmentId(req));
+  if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  if (await duplicateCallPoint(clientId, siteId, name)) {
+    return res.status(409).json({ error: "This site already has a call point with that name" });
+  }
+  const [created] = await db.insert(fireCallPointsTable)
+    .values({
+      clientId, siteId, name, location: location ?? null, sleepingArea: sleepingArea ?? false,
+      sortOrder: await nextSortOrder(clientId, siteId), createdBy: req.currentUser!.id,
+    })
+    .returning();
+  await appendAuditEvent(req, { clientId, entityType: "fire_call_point", entityId: created.id, action: "created", after: created });
+  const [withRotation] = await listCallPoints(clientId, [eq(fireCallPointsTable.id, created.id)]);
+  res.status(201).json(withRotation ?? { ...created, lastTestedDate: null, nextInTurn: false, notTestedThisRound: true });
+});
+
+// PUT /api/fire-safety/call-points/order — the site's rotation order: every
+// call point still in use at the site, first to last. Archived ones keep their
+// old place and a restored one goes to the end.
+router.put("/call-points/order", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const parsed = orderCallPointsSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid order" });
+  const { siteId, ids } = parsed.data;
+  const access = await checkSiteAccess(siteId, clientId, getActiveDepartmentId(req));
+  if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  const siteCondition = siteId == null ? isNull(fireCallPointsTable.siteId) : eq(fireCallPointsTable.siteId, siteId);
+  const updated = await db.transaction(async (tx) => {
+    const current = await tx.select({ id: fireCallPointsTable.id, sortOrder: fireCallPointsTable.sortOrder })
+      .from(fireCallPointsTable)
+      .where(and(eq(fireCallPointsTable.clientId, clientId), siteCondition, isNull(fireCallPointsTable.archivedAt)))
+      .for("update");
+    const currentIds = new Set(current.map(row => row.id));
+    if (ids.length !== currentIds.size || new Set(ids).size !== ids.length || ids.some(id => !currentIds.has(id))) return null;
+    const before = Object.fromEntries(current.map(row => [row.id, row.sortOrder]));
+    for (const [index, id] of ids.entries()) {
+      if (before[id] === index + 1) continue;
+      await tx.update(fireCallPointsTable).set({ sortOrder: index + 1, updatedAt: new Date() })
+        .where(and(eq(fireCallPointsTable.id, id), eq(fireCallPointsTable.clientId, clientId)));
+    }
+    return { before, after: Object.fromEntries(ids.map((id, index) => [id, index + 1])) };
+  });
+  if (!updated) return res.status(409).json({ error: "The call point list has changed. Refresh and try again." });
+  await appendAuditEvent(req, {
+    clientId, entityType: "fire_call_point_order", entityId: siteId ?? 0, action: "updated",
+    before: { siteId, order: updated.before }, after: { siteId, order: updated.after },
+  });
+  res.json(await listCallPoints(clientId, [siteCondition as any, isNull(fireCallPointsTable.archivedAt) as any]));
+});
+
+// PUT /api/fire-safety/call-points/:id — rename, move, archive or restore. The
+// site is fixed: a call point at another site is a different call point.
+router.put("/call-points/:id", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(404).json({ error: "Not found" });
+  const parsed = updateCallPointSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  const [existing] = await db.select().from(fireCallPointsTable)
+    .where(and(eq(fireCallPointsTable.id, id), eq(fireCallPointsTable.clientId, clientId))).limit(1);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  if (await checkSiteAccess(existing.siteId, clientId, getActiveDepartmentId(req)) === "forbidden") {
+    return res.status(404).json({ error: "Not found" });
+  }
+  const name = parsed.data.name ?? existing.name;
+  const location = parsed.data.location === undefined ? existing.location : parsed.data.location;
+  const sleepingArea = parsed.data.sleepingArea ?? existing.sleepingArea;
+  const archivedAt = parsed.data.archived === undefined ? existing.archivedAt
+    : parsed.data.archived ? existing.archivedAt ?? new Date() : null;
+  if (!archivedAt && await duplicateCallPoint(clientId, existing.siteId, name, id)) {
+    return res.status(409).json({ error: "This site already has a call point with that name" });
+  }
+  // A restored call point rejoins the rotation at the end.
+  const sortOrder = existing.archivedAt && !archivedAt ? await nextSortOrder(clientId, existing.siteId) : existing.sortOrder;
+  const [updated] = await db.update(fireCallPointsTable)
+    .set({ name, location, sleepingArea, archivedAt, sortOrder, updatedAt: new Date() })
+    .where(and(eq(fireCallPointsTable.id, id), eq(fireCallPointsTable.clientId, clientId)))
+    .returning();
+  await appendAuditEvent(req, { clientId, entityType: "fire_call_point", entityId: id, action: "updated", before: existing, after: updated });
+  const [withRotation] = await listCallPoints(clientId, [eq(fireCallPointsTable.id, id)]);
+  res.json(withRotation ?? { ...updated, lastTestedDate: null, nextInTurn: false, notTestedThisRound: false });
 });
 
 // ── Template config ───────────────────────────────────────────────────────────
@@ -388,7 +898,13 @@ router.put("/config", requireAuth, denyViewers, async (req, res) => {
   if (updates.controlProfile !== undefined) {
     if (siteId == null) return res.status(400).json({ error: "A site is required for a control profile" });
     const profile = fireProfileSchema.safeParse(updates.controlProfile);
-    if (!profile.success) return res.status(400).json({ error: profile.error.flatten() });
+    if (!profile.success) {
+      const issue = profile.error.issues[0];
+      return res.status(400).json({
+        error: `Invalid control profile: ${issue?.path.join(".") || "profile"} — ${issue?.message ?? "invalid value"}`,
+        details: profile.error.flatten(),
+      });
+    }
     await db.insert(trackControlProfilesTable).values({
       clientId, siteId, module: FIRE_PROFILE_MODULE, profile: profile.data,
     }).onConflictDoUpdate({

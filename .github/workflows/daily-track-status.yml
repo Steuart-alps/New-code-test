@@ -1,0 +1,90 @@
+name: DailyTrack status checks
+
+# The status page's day grid and month calendar: expected checks follow the
+# client's services, failed history loads show a retryable error, and the
+# history route keeps tenants and departments apart. Path-filtered, so it
+# only spends Actions minutes when this area changes.
+on:
+  pull_request:
+    paths:
+      - "artifacts/compliance-tracker/src/pages/daily-track-status.tsx"
+      - "artifacts/compliance-tracker/src/lib/daily-track-month-status.ts"
+      - "artifacts/compliance-tracker/tests/daily-track-month-*"
+      - "artifacts/compliance-tracker/tests/browser/daily-track-month.*"
+      - "artifacts/api-server/src/routes/daily-track-status.ts"
+      - "artifacts/api-server/src/lib/dailyChecklistEntitlements.ts"
+      - "artifacts/api-server/src/lib/services.ts"
+      - "artifacts/api-server/tests/daily-checklist-entitlements.mjs"
+      - "artifacts/api-server/tests/daily-track-month-history.mjs"
+      - "artifacts/compliance-tracker/package.json"
+      - "artifacts/api-server/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/daily-track-status.yml"
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/compliance-tracker/src/pages/daily-track-status.tsx"
+      - "artifacts/compliance-tracker/src/lib/daily-track-month-status.ts"
+      - "artifacts/compliance-tracker/tests/daily-track-month-*"
+      - "artifacts/compliance-tracker/tests/browser/daily-track-month.*"
+      - "artifacts/api-server/src/routes/daily-track-status.ts"
+      - "artifacts/api-server/src/lib/dailyChecklistEntitlements.ts"
+      - "artifacts/api-server/src/lib/services.ts"
+      - "artifacts/api-server/tests/daily-checklist-entitlements.mjs"
+      - "artifacts/api-server/tests/daily-track-month-history.mjs"
+      - "artifacts/compliance-tracker/package.json"
+      - "artifacts/api-server/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/daily-track-status.yml"
+  workflow_dispatch:
+
+jobs:
+  daily-track-status:
+    name: Monthly checklist colours match the client's services
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Daily requirements by service
+        run: node artifacts/api-server/tests/daily-checklist-entitlements.mjs
+
+      - name: Month and day status calculations
+        run: pnpm --filter @workspace/compliance-tracker run test:daily-track-month-status
+
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Month calendar browser checks (failed loads, partial subscriptions)
+        run: pnpm --filter @workspace/compliance-tracker run test:daily-track-month-browser
+
+      # The fresh-schema runner starts a private cluster with initdb and
+      # pg_ctl, which ubuntu-latest ships (PostgreSQL 16) but not on PATH.
+      - name: Put PostgreSQL server tools on PATH
+        run: |
+          bin="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -n 1)"
+          if [ -z "$bin" ] || [ ! -x "$bin/initdb" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq postgresql
+            bin="$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -n 1)"
+          fi
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: History route isolation (production schema base)
+        run: pnpm --filter @workspace/api-server run test:daily-track-month-history:pushed

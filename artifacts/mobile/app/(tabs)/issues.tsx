@@ -69,6 +69,8 @@ export default function IssuesScreen() {
           <TouchableOpacity
             style={[styles.fab, { backgroundColor: '#ffffff' }]}
             onPress={() => router.push('/issues/new' as any)}
+            accessibilityRole="button"
+            accessibilityLabel="Report an issue"
           >
             <Feather name="plus" size={20} color={colors.navy} />
           </TouchableOpacity>

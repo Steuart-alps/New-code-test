@@ -58,8 +58,10 @@ export async function kitchenInspectionRegister(clientId: number, siteId: number
       AND check_date BETWEEN ${from}::date AND ${to}::date
     ORDER BY check_date, id LIMIT 10001`);
   add("probe-checks.csv", probes.map(row => ({ inspection_date: dateOf(row.check_date), ...row })));
+  // GreenTrack's greenkeeping shed checklists share the table; they are not kitchen records.
   const checklists = await load(sql`SELECT * FROM daily_checklists
     WHERE client_id = ${clientId} AND site_id = ${siteId}
+      AND checklist_type NOT LIKE 'greenkeeping%'
       AND check_date BETWEEN ${from}::date AND ${to}::date
     ORDER BY check_date, id LIMIT 10001`);
   add("daily-checklists.csv", checklists.map(row => ({ inspection_date: dateOf(row.check_date), ...row })));

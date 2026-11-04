@@ -10,6 +10,11 @@ export const feedbackReportsTable = pgTable("feedback_reports", {
   summary: text("summary").notNull(),
   details: text("details").notNull(),
   pagePath: text("page_path"),
+  // Optional screenshot: verified image copied to a tenant-owned key on submit.
+  screenshotObjectPath: text("screenshot_object_path"),
+  screenshotFileName: text("screenshot_file_name"),
+  // Web build (commit) the report was sent from, when known.
+  appVersion: text("app_version"),
   emailStatus: text("email_status").notNull().default("pending"),
   status: text("status").notNull().default("new"),
   internalNote: text("internal_note").notNull().default(""),

@@ -5,9 +5,10 @@ description: How the Expo app's native passkey sign-in fits the mandatory TOTP p
 
 ## Rule
 On mobile a passkey replaces the email and password only. `POST /api/auth/mobile-passkeys/authenticate`
-answers a verified passkey exactly like a correct password: a `pendingToken` for the unchanged
-`/auth/mobile-login/verify-totp` step, or `requires2faSetup` + the web setup link. It never issues a
-bearer. Mobile passkeys are discoverable and user-verified (UV required) because they stand in for the password.
+answers a verified passkey exactly like a correct password at `/auth/mobile-login`: a `pendingToken` for the
+unchanged `/auth/mobile-login/verify-totp` step when TOTP is enrolled, `requires2faSetup` + the web setup link
+when `isTwoFactorRequired`, otherwise `issueMobileSession` (both exported from auth.ts). Mobile passkeys are
+discoverable and user-verified (UV required) because they stand in for the password.
 
 ## How it works
 - Routes live in `api-server/src/routes/mobilePasskeys.ts` (not auth.ts). Bearer clients have no cookie
@@ -25,8 +26,8 @@ bearer. Mobile passkeys are discoverable and user-verified (UV required) because
   passkey button simply doesn't show there.
 
 ## Why
-The 2026-10 mandatory-TOTP policy forbids passkeys replacing the authenticator code; replacing the
-password with a phishing-resistant, user-verified passkey keeps two factors.
+Passkeys never replace the authenticator code where one is enrolled or required; replacing the
+password with a phishing-resistant, user-verified passkey keeps the same factors as a password sign-in.
 
 ## How to apply
 Native passkeys need an installed (EAS/dev) build, which reverses the Expo Go-only decision in

@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import * as XLSX from "@e965/xlsx";
 import { AppLayout } from "@/components/layout";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,8 +9,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Plus, Pencil, Trash2, Loader2, Search, UserCheck, UserX, Upload, FileSpreadsheet, X, Printer } from "lucide-react";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
+import { Users, Plus, Pencil, Trash2, Loader2, Search, UserCheck, UserX, Upload, Printer } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { RosterImportDialog } from "@/components/roster-import-dialog";
+import { DepartmentNameSelect } from "@/components/department-name-select";
 import { printHtmlDocument } from "@/lib/download";
 
 interface StaffMember {
@@ -35,14 +37,17 @@ interface Site { id: number; name: string; }
 const EMPTY_FORM = { name: "", externalPayrollId: "", jobTitle: "", department: "", email: "", siteId: "none", active: true };
 
 function StaffDialog({
-  open, onClose, onSaved, sites, editing,
+  open, onClose, onSaved, sites, editing, usedDepartments,
 }: {
   open: boolean; onClose: () => void; onSaved: () => void;
   sites: Site[]; editing: StaffMember | null;
+  /** Departments already on the roster, offered alongside the ones set up. */
+  usedDepartments: (string | null)[];
 }) {
   const { toast } = useToast();
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const workingSiteId = useWorkingSiteId();
 
   useEffect(() => {
     if (editing) {
@@ -56,7 +61,8 @@ function StaffDialog({
         active: editing.active,
       });
     } else {
-      setForm(EMPTY_FORM);
+      // A new staff member starts on the user's working site.
+      setForm({ ...EMPTY_FORM, siteId: workingSiteId ? String(workingSiteId) : "none" });
     }
   }, [editing, open]);
 
@@ -77,12 +83,12 @@ function StaffDialog({
         editing ? `/staff-roster/${editing.id}` : "/staff-roster",
         { method: editing ? "PATCH" : "POST", body: JSON.stringify(body) },
       );
-      if (!res.ok) throw new Error("Save failed");
+      if (!res.ok) throw new Error(await getApiErrorMessage(res, "Please try again."));
       toast({ title: editing ? "Staff member updated" : "Staff member added" });
       onSaved();
       onClose();
-    } catch {
-      toast({ title: "Save failed", variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Save failed", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -103,15 +109,9 @@ function StaffDialog({
             <Label>Payroll / workforce identifier <span className="text-muted-foreground text-xs">(recommended)</span></Label>
             <Input value={form.externalPayrollId} onChange={e => setForm(f => ({ ...f, externalPayrollId: e.target.value }))} placeholder="e.g. EMP-1042" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Job Title</Label>
-              <Input value={form.jobTitle} onChange={e => setForm(f => ({ ...f, jobTitle: e.target.value }))} placeholder="e.g. Chef" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Department</Label>
-              <Input value={form.department} onChange={e => setForm(f => ({ ...f, department: e.target.value }))} placeholder="e.g. Kitchen" />
-            </div>
+          <div className="space-y-1.5">
+            <Label>Job Title</Label>
+            <Input value={form.jobTitle} onChange={e => setForm(f => ({ ...f, jobTitle: e.target.value }))} placeholder="e.g. Chef" />
           </div>
           <div className="space-y-1.5">
             <Label>Email <span className="text-muted-foreground text-xs">(optional)</span></Label>
@@ -129,6 +129,17 @@ function StaffDialog({
               </Select>
             </div>
           )}
+          <div className="space-y-1.5">
+            <Label htmlFor="staff-department">Department</Label>
+            <DepartmentNameSelect
+              id="staff-department"
+              value={form.department}
+              onChange={department => setForm(f => ({ ...f, department }))}
+              siteId={form.siteId !== "none" ? Number(form.siteId) : null}
+              usedBefore={usedDepartments}
+              noneLabel="No department"
+            />
+          </div>
           {editing && (
             <div className="flex items-center gap-3">
               <button
@@ -152,270 +163,6 @@ function StaffDialog({
           <Button onClick={handleSave} disabled={!form.name.trim() || saving}>
             {saving && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />}
             {editing ? "Save Changes" : "Add Staff Member"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-interface ParsedStaff {
-  externalPayrollId: string;
-  name: string;
-  jobTitle: string | null;
-  department: string | null;
-  email: string | null;
-}
-
-function parseExcel(file: File): Promise<ParsedStaff[]> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target!.result as ArrayBuffer);
-        const wb = XLSX.read(data, { type: "array" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: "" });
-
-        // Normalise header names
-        const normalise = (k: string) => k.toLowerCase().replace(/[\s_-]/g, "");
-        const find = (row: Record<string, any>, ...keys: string[]) => {
-          const entry = Object.entries(row).find(([k]) => keys.includes(normalise(k)));
-          return entry ? String(entry[1]).trim() || null : null;
-        };
-
-        const members: ParsedStaff[] = rows
-          .map(row => ({
-            externalPayrollId: find(row, "payrollid", "employeeid", "staffid", "workforceid", "identifier") ?? "",
-            name:       find(row, "name", "fullname", "staffname", "employeename") ?? "",
-            jobTitle:   find(row, "jobtitle", "title", "role", "position", "job"),
-            department: find(row, "department", "dept", "team", "area", "division"),
-            email:      find(row, "email", "emailaddress", "mail"),
-          }))
-          .filter(m => m.name.length > 0 || m.externalPayrollId.length > 0);
-
-        resolve(members);
-      } catch (err) {
-        reject(err);
-      }
-    };
-    reader.onerror = () => reject(new Error("Failed to read file"));
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-function parsePasteText(text: string): ParsedStaff[] {
-  return text.split("\n")
-    .map(l => l.trim()).filter(Boolean)
-    .map(line => {
-      const [externalPayrollId, name, jobTitle, department, email] = line.split(",").map(s => s.trim());
-      return { externalPayrollId: externalPayrollId || "", name: name || "", jobTitle: jobTitle || null, department: department || null, email: email || null };
-    })
-    .filter(m => m.name);
-}
-
-function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean; onClose: () => void; onImported: () => void; sites: Site[] }) {
-  const { toast } = useToast();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [mode, setMode] = useState<"excel" | "paste">("excel");
-  const [text, setText] = useState("");
-  const [excelFile, setExcelFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<ParsedStaff[]>([]);
-  const [siteId, setSiteId] = useState("none");
-  const [importing, setImporting] = useState(false);
-  const [parsing, setParsing] = useState(false);
-  const [reconciliation, setReconciliation] = useState<{ total: number; created: number; updated: number; reactivated: number; unchanged: number; deactivated: number; matchedByEmail: number; matchedByName: number } | null>(null);
-
-  function reset() {
-    setText(""); setExcelFile(null); setPreview([]);
-    setSiteId("none"); setMode("excel"); setReconciliation(null);
-  }
-
-  async function handleFileChange(file: File) {
-    setExcelFile(file);
-    setParsing(true);
-    try {
-      const members = await parseExcel(file);
-      setPreview(members);
-      setReconciliation(null);
-    } catch {
-      toast({ title: "Could not read file", description: "Make sure it is a valid .xlsx or .xls file.", variant: "destructive" });
-      setExcelFile(null);
-    } finally {
-      setParsing(false);
-    }
-  }
-
-  const members: ParsedStaff[] = mode === "excel" ? preview : parsePasteText(text);
-  const canImport = members.length > 0 && members.every(member => member.externalPayrollId.trim() && member.name.trim()) && !importing;
-
-  async function handleImport() {
-    if (!members.length) return;
-    setImporting(true);
-    try {
-      const body = {
-        rows: members.map(m => ({ ...m, siteId: siteId !== "none" ? Number(siteId) : null })),
-        siteId: siteId !== "none" ? Number(siteId) : null,
-        preview: !reconciliation,
-      };
-      const res = await apiFetch("/staff-roster/reconcile", { method: "POST", body: JSON.stringify(body) });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Roster reconciliation failed");
-      if (!reconciliation) {
-        setReconciliation(data.summary);
-        return;
-      }
-      toast({ title: "Monthly roster updated", description: `${data.summary.created} added, ${data.summary.updated + data.summary.reactivated} updated, ${data.summary.deactivated} made inactive.` });
-      onImported();
-      reset();
-      onClose();
-    } catch (error) {
-      toast({ title: "Roster update failed", description: error instanceof Error ? error.message : "Please check the file and try again.", variant: "destructive" });
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={v => { if (!v && !importing) { reset(); onClose(); } }}>
-      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Upload className="w-4 h-4" /> Replace monthly staff roster</DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-4 py-1">
-          {/* Mode tabs */}
-          <div className="flex rounded-lg border overflow-hidden text-sm">
-            <button
-              className={cn("flex-1 py-2 font-medium transition-colors flex items-center justify-center gap-1.5",
-                mode === "excel" ? "bg-primary text-primary-foreground" : "bg-muted/40 text-muted-foreground hover:text-foreground")}
-              onClick={() => setMode("excel")}
-            >
-              <FileSpreadsheet className="w-4 h-4" /> Upload Excel / CSV
-            </button>
-            <button
-              className={cn("flex-1 py-2 font-medium transition-colors",
-                mode === "paste" ? "bg-primary text-primary-foreground" : "bg-muted/40 text-muted-foreground hover:text-foreground")}
-              onClick={() => setMode("paste")}
-            >
-              Paste a list
-            </button>
-          </div>
-
-          {mode === "excel" ? (
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                 Upload the complete current roster as Excel or CSV. Required columns: <strong>Payroll ID</strong> and <strong>Name</strong>. Optional columns: Job Title, Department and Email.
-              </p>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) handleFileChange(f); }}
-              />
-              {!excelFile ? (
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full border-2 border-dashed rounded-lg p-6 text-center hover:border-primary/50 hover:bg-muted/20 transition-colors"
-                >
-                  <FileSpreadsheet className="w-8 h-8 mx-auto mb-2 text-muted-foreground opacity-50" />
-                  <p className="text-sm font-medium text-muted-foreground">Click to choose an Excel or CSV file</p>
-                </button>
-              ) : (
-                <div className="flex items-center gap-3 p-3 border rounded-lg bg-muted/20">
-                  <FileSpreadsheet className="w-5 h-5 text-green-600 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{excelFile.name}</p>
-                    {parsing ? (
-                      <p className="text-xs text-muted-foreground flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Reading…</p>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">{preview.length} staff member{preview.length === 1 ? "" : "s"} found</p>
-                    )}
-                  </div>
-                  <button onClick={() => { setExcelFile(null); setPreview([]); if (fileInputRef.current) fileInputRef.current.value = ""; }}
-                    className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-
-              {/* Preview table */}
-              {preview.length > 0 && (
-                <div className="border rounded-lg overflow-hidden max-h-52 overflow-y-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-muted/40 sticky top-0">
-                      <tr>
-                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Name</th>
-                         <th className="text-left px-3 py-2 font-medium text-muted-foreground">Payroll ID</th>
-                        <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden sm:table-cell">Job Title</th>
-                        <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden sm:table-cell">Department</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {preview.slice(0, 50).map((m, i) => (
-                        <tr key={i}>
-                          <td className="px-3 py-1.5 font-medium">{m.name}</td>
-                           <td className="px-3 py-1.5 text-muted-foreground">{m.externalPayrollId || "Missing"}</td>
-                          <td className="px-3 py-1.5 text-muted-foreground hidden sm:table-cell">{m.jobTitle ?? "—"}</td>
-                          <td className="px-3 py-1.5 text-muted-foreground hidden sm:table-cell">{m.department ?? "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {preview.length > 50 && <p className="text-xs text-center text-muted-foreground py-2">…and {preview.length - 50} more</p>}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                One staff member per line: payroll ID, name, then optional job title, department and email.
-              </p>
-              <div className="bg-muted/40 rounded-md p-3 text-xs text-muted-foreground font-mono space-y-0.5">
-                <p>EMP-1001, John Smith</p>
-                <p>EMP-1002, Jane Doe, Chef, Kitchen</p>
-                <p>EMP-1003, Bob Jones, Manager, Front of House, bob@example.com</p>
-              </div>
-              <textarea
-                className="w-full border rounded-md p-3 text-sm font-mono resize-y min-h-[120px] focus:outline-none focus:ring-2 focus:ring-ring"
-                placeholder={"EMP-1001, John Smith\nEMP-1002, Jane Doe, Chef, Kitchen\n..."}
-                value={text}
-                onChange={e => { setText(e.target.value); setReconciliation(null); }}
-              />
-            </div>
-          )}
-
-          {sites.length > 0 && (
-            <div className="space-y-1.5">
-              <Label>Assign all to site <span className="text-muted-foreground text-xs">(optional)</span></Label>
-              <Select value={siteId} onValueChange={value => { setSiteId(value); setReconciliation(null); }}>
-                <SelectTrigger><SelectValue placeholder="All sites" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">All sites</SelectItem>
-                  {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-            This is a complete replacement for {siteId === "none" ? "the whole current roster" : "the selected site's current roster"}. Staff missing from the file will be made inactive, never deleted. Their training and compliance history will remain.
-          </div>
-          {members.some(member => !member.externalPayrollId.trim() || !member.name.trim()) && <p className="text-sm text-destructive">Every row needs both a payroll identifier and a name.</p>}
-          {reconciliation && <div className="grid grid-cols-2 gap-2 rounded-md border bg-muted/30 p-3 text-sm sm:grid-cols-4">
-            <div><strong>{reconciliation.created}</strong><br /><span className="text-muted-foreground">New</span></div>
-            <div><strong>{reconciliation.updated}</strong><br /><span className="text-muted-foreground">Updated</span></div>
-            <div><strong>{reconciliation.reactivated}</strong><br /><span className="text-muted-foreground">Reactivated</span></div>
-            <div><strong>{reconciliation.deactivated}</strong><br /><span className="text-muted-foreground">Made inactive</span></div>
-            {(reconciliation.matchedByEmail + reconciliation.matchedByName) > 0 && <p className="col-span-2 text-xs text-muted-foreground sm:col-span-4">{reconciliation.matchedByEmail + reconciliation.matchedByName} existing staff matched safely and will keep their history.</p>}
-          </div>}
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => { reset(); onClose(); }} disabled={importing}>Cancel</Button>
-          <Button onClick={handleImport} disabled={!canImport}>
-            {importing && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />}
-            {reconciliation ? "Confirm monthly replacement" : `Preview ${members.length > 0 ? `${members.length} staff` : "roster"}`}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -586,12 +333,12 @@ ${rows.map(s => `<tr>
             Manage your staff list — used for document acknowledgements and training records
           </p>
         </div>
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <Button variant="outline" onClick={handlePrintRoster} className="gap-1.5">
             <Printer className="w-4 h-4" /> Print Roster
           </Button>
           <Button variant="outline" onClick={() => setBulkOpen(true)} className="gap-1.5">
-            <Upload className="w-4 h-4" /> Bulk Import
+            <Upload className="w-4 h-4" /> Import spreadsheet
           </Button>
           <Button variant="outline" onClick={generateKioskLink} disabled={generatingKioskToken} className="gap-1.5">
             {generatingKioskToken && <Loader2 className="w-4 h-4 animate-spin" />} Open kiosk
@@ -644,13 +391,13 @@ ${rows.map(s => `<tr>
               {staff.length === 0 ? "No staff added yet" : "No staff match your search"}
             </p>
             <p className="text-sm text-muted-foreground mt-1">
-              {staff.length === 0 ? "Add staff members individually or use Bulk Import to paste a list." : "Try a different search."}
+              {staff.length === 0 ? "Add staff members individually or import a spreadsheet." : "Try a different search."}
             </p>
           </div>
           {staff.length === 0 && (
             <div className="flex gap-2 mt-1">
               <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)} className="gap-1.5">
-                <Upload className="w-3.5 h-3.5" /> Bulk Import
+                <Upload className="w-3.5 h-3.5" /> Import spreadsheet
               </Button>
               <Button size="sm" onClick={() => { setEditing(null); setDialogOpen(true); }} className="gap-1.5">
                 <Plus className="w-3.5 h-3.5" /> Add Staff
@@ -712,8 +459,9 @@ ${rows.map(s => `<tr>
         </div>
       )}
 
-      <StaffDialog open={dialogOpen} onClose={() => { setDialogOpen(false); setEditing(null); }} onSaved={load} sites={sites} editing={editing} />
-      <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onImported={load} sites={sites} />
+      <StaffDialog open={dialogOpen} onClose={() => { setDialogOpen(false); setEditing(null); }} onSaved={load} sites={sites} editing={editing}
+        usedDepartments={staff.map(s => s.department)} />
+      <RosterImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onImported={load} sites={sites} />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null); }}>
         <AlertDialogContent>

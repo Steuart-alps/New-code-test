@@ -1,5 +1,6 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { submittedDailyChecklists } from "./dailyChecklistCompletion";
 
 /** The unfiltered /reports/compliance calculation, also used by monthly email. */
 export async function getUnscopedComplianceReport(clientId: number, from: string, to: string) {
@@ -11,11 +12,8 @@ export async function getUnscopedComplianceReport(clientId: number, from: string
              COUNT(DISTINCT dc.check_date)::int AS submitted
       FROM sites s
       CROSS JOIN (VALUES ('am'), ('pm')) AS t(checklist_type)
-      LEFT JOIN daily_checklists dc ON dc.site_id = s.id
-        AND dc.client_id = ${clientId}
-        AND dc.checklist_type = t.checklist_type
-        AND dc.check_date BETWEEN ${from} AND ${to}
-        AND dc.submitted_at IS NOT NULL
+      LEFT JOIN ${submittedDailyChecklists(clientId, from, to)} dc
+        ON dc.site_id = s.id AND dc.period = t.checklist_type
       WHERE s.client_id = ${clientId}
       GROUP BY s.id, s.name, t.checklist_type
       ORDER BY s.name, t.checklist_type
@@ -27,6 +25,7 @@ export async function getUnscopedComplianceReport(clientId: number, from: string
         UNION ALL SELECT 'LegionellaTrack', site_id FROM legionella_checks WHERE client_id = ${clientId} AND check_date BETWEEN ${from} AND ${to}
         UNION ALL SELECT 'TubTrack', site_id FROM hot_tub_checks WHERE client_id = ${clientId} AND check_date BETWEEN ${from} AND ${to}
         UNION ALL SELECT 'TreeTrack', site_id FROM tree_inspections WHERE client_id = ${clientId} AND check_date BETWEEN ${from} AND ${to}
+        UNION ALL SELECT 'COSHHTrack', site_id FROM coshh_checks WHERE client_id = ${clientId} AND deleted_at IS NULL AND check_date BETWEEN ${from} AND ${to}
         UNION ALL SELECT 'PremisesTrack', site_id FROM premises_inspections WHERE client_id = ${clientId} AND inspection_date BETWEEN ${from} AND ${to}
         UNION ALL SELECT 'PestTrack', site_id FROM pest_visits WHERE client_id = ${clientId} AND visit_date BETWEEN ${from} AND ${to}
         UNION ALL SELECT 'IncidentTrack', site_id FROM incidents WHERE client_id = ${clientId} AND incident_date BETWEEN ${from} AND ${to} AND site_id IS NOT NULL

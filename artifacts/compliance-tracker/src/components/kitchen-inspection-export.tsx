@@ -20,6 +20,7 @@ export function KitchenInspectionExport({ siteId }: { siteId: number | null }) {
     return () => { generation.current++; controller.current?.abort(); };
   }, [siteId, activeClientId, user?.id]);
   if (user?.role !== "client_admin" && user?.role !== "consultant"
+    && user?.role !== "client_manager"
     && !(user?.role === "client_staff" && user.isDepartmentManager)) return null;
   async function download() {
     if (siteId === null || !from || !to || from > to) return;
@@ -46,7 +47,7 @@ export function KitchenInspectionExport({ siteId }: { siteId: number | null }) {
     } finally { if (current === generation.current) setBusy(false); }
   }
   return <section className="rounded border bg-card p-4 space-y-3">
-    <h2 className="font-medium">KitchenTrack inspection register</h2>
+    <h2 className="font-bold">KitchenTrack inspection register</h2>
     <p className="text-sm text-muted-foreground">Download this site’s temperatures, weekly reviews, probe checks, sign-offs, failures and corrective actions as a ZIP of CSV files. Dates are inclusive; later remediation is grouped with its original failed diary.</p>
     <div className="flex flex-wrap items-end gap-3">
       <label className="text-sm">From<Input aria-label="Inspection start date" type="date" value={from} disabled={busy} onChange={e => setFrom(e.target.value)} /></label>

@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { getCheckAlerts } from "../lib/checkReminders";
+import { visibleSiteIdsSql } from "../lib/departmentSites";
 
 const router = Router();
 
@@ -14,8 +15,7 @@ router.get("/check-reminders", requireAuth, async (req, res) => {
   try {
     const departmentId = getActiveDepartmentId(req);
     const accessibleSiteIds = departmentId == null ? null :
-      (await db.execute(sql`SELECT id FROM sites WHERE client_id = ${clientId}
-        AND (department_id IS NULL OR department_id = ${departmentId})`)).rows.map(row => Number(row.id));
+      (await db.execute(visibleSiteIdsSql(clientId, departmentId))).rows.map(row => Number(row.id));
     const alerts = await getCheckAlerts(clientId, { accessibleSiteIds });
     return res.json(alerts);
   } catch (err) {

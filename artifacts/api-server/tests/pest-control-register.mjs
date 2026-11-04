@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promoteToConsultant } from "./consultant-account.mjs";
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 
@@ -17,12 +18,12 @@ function extractPdfText(pdf) {
   return text;
 }
 
-function session() {
+function session(defaultHeaders = {}) {
   let cookie = "";
   return async (method, path, body) => {
     const response = await fetch(`${BASE}${path}`, {
       method,
-      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
+      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}), ...defaultHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const setCookie = response.headers.get("set-cookie");
@@ -37,7 +38,8 @@ function session() {
 }
 
 async function createManager() {
-  const request = session();
+  // The manager deliberately records past visits, which an owner may do with a reason.
+  const request = session({ "X-Override-Reason": encodeURIComponent("Pest register fixture: past visit") });
   const stamp = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   const email = `pest-register-${stamp}@test.local`;
   const registration = await request("POST", "/auth/register", {
@@ -49,12 +51,17 @@ async function createManager() {
   assert.ok(registration.data.verificationToken);
   assert.equal((await request("GET", `/auth/verify-email?token=${encodeURIComponent(registration.data.verificationToken)}`)).status, 200);
   assert.equal((await request("POST", "/auth/login", { email, password: "password-123" })).status, 200);
+  // A consultant, so the suite can add a second business and select it.
+  promoteToConsultant(email);
   return { request, stamp };
 }
 
 const { request, stamp } = await createManager();
+// Visits that this suite deletes use today's date so they stay inside the
+// 24-hour correction window however far the calendar moves on.
+const today = new Date().toISOString().slice(0, 10);
 const ownVisit = await request("POST", "/pest-track/visits", {
-  visitDate: "2026-08-01",
+  visitDate: today,
   contractorName: "Wrong Tenant Contractor",
   areasInspected: "Wrong tenant area",
 });
@@ -72,7 +79,7 @@ assert.ok([200, 201].includes(client.status));
 const selectedClientId = client.data.id;
 
 const foreignVisit = await request("POST", `/pest-track/visits?clientId=${selectedClientId}`, {
-  visitDate: "2026-08-02",
+  visitDate: today,
   contractorName: "Selected Tenant Contractor",
 });
 assert.equal(foreignVisit.status, 201);
@@ -87,6 +94,9 @@ assert.equal(emptyPdf.status, 200);
 assert.equal(emptyPdf.contentType, "application/pdf");
 assert.match(extractPdfText(emptyPdf.data), /Contractor visits \(0\)/);
 
+// Intentionally fixed dates: these register rows are only created and then
+// read back from the PDF, whose text is asserted below (e.g. "Next visit").
+// Keep them fixed so the expected output stays exact.
 for (let index = 0; index < 26; index += 1) {
   const visit = await request("POST", `/pest-track/visits?clientId=${selectedClientId}`, {
     visitDate: `2026-08-${String((index % 26) + 1).padStart(2, "0")}`,

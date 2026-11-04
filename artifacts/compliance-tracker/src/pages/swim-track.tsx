@@ -1,6 +1,8 @@
 import { useState, useMemo, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
+import { useRecordMedia } from "@/components/record-media";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { RequiredRecordPhotoEvidence, useNewRecordPhotoEvidence } from "@/components/required-record-photo-evidence";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
@@ -26,6 +28,9 @@ import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { getApiErrorMessage } from "@/lib/api";
+import { camelCaseRows } from "@/lib/camel-case-rows";
+import { sortedEntries } from "@/lib/sort-options";
+import { RecordSignedBy } from "@/components/record-signature";
 
 function useSwimTrackApi() {
   const request = useActiveClientApi();
@@ -169,10 +174,11 @@ function SessionDialog({
 }) {
   const { toast } = useToast();
   const apiFetch = useSwimTrackApi();
+  const workingSiteId = useWorkingSiteId();
   const photoEvidence = useNewRecordPhotoEvidence("swim_session", open && !session);
   const today = new Date().toISOString().split("T")[0];
   const blank = {
-     siteId: "", sessionDate: today, sessionType: "public_swim", lifeguardName: "", lifeguardRosterId: null as number | null,
+     siteId: workingSiteId ? String(workingSiteId) : "", sessionDate: today, sessionType: "public_swim", lifeguardName: "", lifeguardRosterId: null as number | null,
     openTime: "", closeTime: "", maxBathers: "", batherCountPeak: "",
     preSessionResult: "pass", preSessionNotes: "", poolClosed: false,
     closureReason: "", notes: "",
@@ -180,6 +186,7 @@ function SessionDialog({
   const [form, setForm] = useState(blank);
   const [preSessionResultChanged, setPreSessionResultChanged] = useState(false);
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("swim_session", { disabled: saving });
 
   const reset = () => {
     setPreSessionResultChanged(false);
@@ -222,11 +229,12 @@ function SessionDialog({
       if (session) {
         await apiFetch(`/swim-track/sessions/${session.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/swim-track/sessions", {
+        const created = await apiFetch("/swim-track/sessions", {
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
         photoEvidence.consume();
+        await media.attach(created?.id);
       }
       toast({ title: session ? "Session updated" : "Session logged" });
       onSaved(); onClose();
@@ -237,7 +245,7 @@ function SessionDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); }}>
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); media.clear(); }}>
         <DialogHeader><DialogTitle>{session ? "Edit Session" : "Log Pool Session"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-1 max-h-[70vh] overflow-y-auto pr-1">
           <div className="grid grid-cols-2 gap-3">
@@ -251,7 +259,7 @@ function SessionDialog({
               <Select value={form.sessionType} onValueChange={v => setForm(f => ({ ...f, sessionType: v }))}>
                 <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(SESSION_TYPE_LABELS).map(([v, l]) => (
+                  {sortedEntries(SESSION_TYPE_LABELS).map(([v, l]) => (
                     <SelectItem key={v} value={v}>{l}</SelectItem>
                   ))}
                 </SelectContent>
@@ -334,6 +342,7 @@ function SessionDialog({
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
           {!session && <RequiredRecordPhotoEvidence evidence={photoEvidence} />}
+          {session ? <CheckPhotoUploader entityType="swim_session" entityId={session.id} /> : media.picker}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
@@ -354,15 +363,17 @@ function SurveillanceDialog({
 }) {
   const { toast } = useToast();
   const apiFetch = useSwimTrackApi();
+  const workingSiteId = useWorkingSiteId();
   const photoEvidence = useNewRecordPhotoEvidence("swim_surveillance_check", open && !check);
   const today = new Date().toISOString().split("T")[0];
   const now = new Date().toTimeString().slice(0, 5);
   const blank = {
-    siteId: "", checkDate: today, checkTime: now, batherCount: "",
+    siteId: workingSiteId ? String(workingSiteId) : "", checkDate: today, checkTime: now, batherCount: "",
     scanCompleted: true, observations: "", checkedBy: "", checkedByRosterId: null as number | null, result: "pass",
   };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("swim_surveillance_check", { disabled: saving });
 
   const reset = () => setForm(check ? {
     siteId: check.siteId ? String(check.siteId) : "",
@@ -390,11 +401,12 @@ function SurveillanceDialog({
       if (check) {
         await apiFetch(`/swim-track/surveillance/${check.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/swim-track/surveillance", {
+        const created = await apiFetch("/swim-track/surveillance", {
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
         photoEvidence.consume();
+        await media.attach(created?.id);
       }
       toast({ title: check ? "Check updated" : "Surveillance check logged" });
       onSaved(); onClose();
@@ -405,7 +417,7 @@ function SurveillanceDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); }}>
+      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); media.clear(); }}>
         <DialogHeader><DialogTitle>{check ? "Edit Surveillance Check" : "Log Surveillance Check"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-1">
           <div className="grid grid-cols-2 gap-3">
@@ -455,6 +467,7 @@ function SurveillanceDialog({
               placeholder="Anything to note during this surveillance check…" />
           </div>
           {!check && <RequiredRecordPhotoEvidence evidence={photoEvidence} />}
+          {check ? <CheckPhotoUploader entityType="swim_surveillance_check" entityId={check.id} /> : media.picker}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
@@ -475,12 +488,14 @@ function FirstAidDialog({
 }) {
   const { toast } = useToast();
   const apiFetch = useSwimTrackApi();
+  const workingSiteId = useWorkingSiteId();
   const photoEvidence = useNewRecordPhotoEvidence("swim_first_aid_check", open && !check);
   const today = new Date().toISOString().split("T")[0];
   const blankItems = Object.fromEntries(FIRST_AID_ITEMS.map(i => [i.key, true]));
-  const blank = { siteId: "", checkDate: today, checkedBy: "", checkedByRosterId: null as number | null, defectsFound: "", notes: "", ...blankItems };
+  const blank = { siteId: workingSiteId ? String(workingSiteId) : "", checkDate: today, checkedBy: "", checkedByRosterId: null as number | null, defectsFound: "", notes: "", ...blankItems };
   const [form, setForm] = useState<Record<string, any>>(blank);
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("swim_first_aid_check", { disabled: saving });
 
   const reset = () => setForm(check ? {
     siteId: check.siteId ? String(check.siteId) : "",
@@ -505,11 +520,12 @@ function FirstAidDialog({
       if (check) {
         await apiFetch(`/swim-track/first-aid/${check.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/swim-track/first-aid", {
+        const created = await apiFetch("/swim-track/first-aid", {
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
         photoEvidence.consume();
+        await media.attach(created?.id);
       }
       toast({ title: check ? "Check updated" : "First-aid check saved" });
       onSaved(); onClose();
@@ -520,7 +536,7 @@ function FirstAidDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); }}>
+      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); media.clear(); }}>
         <DialogHeader><DialogTitle>{check ? "Edit First-Aid Check" : "First-Aid Readiness Check"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-1">
           <div className="grid grid-cols-2 gap-3">
@@ -573,6 +589,7 @@ function FirstAidDialog({
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
           {!check && <RequiredRecordPhotoEvidence evidence={photoEvidence} />}
+          {check ? <CheckPhotoUploader entityType="swim_first_aid_check" entityId={check.id} /> : media.picker}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
@@ -593,15 +610,17 @@ function IncidentDialog({
 }) {
   const { toast } = useToast();
   const apiFetch = useSwimTrackApi();
+  const workingSiteId = useWorkingSiteId();
   const photoEvidence = useNewRecordPhotoEvidence("swim_incident", open && !incident);
   const today = new Date().toISOString().split("T")[0];
   const blank = {
-    siteId: "", incidentDate: today, incidentTime: "", incidentType: "near_miss", severity: "low",
+    siteId: workingSiteId ? String(workingSiteId) : "", incidentDate: today, incidentTime: "", incidentType: "near_miss", severity: "low",
     personsInvolved: "", description: "", actionTaken: "", reportedTo: "",
     reportedDate: "", outcome: "", notes: "",
   };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("swim_incident", { disabled: saving });
 
   const reset = () => setForm(incident ? {
     siteId: incident.siteId ? String(incident.siteId) : "",
@@ -633,11 +652,12 @@ function IncidentDialog({
       if (incident) {
         await apiFetch(`/swim-track/incidents/${incident.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/swim-track/incidents", {
+        const created = await apiFetch("/swim-track/incidents", {
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
         photoEvidence.consume();
+        await media.attach(created?.id);
       }
       toast({ title: incident ? "Incident updated" : "Incident logged" });
       onSaved(); onClose();
@@ -648,7 +668,7 @@ function IncidentDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); }}>
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); media.clear(); }}>
         <DialogHeader><DialogTitle>{incident ? "Edit Incident" : "Log Incident / Near Miss"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-1 max-h-[70vh] overflow-y-auto pr-1">
           <div className="grid grid-cols-2 gap-3">
@@ -667,7 +687,7 @@ function IncidentDialog({
               <Select value={form.incidentType} onValueChange={v => setForm(f => ({ ...f, incidentType: v }))}>
                 <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(INCIDENT_TYPE_LABELS).map(([v, l]) => (
+                  {sortedEntries(INCIDENT_TYPE_LABELS).map(([v, l]) => (
                     <SelectItem key={v} value={v}>{l}</SelectItem>
                   ))}
                 </SelectContent>
@@ -738,6 +758,7 @@ function IncidentDialog({
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
           {!incident && <RequiredRecordPhotoEvidence evidence={photoEvidence} />}
+          {incident ? <CheckPhotoUploader entityType="swim_incident" entityId={incident.id} /> : media.picker}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
@@ -785,22 +806,22 @@ export default function SwimTrackPage() {
   });
   const { data: sessions = [], isLoading: sessionsLoading } = useQuery({
     queryKey: ["swim-sessions", user?.id, activeClientId],
-    queryFn: () => apiFetch<SwimSession[]>("/swim-track/sessions"),
+    queryFn: () => apiFetch("/swim-track/sessions").then(camelCaseRows<SwimSession>),
     enabled: activeTab === "sessions",
   });
   const { data: surveillance = [], isLoading: surveillanceLoading } = useQuery({
     queryKey: ["swim-surveillance", user?.id, activeClientId],
-    queryFn: () => apiFetch<SurveillanceCheck[]>("/swim-track/surveillance"),
+    queryFn: () => apiFetch("/swim-track/surveillance").then(camelCaseRows<SurveillanceCheck>),
     enabled: activeTab === "surveillance",
   });
   const { data: firstAidChecks = [], isLoading: firstAidLoading } = useQuery({
     queryKey: ["swim-first-aid", user?.id, activeClientId],
-    queryFn: () => apiFetch<FirstAidCheck[]>("/swim-track/first-aid"),
+    queryFn: () => apiFetch("/swim-track/first-aid").then(camelCaseRows<FirstAidCheck>),
     enabled: activeTab === "first-aid",
   });
   const { data: incidents = [], isLoading: incidentsLoading } = useQuery({
     queryKey: ["swim-incidents", user?.id, activeClientId],
-    queryFn: () => apiFetch<Incident[]>("/swim-track/incidents"),
+    queryFn: () => apiFetch("/swim-track/incidents").then(camelCaseRows<Incident>),
     enabled: activeTab === "incidents",
   });
 
@@ -1038,6 +1059,7 @@ export default function SwimTrackPage() {
                             : <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Open</span>}
                         </td>
                         <td className="py-2 px-2">
+                          <RecordSignedBy recordType="swim_session" recordId={s.id} compact className="mb-1" />
                           <CheckPhotoUploader entityType="swim_session" entityId={s.id}
                             required={photoRequirements.swim_session?.required ?? false}
                             minPhotos={photoRequirements.swim_session?.minPhotos ?? 1} compact />
@@ -1116,6 +1138,7 @@ export default function SwimTrackPage() {
                           {c.observations ?? "—"}
                         </td>
                         <td className="py-2 px-2">
+                          <RecordSignedBy recordType="swim_surveillance_check" recordId={c.id} compact className="mb-1" />
                           <CheckPhotoUploader entityType="swim_surveillance_check" entityId={c.id}
                             required={photoRequirements.swim_surveillance_check?.required ?? false}
                             minPhotos={photoRequirements.swim_surveillance_check?.minPhotos ?? 1} compact />
@@ -1213,6 +1236,7 @@ export default function SwimTrackPage() {
                                 </span>}
                           </td>
                           <td className="py-2 px-2">
+                            <RecordSignedBy recordType="swim_first_aid_check" recordId={f.id} compact className="mb-1" />
                             <CheckPhotoUploader entityType="swim_first_aid_check" entityId={f.id}
                               required={photoRequirements.swim_first_aid_check?.required ?? false}
                               minPhotos={photoRequirements.swim_first_aid_check?.minPhotos ?? 1} compact />

@@ -151,6 +151,8 @@ const COMPLETED_WORK_RULES: readonly CompletedWorkRule[] = [
   [/^\/legionella$/, ["legionellatrack"], "check_completed"],
   [/^\/hot-tub$/, ["hottubtrack"], "check_completed"],
   [/^\/tree-track$/, ["treetrack"], "check_completed"],
+  [/^\/coshh-track\/checks$/, ["coshhtrack"], "check_completed"],
+  [/^\/coshh-track\/assessments$/, ["coshhtrack"], "record_saved"],
   [/^\/premises-track$/, ["premisestrack"], "check_completed"],
   [/^\/pool-track$/, ["pooltrack", "aquatrack"], "check_completed"],
   [/^\/swim-track\/surveillance$/, ["swimtrack", "aquatrack"], "check_completed"],

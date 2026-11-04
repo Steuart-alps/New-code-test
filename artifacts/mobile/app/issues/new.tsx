@@ -24,6 +24,7 @@ import { useColors } from '@/hooks/useColors';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { pendingIssueUploadKey, RecoveryIdentity } from '@/lib/fixTrackRecovery';
+import { localIsoDate } from '@/components/date-stepper-logic';
 
 interface Site {
   id: number;
@@ -268,7 +269,7 @@ export default function NewIssueScreen() {
       priority,
       location: location.trim(),
       reportedBy: user?.name ?? 'Mobile user',
-      reportedDate: new Date().toISOString().slice(0, 10),
+      reportedDate: localIsoDate(),
       ...(siteId ? { siteId } : {}),
     });
   }
@@ -466,7 +467,7 @@ export default function NewIssueScreen() {
             <Feather name="image" size={17} color={colors.primary} /><Text style={[styles.photoButtonText, { color: colors.foreground }]}>Photo library</Text>
           </TouchableOpacity>
         </View>
-        {attachments.length > 0 && <View style={styles.photoList}>{attachments.map((attachment, index) => <View key={attachment.key} style={styles.photoWrap}><Image source={{ uri: attachment.photo.uri }} style={styles.photo} />{!attachment.objectPath && <TouchableOpacity testID={`issue-photo-remove-${index}`} disabled={isPending} onPress={() => setAttachments((current) => current.filter((currentAttachment) => currentAttachment.key !== attachment.key))} style={styles.removePhoto}><Feather name="x" size={14} color="#ffffff" /></TouchableOpacity>}</View>)}</View>}
+        {attachments.length > 0 && <View style={styles.photoList}>{attachments.map((attachment, index) => <View key={attachment.key} style={styles.photoWrap}><Image source={{ uri: attachment.photo.uri }} style={styles.photo} />{!attachment.objectPath && <TouchableOpacity testID={`issue-photo-remove-${index}`} accessibilityRole="button" accessibilityLabel={`Remove photo ${index + 1}`} disabled={isPending} onPress={() => setAttachments((current) => current.filter((currentAttachment) => currentAttachment.key !== attachment.key))} style={styles.removePhoto}><Feather name="x" size={14} color="#ffffff" /></TouchableOpacity>}</View>)}</View>}
         {isSavedIssue && <View style={styles.recoveryNotice}>
           <Text style={[styles.savedIssueHint, { color: colors.mutedForeground }]}>Issue #{createdIssueId} is already saved. {attachments.some((attachment) => !attachment.objectPath) ? 'Retry attaching its photos or finish without them.' : 'Finalizing its photos can be retried.'}</Text>
           <TouchableOpacity testID="issue-photo-recovery-discard" disabled={isPending} onPress={discardPendingRecovery}>
@@ -550,14 +551,14 @@ const styles = StyleSheet.create({
   field: { paddingHorizontal: 16, marginBottom: 20, marginTop: 16 },
   label: { fontSize: 13, fontFamily: 'Inter_600SemiBold', marginBottom: 10 },
   input: {
-    height: 46,
+    minHeight: 46,
     borderWidth: 1,
     borderRadius: 6,
     paddingHorizontal: 14,
     fontSize: 15,
     fontFamily: 'Inter_400Regular',
   },
-  textArea: { height: 96, paddingTop: 12 },
+  textArea: { minHeight: 96, paddingTop: 12 },
   typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   typeBtn: {
     flexDirection: 'row',
@@ -579,7 +580,7 @@ const styles = StyleSheet.create({
   },
   priorityText: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
   photoActions: { flexDirection: 'row', gap: 8 },
-  photoButton: { flex: 1, height: 44, borderWidth: 1, borderRadius: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  photoButton: { flex: 1, minHeight: 44, borderWidth: 1, borderRadius: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
   photoButtonText: { fontSize: 13, fontFamily: 'Inter_500Medium' },
   photoList: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 10 },
   photoWrap: { position: 'relative' },
@@ -596,7 +597,7 @@ const styles = StyleSheet.create({
   },
   siteChipText: { fontSize: 13, fontFamily: 'Inter_500Medium' },
   submitBtn: {
-    height: 52,
+    minHeight: 52,
     borderRadius: 6,
     flexDirection: 'row',
     alignItems: 'center',

@@ -4,8 +4,8 @@
  * Configurable cleaning task templates + dated completion logs.
  * Frequencies: Daily | Weekly | Monthly
  */
-import { useState, useEffect, useMemo } from "react";
-import { apiFetch } from "@/lib/api";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,10 @@ import {
 import { cn } from "@/lib/utils";
 import { API_BASE } from "@/lib/api";
 import { downloadFile } from "@/lib/download";
+import { useListSites } from "@workspace/api-client-react";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { useWorkingSite } from "@/hooks/use-working-site";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -61,6 +65,9 @@ type CleaningLog = {
 
 type HistoryEntry = {
   id: number;
+  site_id: number | null;
+  site_name: string | null;
+  account_level: boolean;
   log_date: string;
   frequency: string;
   signed_by: string | null;
@@ -156,17 +163,19 @@ function ManageTasksDialog({
         method: form.method.trim() || null, product: form.product.trim() || null,
         responsible: form.responsible.trim() || null,
       };
-      if (editTask) {
-        await apiFetch(`/kitchen-cleaning/tasks/${editTask.id}`, { method: "PUT", body: JSON.stringify(body) });
-        toast({ title: "Task updated" });
-      } else {
-        await apiFetch("/kitchen-cleaning/tasks", { method: "POST", body: JSON.stringify(body) });
-        toast({ title: "Task added" });
+      const res = editTask
+        ? await apiFetch(`/kitchen-cleaning/tasks/${editTask.id}`, { method: "PUT", body: JSON.stringify(body) })
+        : await apiFetch("/kitchen-cleaning/tasks", { method: "POST", body: JSON.stringify(body) });
+      if (!res.ok) {
+        // Keep the form open with the user's input.
+        toast({ title: "Failed to save task", description: await getApiErrorMessage(res, "Please try again."), variant: "destructive" });
+        return;
       }
+      toast({ title: editTask ? "Task updated" : "Task added" });
       setShowForm(false);
       onChanged();
     } catch {
-      toast({ title: "Failed to save task", variant: "destructive" });
+      toast({ title: "Failed to save task", description: "Check your connection and try again.", variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -175,11 +184,15 @@ function ManageTasksDialog({
   async function handleDelete(t: CleaningTask) {
     if (!confirm(`Remove "${t.task}" from the cleaning schedule?`)) return;
     try {
-      await apiFetch(`/kitchen-cleaning/tasks/${t.id}`, { method: "DELETE" });
+      const res = await apiFetch(`/kitchen-cleaning/tasks/${t.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        toast({ title: "Failed to remove task", description: await getApiErrorMessage(res, "Please try again."), variant: "destructive" });
+        return;
+      }
       toast({ title: "Task removed" });
       onChanged();
     } catch {
-      toast({ title: "Failed to remove task", variant: "destructive" });
+      toast({ title: "Failed to remove task", description: "Check your connection and try again.", variant: "destructive" });
     }
   }
 
@@ -193,13 +206,13 @@ function ManageTasksDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle className="font-display">Manage Cleaning Tasks</DialogTitle>
+          <DialogTitle className="font-display font-bold">Manage Cleaning Tasks</DialogTitle>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto space-y-6 pr-1">
           {(["daily", "weekly", "monthly"] as Frequency[]).map(freq => (
             <div key={freq}>
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+              <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-wide mb-2">
                 {freqLabel(freq)}
               </h3>
               {byFreq[freq].length === 0 ? (
@@ -298,15 +311,16 @@ function ManageTasksDialog({
 
 // ── History panel ─────────────────────────────────────────────────────────────
 
-function HistoryPanel({ history, onSelect }: {
+function HistoryPanel({ history, title, onSelect }: {
   history: HistoryEntry[];
+  title: string;
   onSelect: (e: HistoryEntry) => void;
 }) {
   if (!history.length) return null;
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base font-display">Recent Logs</CardTitle>
+        <CardTitle className="text-base font-display font-bold">{title}</CardTitle>
         <CardDescription>Click a row to view that record</CardDescription>
       </CardHeader>
       <CardContent className="p-0">
@@ -318,6 +332,9 @@ function HistoryPanel({ history, onSelect }: {
                 <p className="text-sm font-medium truncate">{periodLabel(h.frequency as Frequency, h.log_date)}</p>
                 <p className="text-xs text-muted-foreground capitalize">{freqLabel(h.frequency as Frequency)}</p>
               </div>
+              {h.account_level && (
+                <Badge variant="outline" className="shrink-0 text-muted-foreground">Account-level</Badge>
+              )}
               <div className="shrink-0 text-right">
                 <p className="text-sm font-medium">
                   {h.completed_count}/{h.total_count}
@@ -336,6 +353,14 @@ function HistoryPanel({ history, onSelect }: {
     </Card>
   );
 }
+
+const ALL_SITES = "__all__";
+/**
+ * Logs with no kitchen are account-level: most were recorded before kitchens
+ * were added. They have their own view and are never shown as the selected
+ * kitchen's evidence (the API keeps the two apart as well).
+ */
+const ACCOUNT_LEVEL = "account";
 
 // ── Main tab ──────────────────────────────────────────────────────────────────
 
@@ -359,6 +384,20 @@ export default function CleaningScheduleTab() {
   const [exportFrom, setExportFrom]     = useState(format(subDays(new Date(), 30), "yyyy-MM-dd"));
   const [exportTo, setExportTo]         = useState(todayIso());
   const [exportFrequency, setExportFrequency] = useState<Frequency>("daily");
+  const [exportSiteId, setExportSiteId] = useState<string>(ALL_SITES);
+  const { data: sites = [], isLoading: sitesLoading } = useListSites();
+  // A kitchen's id, ACCOUNT_LEVEL, or null until the sites have loaded.
+  const [view, setView]                 = useState<string | null>(null);
+  const [hasAccountLevel, setHasAccountLevel] = useState(false);
+  const viewSite = sites.find(site => String(site.id) === view) ?? null;
+  const workingSite = useWorkingSite();
+  const loadSeq = useRef(0);
+  // Ticks, names and notes not yet saved, by period and task: kept when the
+  // kitchen is changed so they aren't wiped by the reload; cleared by a save.
+  const unsaved = useRef(new Map<string, CompletionItem>());
+  const unsavedKey = (freq: Frequency, date: string, taskId: number) => `${freq}|${date}|${taskId}`;
+  const viewRef = useRef(view);
+  viewRef.current = view;
 
   const submitted = !!log?.submitted_at;
 
@@ -413,11 +452,21 @@ export default function CleaningScheduleTab() {
 
   // ── Load log and build completions ───────────────────────────────────────
 
+  // Query string for the selected view; account-level logs are the ones
+  // saved without a siteId.
+  function siteQuery(forHistory = false) {
+    if (view && view !== ACCOUNT_LEVEL) return `siteId=${encodeURIComponent(view)}`;
+    return forHistory ? `siteId=${ACCOUNT_LEVEL}` : "";
+  }
+
   async function loadLog(freq: Frequency, date: string) {
+    const seq = ++loadSeq.current;
     setLoading(true);
     try {
-      const r = await apiFetch(`/kitchen-cleaning/logs?date=${date}&frequency=${freq}`);
+      const site = siteQuery();
+      const r = await apiFetch(`/kitchen-cleaning/logs?date=${date}&frequency=${freq}${site ? `&${site}` : ""}`);
       const savedLog: CleaningLog | null = r.ok ? await r.json() : null;
+      if (seq !== loadSeq.current) return;
       setLog(savedLog);
       setSignedBy(savedLog?.signed_by ?? user?.name ?? "");
 
@@ -437,22 +486,31 @@ export default function CleaningScheduleTab() {
           notes:  saved?.notes  ?? "",
         };
       });
-      setCompletions(merged);
+      setCompletions(savedLog?.submitted_at ? merged : merged.map(c => (c.taskId != null && unsaved.current.get(unsavedKey(freq, date, c.taskId))) || c));
     } catch {
+      if (seq !== loadSeq.current) return;
       setLog(null);
-      setCompletions(tasks.filter(t => t.frequency === freq).map(t => ({
+      setCompletions(tasks.filter(t => t.frequency === freq).map(t => unsaved.current.get(unsavedKey(freq, date, t.id)) ?? ({
         taskId: t.id, taskArea: t.area, taskName: t.task,
         done: false, doneBy: user?.name ?? "", notes: "",
       })));
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }
 
   async function loadHistory() {
+    if (view === null) return;
+    const requested = view;
     try {
-      const r = await apiFetch("/kitchen-cleaning/logs/history");
-      if (r.ok) setHistory(await r.json());
+      const r = await apiFetch(`/kitchen-cleaning/logs/history?${siteQuery(true)}`);
+      if (r.ok && requested === viewRef.current) setHistory(await r.json());
+      // Only matters while a kitchen is selected: points staff at the
+      // account-level view instead of mixing those logs in.
+      if (requested !== ACCOUNT_LEVEL && sites.length > 0) {
+        const a = await apiFetch(`/kitchen-cleaning/logs/history?siteId=${ACCOUNT_LEVEL}`);
+        if (a.ok && requested === viewRef.current) setHasAccountLevel((await a.json()).length > 0);
+      }
     } catch { /* ignore */ }
   }
 
@@ -460,12 +518,33 @@ export default function CleaningScheduleTab() {
 
   useEffect(() => {
     loadTasks();
-    loadHistory();
   }, []);
 
+  // Open on the user's working site's kitchen (else the first kitchen) once
+  // kitchens exist; a business without
+  // kitchens keeps the account-level view it has always had.
   useEffect(() => {
-    if (tasks.length >= 0) loadLog(activeFreq, periodDate);
-  }, [activeFreq, periodDate, tasks]);
+    if (sitesLoading || !workingSite.ready) return;
+    if (view !== null && (view === ACCOUNT_LEVEL || viewSite)) return;
+    const startSite = sites.find(site => site.id === workingSite.siteId) ?? sites[0];
+    setView(startSite ? String(startSite.id) : ACCOUNT_LEVEL);
+  }, [sites, sitesLoading, view, viewSite, workingSite.ready, workingSite.siteId]);
+
+  useEffect(() => {
+    setHistory([]);
+    setHasAccountLevel(false);
+    loadHistory();
+  }, [view]);
+
+  // A site picked for another client would be rejected by the export.
+  useEffect(() => {
+    setExportSiteId(ALL_SITES);
+    setView(null);
+  }, [activeClientId]);
+
+  useEffect(() => {
+    if (view !== null) loadLog(activeFreq, periodDate);
+  }, [activeFreq, periodDate, tasks, view]);
 
   // ── Save ─────────────────────────────────────────────────────────────────
 
@@ -478,15 +557,20 @@ export default function CleaningScheduleTab() {
         completions,
         signedBy:    signedBy.trim() || null,
         submittedAt: submit ? new Date().toISOString() : (log?.submitted_at ?? null),
+        siteId:      viewSite ? viewSite.id : null,
       };
       const r = await apiFetch("/kitchen-cleaning/logs", { method: "POST", body: JSON.stringify(body) });
-      if (!r.ok) throw new Error();
+      if (!r.ok) {
+        toast({ title: "Failed to save", description: await getApiErrorMessage(r, "Please try again."), variant: "destructive" });
+        return;
+      }
       const saved = await r.json();
+      for (const c of completions) if (c.taskId != null) unsaved.current.delete(unsavedKey(activeFreq, periodDate, c.taskId));
       setLog(saved);
       toast({ title: submit ? "Schedule signed off" : "Draft saved" });
       loadHistory();
     } catch {
-      toast({ title: "Failed to save", variant: "destructive" });
+      toast({ title: "Failed to save", description: "Check your connection and try again.", variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -500,16 +584,25 @@ export default function CleaningScheduleTab() {
 
   // ── Completion helpers ───────────────────────────────────────────────────
 
+  function edit(idx: number, change: Partial<CompletionItem>) {
+    setCompletions(prev => prev.map((c, i) => {
+      if (i !== idx) return c;
+      const next = { ...c, ...change };
+      if (next.taskId != null) unsaved.current.set(unsavedKey(activeFreq, periodDate, next.taskId), next);
+      return next;
+    }));
+  }
+
   function toggleDone(idx: number, done: boolean) {
-    setCompletions(prev => prev.map((c, i) => i === idx ? { ...c, done } : c));
+    edit(idx, { done });
   }
 
   function setDoneBy(idx: number, v: string) {
-    setCompletions(prev => prev.map((c, i) => i === idx ? { ...c, doneBy: v } : c));
+    edit(idx, { doneBy: v });
   }
 
   function setNotes(idx: number, v: string) {
-    setCompletions(prev => prev.map((c, i) => i === idx ? { ...c, notes: v } : c));
+    edit(idx, { notes: v });
   }
 
   // ── Group completions by area ────────────────────────────────────────────
@@ -537,9 +630,11 @@ export default function CleaningScheduleTab() {
     try {
       const params = new URLSearchParams({ from: exportFrom, to: exportTo, frequency: exportFrequency });
       if (activeClientId) params.set("clientId", String(activeClientId));
+      const siteSuffix = exportSiteId === ALL_SITES ? "" : `-site-${exportSiteId}`;
+      if (exportSiteId !== ALL_SITES) params.set("siteId", exportSiteId);
       await downloadFile(
         `${API_BASE}/kitchen-cleaning/export?${params}`,
-        `cleaning-schedule-${exportFrequency}-${exportFrom}-to-${exportTo}.pdf`,
+        `cleaning-schedule-${exportFrequency}-${exportFrom}-to-${exportTo}${siteSuffix}.pdf`,
       );
       setExportOpen(false);
       toast({ title: "Cleaning record downloaded", description: "The PDF is ready for your food hygiene records." });
@@ -595,6 +690,36 @@ export default function CleaningScheduleTab() {
           )}
         </div>
       </div>
+
+      {/* ── Kitchen / account-level view ── */}
+      {sites.length > 0 && view !== null && (
+        <div className="space-y-2">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <Label htmlFor="cleaning-view" className="shrink-0">Kitchen</Label>
+            <Select value={view} onValueChange={setView}>
+              <SelectTrigger id="cleaning-view" className="sm:w-72"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {sites.map(site => (
+                  <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>
+                ))}
+                <SelectItem value={ACCOUNT_LEVEL}>Account-level (no kitchen)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {view === ACCOUNT_LEVEL ? (
+            <p className="text-xs text-muted-foreground" data-testid="cleaning-account-level-note">
+              Account-level records aren't tied to a kitchen. Most were recorded before kitchens were added.
+              They are never counted as evidence for any kitchen.
+            </p>
+          ) : hasAccountLevel && (
+            <p className="text-xs text-muted-foreground" data-testid="cleaning-account-level-hint">
+              Only {viewSite?.name ?? "this kitchen"}'s records are shown. Older records that aren't tied to a
+              kitchen are under <button type="button" className="text-primary hover:underline"
+                onClick={() => setView(ACCOUNT_LEVEL)}>Account-level</button>.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* ── Period navigator ── */}
       <div className="flex items-center gap-3">
@@ -752,8 +877,14 @@ export default function CleaningScheduleTab() {
                   <p className="text-sm text-emerald-700 flex items-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4" />
                     Signed off{log?.submitted_at ? ` on ${format(parseISO(log.submitted_at), "d MMM yyyy 'at' HH:mm")}` : ""}
+                    {log?.id && <RecordSignedBy recordType="kitchen_cleaning_log" recordId={log.id} compact className="ml-2" />}
                   </p>
                 )}
+                <div className="border-t pt-3">
+                  {log?.id ? (
+                    <CheckPhotoUploader entityType="kitchen_cleaning_log" entityId={log.id} compact />
+                  ) : !submitted && <p className="text-xs text-muted-foreground">Save a draft to add photos or videos.</p>}
+                </div>
               </CardContent>
             </Card>
           )}
@@ -761,17 +892,40 @@ export default function CleaningScheduleTab() {
       )}
 
       {/* ── History ── */}
-      <HistoryPanel history={history} onSelect={handleHistorySelect} />
+      <HistoryPanel
+        history={history}
+        title={sites.length === 0 ? "Recent Logs"
+          : view === ACCOUNT_LEVEL ? "Recent account-level logs"
+          : `Recent logs · ${viewSite?.name ?? "kitchen"}`}
+        onSelect={handleHistorySelect}
+      />
 
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="font-display">Download cleaning record</DialogTitle>
+            <DialogTitle className="font-display font-bold">Download cleaning record</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <p className="text-sm text-muted-foreground">
               Choose the logs to include in the PDF for your food hygiene records.
             </p>
+            <div className="space-y-1.5">
+              <Label>Site</Label>
+              <Select value={exportSiteId} onValueChange={setExportSiteId}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_SITES}>All sites</SelectItem>
+                  {sites.map(site => (
+                    <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {exportSiteId !== ALL_SITES && (
+                <p className="text-xs text-muted-foreground">
+                  Only logs recorded against this site are included.
+                </p>
+              )}
+            </div>
             <div className="space-y-1.5">
               <Label>Frequency</Label>
               <Select value={exportFrequency} onValueChange={value => setExportFrequency(value as Frequency)}>

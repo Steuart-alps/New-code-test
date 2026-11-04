@@ -13,8 +13,17 @@ import { db } from "@workspace/db";
 import { clientsTable } from "@workspace/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
-import { sendSystemEmail, getPublicAppUrl } from "./email";
+import { sendSystemEmail, getPublicAppUrl, renderEmailLayout } from "./email";
 import { getNotificationEmails } from "./getNotificationEmails";
+import {
+  claimEmailDelivery,
+  emailDeliveryIdempotencyKey,
+  markEmailDeliverySent,
+  pruneSentEmailDeliveries,
+  settleEmailDelivery,
+} from "./emailDeliveryClaims";
+
+const JOB = "contractor-insurance-digest";
 
 /** Insurance is flagged when it expires within this many days (or has already expired). */
 const LEAD_DAYS = 30;
@@ -61,17 +70,10 @@ function buildEmailHtml(
     )
     .join("");
 
-  return `
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"/></head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
-    <div style="background:#0f172a;padding:32px 40px;">
-      <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">🛡️ ComplyTrack</div>
-      <div style="font-size:14px;color:#94a3b8;margin-top:6px;">Contractor insurance expiry alert</div>
-    </div>
-    <div style="padding:32px 40px;">
+  return renderEmailLayout({
+    subtitle: `Contractor insurance expiry alert`,
+    footerNote: `You are receiving this as an account manager.`,
+    bodyHtml: `
       <p style="font-size:15px;color:#334155;margin:0 0 20px;">
         ${alerts.length} contractor${alerts.length !== 1 ? "s" : ""} ${alerts.length !== 1 ? "have" : "has"} public liability insurance that is expiring soon or has already expired. Please chase renewals or update the records in ComplyTrack.
       </p>
@@ -79,17 +81,12 @@ function buildEmailHtml(
         <tbody>${rows}</tbody>
       </table>
       <div style="margin-top:28px;text-align:center;">
-        <a href="${appUrl}/contractors" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">
+        <a href="${appUrl}/contractors" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:10px;font-size:16px;font-weight:700;">
           View Contractors →
         </a>
       </div>
-    </div>
-    <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
-      ComplyTrack by ALPS Consulting · You are receiving this as an account manager.
-    </div>
-  </div>
-</body>
-</html>`;
+`,
+  });
 }
 
 export async function runContractorInsuranceExpiryReminderJob(): Promise<ContractorInsuranceExpiryJobResult> {
@@ -103,6 +100,10 @@ export async function runContractorInsuranceExpiryReminderJob(): Promise<Contrac
   const appUrl = getPublicAppUrl();
   const now = new Date();
   const threshold = new Date(now.getTime() + LEAD_DAYS * 24 * 60 * 60 * 1000);
+  // The Monday (UTC date) that starts this digest week.
+  const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - ((now.getUTCDay() + 6) % 7)));
+  const weekKey = monday.toISOString().slice(0, 10);
+  await pruneSentEmailDeliveries(JOB, 60).catch((err) => logger.warn({ err }, "Could not prune insurance digest markers"));
 
   const clients = await db
     .select({ id: clientsTable.id, name: clientsTable.name })
@@ -147,15 +148,28 @@ export async function runContractorInsuranceExpiryReminderJob(): Promise<Contrac
       const subject = `⚠️ ${alerts.length} contractor${alerts.length !== 1 ? "s" : ""} with expiring insurance — ComplyTrack`;
       const html = buildEmailHtml(alerts, appUrl);
 
-      for (const email of emails) {
-        try {
-          await sendSystemEmail({ to: email, subject, html });
-          result.emailsSent++;
-        } catch (err) {
-          logger.warn({ err, email, clientId: client.id }, "Failed to send contractor insurance expiry reminder");
-          result.errors++;
+      // One digest per client per week, even when the start-up catch-up and
+      // the Monday schedule (or two instances) both run: claim the week first;
+      // the claim becomes the week's sent marker once anything was accepted.
+      const claim = await claimEmailDelivery(JOB, `${client.id}:${weekKey}`);
+      if (!claim) continue;
+      let delivered = 0;
+      try {
+        for (const email of emails) {
+          try {
+            await sendSystemEmail({ to: email, subject, html, idempotencyKey: emailDeliveryIdempotencyKey(claim, email) });
+            delivered++;
+            result.emailsSent++;
+          } catch (err) {
+            logger.warn({ err, email, clientId: client.id }, "Failed to send contractor insurance expiry reminder");
+            result.errors++;
+          }
         }
+      } finally {
+        if (delivered > 0) await markEmailDeliverySent(claim).catch(() => {});
+        else await settleEmailDelivery(claim).catch(() => {});
       }
+      if (delivered === 0) continue;
 
       result.clientsAlerted++;
       logger.info(

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useRequestUploadUrl } from "@workspace/api-client-react";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
 
 export function useUpload() {
   const [isUploading, setIsUploading] = useState(false);
@@ -7,6 +8,7 @@ export function useUpload() {
   const { mutateAsync: requestUrl } = useRequestUploadUrl();
 
   const uploadFile = async (file: File): Promise<string> => {
+    assertWithinUploadLimit(file);
     setIsUploading(true);
     setProgress(10);
     try {

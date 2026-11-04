@@ -278,11 +278,15 @@ async function main() {
       [...bookingActivityNotes, ...completionActivityNotes].every(note =>
         note.createdBy === "Former user" && Number.isFinite(Date.parse(note.createdAt))),
     JSON.stringify(publicDetail.data?.notes));
-  const completionNotes = publicDetail.data?.notes?.filter(note => note.note === "Contractor completion note") ?? [];
+  // Either concurrent request may win; only the winner's note may persist.
+  const [winningNote, losingNote] = completionStatuses[0] === 200
+    ? ["Contractor completion note", "Duplicate completion must not persist"]
+    : ["Duplicate completion must not persist", "Contractor completion note"];
+  const completionNotes = publicDetail.data?.notes?.filter(note => note.note === winningNote) ?? [];
   check("contractor-supplied completion note is attributed and timestamped once",
     completionNotes.length === 1 &&
       completionNotes.every(note => note.createdBy === "Former user" && Number.isFinite(Date.parse(note.createdAt))) &&
-      !publicDetail.data?.notes?.some(note => note.note === "Duplicate completion must not persist"),
+      !publicDetail.data?.notes?.some(note => note.note === losingNote),
     JSON.stringify(publicDetail.data?.notes));
 
   console.log(`${passed} FixTrack history checks passed, ${failures.length} failed.`);

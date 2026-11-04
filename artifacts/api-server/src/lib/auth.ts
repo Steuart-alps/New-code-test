@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import { db } from "@workspace/db";
 import { usersTable, clientsTable } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { SafeUser } from "@workspace/db/schema";
 
 export async function hashPassword(password: string): Promise<string> {
@@ -31,6 +31,8 @@ export async function getUserById(id: number): Promise<SafeUser | null> {
       totpEnabled: usersTable.totpEnabled,
       isMaintenanceManager: usersTable.isMaintenanceManager,
       isDepartmentManager: usersTable.isDepartmentManager,
+      allDepartments: usersTable.allDepartments,
+      staffRosterId: usersTable.staffRosterId,
       createdAt: usersTable.createdAt,
       updatedAt: usersTable.updatedAt,
     })
@@ -47,6 +49,11 @@ export async function getUserWithClientByEmail(email: string) {
     })
     .from(usersTable)
     .leftJoin(clientsTable, eq(usersTable.clientId, clientsTable.id))
-    .where(eq(usersTable.email, email));
+    // Email addresses are case-insensitive: "Jo@Example.com" signs in to the
+    // account registered as "jo@example.com". An exact match wins if older
+    // accounts differ only by case.
+    .where(sql`lower(${usersTable.email}) = lower(${email.trim()})`)
+    .orderBy(sql`(${usersTable.email} = ${email.trim()}) DESC`, usersTable.id)
+    .limit(1);
   return rows[0] ?? null;
 }

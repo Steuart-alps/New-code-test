@@ -411,6 +411,58 @@ try {
     assert.deepEqual(stripe.calls.void, []);
   }
 
+  {
+    // £50 per-site cap: core + three add-ons (£40) plus a fourth reaches the
+    // cap, so the per-site items are swapped for the bundle and the client
+    // pays only the difference to the cap for this month (no proration).
+    const updates = [];
+    const invoices = [];
+    const item = (key, amount) => ({
+      id: `si_${key}`, current_period_start: 1_700_000_000, quantity: 2,
+      price: { id: `price_${key}`, unit_amount: amount, metadata: { service_key: key } },
+    });
+    const subscription = {
+      id: "sub_cap", created: 1_699_999_000,
+      items: { data: [item("core", 1000), item("firetrack", 1000), item("doctrack", 1000), item("traintrack", 1000),
+        { id: "si_storage", quantity: 5, price: { id: "price_storage", unit_amount: 10, metadata: {} } }] },
+    };
+    const run = (payment) => lib.activatePaidAddonService({
+      allowedServiceKeys: ["fixtrack"], service: "fixtrack", serviceLabel: "FixTrack",
+      clientId: 41, customerId: "cus_1", subscription,
+      stripe: { subscriptions: { update: async (id, params, options) => { updates.push({ id, params, options }); return subscription; } } },
+      getServicePrice: async () => ({ priceId: "price_fixtrack", unitAmount: 1000, currency: "gbp", interval: "month" }),
+      countClientSites: async () => 2,
+      findLiveSubscription: async () => ({ ...subscription, items: { data: [{ id: "si_bundle", price: { metadata: { service_key: "bundle" } } }] } }),
+      collectFirstMonthInvoice: async (_stripe, invoice) => { invoices.push(invoice); return payment; },
+      invalidateEntitlements: () => {},
+      getEntitledServices: async () => "all",
+      bundle: {
+        capPence: 5000, serviceKey: "bundle", label: "ComplyTrack Complete",
+        getPrice: async () => ({ priceId: "price_bundle", unitAmount: 5000, currency: "gbp", interval: "month" }),
+      },
+    });
+
+    assert.deepEqual(await run("paid"), { status: "activated", entitled: "all", bundled: true });
+    assert.deepEqual(updates[0].params, {
+      items: [
+        { id: "si_core", deleted: true }, { id: "si_firetrack", deleted: true },
+        { id: "si_doctrack", deleted: true }, { id: "si_traintrack", deleted: true },
+        { price: "price_bundle", quantity: 2 },
+      ],
+      proration_behavior: "none",
+    }, "per-site items are replaced by the bundle; storage is untouched");
+    assert.equal(invoices[0].amount, (5000 - 4000) * 2, "charge only the difference to the cap");
+
+    updates.length = 0;
+    invoices.length = 0;
+    assert.deepEqual(await run("not_collected"), { status: "charge_failed" });
+    assert.deepEqual(updates[1].params.items, [
+      { id: "si_bundle", deleted: true },
+      { price: "price_core", quantity: 2 }, { price: "price_firetrack", quantity: 2 },
+      { price: "price_doctrack", quantity: 2 }, { price: "price_traintrack", quantity: 2 },
+    ], "a failed upgrade charge restores the original items");
+  }
+
   console.log("Paid add-on activation safety tests passed.");
 } finally {
   await cleanup();

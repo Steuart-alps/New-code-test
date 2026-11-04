@@ -50,6 +50,10 @@ let delayMeRequestNumber = null;
 let delayCountQueryOnNextNavigation = false;
 let delayNextMeRequest = false;
 let delayedMeResponseStarted = false;
+let holdNextMeRequest = false;
+let heldMeRequestStarted = false;
+let heldMeResponseFulfilled = false;
+let releaseHeldMeRequest = null;
 let delaySuccessfulRegeneration = false;
 let delayedRegenerationStarted = false;
 let releaseDelayedRegeneration = null;
@@ -109,6 +113,15 @@ try {
         delayNextMeRequest = false;
         delayedMeResponseStarted = true;
         await new Promise(resolve => setTimeout(resolve, 900));
+      } else if (holdNextMeRequest) {
+        // The body above is already built, so it stays the old account's
+        // response however long it is held.
+        holdNextMeRequest = false;
+        heldMeRequestStarted = true;
+        await new Promise(resolve => { releaseHeldMeRequest = resolve; });
+        await jsonResponse(route, responseData);
+        heldMeResponseFulfilled = true;
+        return;
       }
       return jsonResponse(route, responseData);
     }
@@ -283,6 +296,89 @@ try {
   assert.equal(regenerationRequestCount, 2, "only the wrong-password and single successful requests should reach regeneration");
   assert.deepEqual(regenerationCsrfHeaders, ["browser-test-csrf", "browser-test-csrf"], "the API fixture must enforce CSRF on every regeneration request");
 
+  // ── New codes survive count-only refreshes until the user closes them ──────
+  currentRole = "client_admin";
+  billingLocked = false;
+  currentUserId = 156;
+  recoveryCodesRemaining = 2;
+  await navigate();
+  await waitForCount("2 unused recovery codes remaining.");
+  await page.getByTestId("button-regenerate-recovery-codes-warning").click();
+  await passwordInput.fill("correct-password");
+  await page.getByTestId("button-submit-recovery-code-regeneration").click();
+  await waitForCount("10 unused recovery codes remaining.");
+  const visibleCodes = () => page.locator("code").allInnerTexts();
+  assert.deepEqual(await visibleCodes(), issuedCodes, "a successful regeneration shows the new codes");
+  await page.getByTestId("button-view-regenerate-recovery-codes").click();
+  await passwordInput.fill("dirty-confirmation-draft");
+
+  recoveryCodesRemaining = 9;
+  const requestsBeforeCodeFocus = meRequestCount;
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+  await waitForCount("9 unused recovery codes remaining.");
+  assert.ok(meRequestCount > requestsBeforeCodeFocus, "a focus refresh should refetch the count while new codes are shown");
+  assert.deepEqual(await visibleCodes(), issuedCodes, "a focus count refresh must leave the new codes unchanged");
+  assert.equal(await passwordInput.inputValue(), "dirty-confirmation-draft", "a focus count refresh must keep the dirty password");
+
+  recoveryCodesRemaining = 8;
+  const requestsBeforeCodePoll = meRequestCount;
+  await page.clock.fastForward(30_000);
+  await waitForCount("8 unused recovery codes remaining.");
+  assert.ok(meRequestCount > requestsBeforeCodePoll, "the background poll should refetch the count while new codes are shown");
+  assert.deepEqual(await visibleCodes(), issuedCodes, "a background count refresh must leave the new codes unchanged");
+  assert.equal(await passwordInput.inputValue(), "dirty-confirmation-draft", "a background count refresh must keep the dirty password");
+
+  await page.getByRole("button", { name: "I've saved my codes" }).click();
+  assert.deepEqual(await visibleCodes(), [], "closing the codes removes them");
+  await waitForCount("8 unused recovery codes remaining.");
+  assert.equal(await passwordInput.inputValue(), "dirty-confirmation-draft", "closing the codes does not clear the password form");
+
+  // ── A held count response for account A arrives after switching to B ─────
+  const accountADraft = "account-a-confirmation-draft";
+  await passwordInput.fill("correct-password");
+  await page.getByTestId("button-submit-recovery-code-regeneration").click();
+  await waitForCount("10 unused recovery codes remaining.");
+  assert.deepEqual(await visibleCodes(), issuedCodes, "account A has fresh plaintext codes on screen before the switch");
+  await page.getByTestId("button-view-regenerate-recovery-codes").click();
+  await passwordInput.fill(accountADraft);
+
+  recoveryCodesRemaining = 2;
+  holdNextMeRequest = true;
+  heldMeRequestStarted = false;
+  heldMeResponseFulfilled = false;
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+  await waitForCondition(() => heldMeRequestStarted, "account A's count refresh should be held");
+
+  currentUserId = 157;
+  recoveryCodesRemaining = 1;
+  await page.getByTestId("button-refresh-test-auth").click();
+  await waitForCount("1 unused recovery code remaining.");
+  await warning.getByText("Only 1 unused recovery code remains. Generate a new set soon.").waitFor({ state: "visible" });
+
+  releaseHeldMeRequest?.();
+  await waitForCondition(() => heldMeResponseFulfilled, "account A's held count response should be delivered");
+  // Let the browser process the late response before checking it was ignored.
+  await page.evaluate(() => new Promise(resolve => queueMicrotask(resolve)));
+  await new Promise(resolve => setTimeout(resolve, 250));
+  await page.evaluate(() => new Promise(resolve => queueMicrotask(resolve)));
+
+  assert.deepEqual(await page.getByTestId("text-recovery-code-count").allInnerTexts(),
+    ["1 unused recovery code remaining."], "only account B's count may remain after A's late response");
+  assert.deepEqual(await warning.allInnerTexts().then(texts => texts.map(text => text.split("\n")[0])),
+    ["Only 1 unused recovery code remains. Generate a new set soon."], "only account B's warning may remain");
+  assert.equal(await page.getByText("Only 2 unused recovery codes remain", { exact: false }).count(), 0,
+    "account A's late count must not show its warning");
+  assert.deepEqual(await visibleCodes(), [], "account A's plaintext codes must not survive the switch");
+  const inputValues = await page.locator("input").evaluateAll(inputs => inputs.map(input => input.value));
+  assert.ok(!inputValues.includes(accountADraft), "account A's password draft must not survive the switch");
+  assert.equal(await passwordInput.count(), 0, "account B starts without an open password form");
+  assert.equal(await page.getByTestId("status-recovery-code-count-error").count(), 0,
+    "account A's late response must not put account B's card into an error state");
+
+  assert.equal(regenerationRequestCount, 4, "the new cases make exactly two more successful regenerations");
+  assert.ok(regenerationCsrfHeaders.every(header => header === "browser-test-csrf"),
+    "every regeneration request carries the CSRF token");
+
   console.log("Recovery-code count, warning, regeneration and freshness browser checks passed.");
 } catch (error) {
   console.error("Recovery-code test page:", browser ? (await browser.contexts()[0]?.pages()[0]?.locator("body").innerText().catch(() => "")) : "");
@@ -290,6 +386,7 @@ try {
   throw error;
 } finally {
   releaseDelayedRegeneration?.();
+  releaseHeldMeRequest?.();
   await browser?.close();
   vite.kill("SIGTERM");
 }

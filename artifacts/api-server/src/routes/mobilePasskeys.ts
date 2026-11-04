@@ -18,22 +18,24 @@ import {
   mobileRegistrationOptionsForUser,
 } from "../lib/passkeys";
 import { requireAuth } from "../middleware/requireAuth";
+import { isTwoFactorRequired } from "../lib/twoFactorPolicy";
+import { hashMobileLoginChallenge, issueMobileSession } from "./auth";
 
 /**
  * Native passkeys for the Expo app. The app has no cookie session, so each
  * WebAuthn challenge is stored server-side against a single-use token.
  *
  * On mobile a passkey replaces the email and password; it never replaces the
- * mandatory authenticator code. A verified passkey therefore ends in exactly
- * the same place as a correct password: a pending TOTP challenge for
- * POST /auth/mobile-login/verify-totp, or the web two-factor setup link for an
- * account without TOTP. No bearer session is ever issued here.
+ * authenticator code. A verified passkey therefore ends in exactly the same
+ * place as a correct password at POST /auth/mobile-login: a pending TOTP
+ * challenge for /auth/mobile-login/verify-totp when the account has an
+ * authenticator, the web two-factor setup link when its business requires one,
+ * and otherwise a mobile session.
  */
 const router = Router();
 
 const MOBILE_PASSKEY_CHALLENGE_TTL_MS = 5 * 60 * 1000;
-// Must match the pending-token lifetime and digest used by auth.ts for
-// mobile_login_challenges, which verify-totp consumes.
+// Same lifetime as the pending token auth.ts issues after a correct password.
 const MOBILE_LOGIN_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const MOBILE_PASSKEY_CHALLENGE_INVALID_CODE = "MOBILE_PASSKEY_CHALLENGE_INVALID";
 
@@ -42,7 +44,7 @@ function sha256Hex(token: string): string {
 }
 
 function webSetupUrl(): string {
-  return `${getPublicAppUrl().replace(/\/$/, "")}/settings`;
+  return `${getPublicAppUrl().replace(/\/$/, "")}/settings#security`;
 }
 
 async function issueChallenge(purpose: "authentication" | "registration", userId: number | null, challenge: string) {
@@ -99,8 +101,8 @@ router.post("/auth/mobile-passkeys/authentication/options", passkeyChallengeRate
 
 /**
  * POST /api/auth/mobile-passkeys/authenticate
- * Verifies the passkey assertion, then hands over to the existing mandatory
- * TOTP step exactly as a correct password would.
+ * Verifies the passkey assertion, then continues exactly as a correct
+ * password would at POST /auth/mobile-login.
  */
 router.post("/auth/mobile-passkeys/authenticate", loginRateLimit, async (req, res) => {
   const body = CeremonyBody.safeParse(req.body);
@@ -168,32 +170,25 @@ router.post("/auth/mobile-passkeys/authenticate", loginRateLimit, async (req, re
     .set({ counter: newCounter, lastUsedAt: new Date() })
     .where(eq(passkeysTable.id, credential.id));
 
-  const verificationStatus = await db.execute(sql`
-    SELECT email_verified FROM users WHERE id = ${user.id} LIMIT 1
-  `);
-  const emailVerified = (verificationStatus.rows?.[0] as { email_verified?: boolean } | undefined)?.email_verified;
-  if (emailVerified === false) {
-    res.status(403).json({
-      error: "Please verify your email address before signing in.",
-      requiresEmailVerification: true,
-    });
-    return;
-  }
-
   if (user.totpEnabled && user.totpSecret) {
     const pendingToken = randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + MOBILE_LOGIN_CHALLENGE_TTL_MS);
     await db.execute(sql`DELETE FROM mobile_login_challenges WHERE expires_at <= now()`);
     await db.execute(sql`
       INSERT INTO mobile_login_challenges (user_id, token_hash, expires_at)
-      VALUES (${user.id}, ${sha256Hex(pendingToken)}, ${expiresAt})
+      VALUES (${user.id}, ${hashMobileLoginChallenge(pendingToken)}, ${expiresAt})
     `);
     res.json({ pendingToken });
     return;
   }
 
-  // A passkey never satisfies the mandatory authenticator requirement.
-  res.json({ requires2faSetup: true, setupUrl: webSetupUrl() });
+  // A passkey never satisfies a business's two-factor requirement.
+  if (await isTwoFactorRequired(user)) {
+    res.json({ requires2faSetup: true, setupUrl: webSetupUrl() });
+    return;
+  }
+
+  res.json(await issueMobileSession(user));
 });
 
 /**

@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { build } from "esbuild";
+import { buildOwnedFixturePurgeSql, resolveRunId } from "./fixture-ownership.mjs";
 
 const testsDir = path.dirname(fileURLToPath(import.meta.url));
 const dbDir = path.resolve(testsDir, "../../../lib/db");
@@ -13,6 +14,7 @@ const pinoLink = path.join(dbDir, "node_modules", "pino");
 let pinoLinkCreated = false;
 let pool;
 let clientIds = [];
+const runId = resolveRunId();
 try {
   // pino belongs to the API package while pg belongs to the DB package. Keep
   // both external and temporarily expose the former to Node's ESM resolver.
@@ -33,13 +35,15 @@ try {
     sql,
     runSafeTrackAckReminderJob,
     getOutstandingSafeTrackAcknowledgements,
+    getSafeTrackReminderLastSentAt,
     parseSafeTrackReminderSettings,
     isSafeTrackReminderDue,
     MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES,
     registerSafeTrackAckReminderSchedule,
   } = lib;
   pool = lib.pool;
-  const tag = `safe-ack-${Date.now()}`;
+  // Client slugs carry the run id so cleanup removes only this run's tenants.
+  const tag = `safe-ack-${runId}`;
   const insertClient = async (suffix) => {
     const row = await db.execute(sql`INSERT INTO clients (name, slug, active) VALUES (${`${tag}-${suffix}`}, ${`${tag}-${suffix}`}, true) RETURNING id`);
     clientIds.push(row.rows[0].id); return row.rows[0].id;
@@ -132,6 +136,20 @@ try {
   assert.equal(one.remindersClaimed + two.remindersClaimed, 1);
   assert.deepEqual(sent.sort(), ["manager@test.local", "staff@test.local"]);
   assert.equal(one.errors + two.errors, 1, "partial email failure remains isolated");
+  // Settings previews the next reminder from the last confirmed send.
+  const lastSentAt = await getSafeTrackReminderLastSentAt(primary);
+  assert.ok(lastSentAt && Math.abs(lastSentAt.getTime() - Date.now()) < 60_000, "last send is readable for the preview");
+  assert.equal(await getSafeTrackReminderLastSentAt(foreign), null);
+  // Later the same Monday is the same weekly window: nothing more is claimed.
+  const sameWindow = await runSafeTrackAckReminderJob({ ...deps, now: () => new Date("2026-01-05T15:00:00.000Z"), send: async () => {} });
+  assert.equal(sameWindow.remindersClaimed, 0);
+  // The next window claims again even though the last send was under 7 days
+  // before it: one reminder per window, not per rolling period.
+  const nextMonday = new Date(Date.now() + 7 * 86_400_000);
+  nextMonday.setUTCDate(nextMonday.getUTCDate() + ((8 - nextMonday.getUTCDay()) % 7));
+  nextMonday.setUTCHours(12, 0, 0, 0);
+  const nextWindow = await runSafeTrackAckReminderJob({ ...deps, now: () => nextMonday, send: async () => {} });
+  assert.equal(nextWindow.remindersClaimed, 1);
   let largeManagerHtml = "";
   const largeDocs = Array.from({ length: 250 }, (_, index) => ({
     title: `Required document ${index} ${"Long title ".repeat(8)}`,
@@ -156,6 +174,85 @@ try {
   assert.match(largeManagerHtml, /7500 outstanding acknowledgements/);
   assert.match(largeManagerHtml, /Additional documents not shown/);
   assert.match(largeManagerHtml, /https:\/\/app\.example\/safe-track/);
+  // Replit #342: accented and non-Latin names, emoji, & < > " and long titles
+  // near the byte cap stay inside it as well-formed, escaped HTML.
+  const managerHtmlFor = async (docs) => {
+    let html = "";
+    await runSafeTrackAckReminderJob({
+      ...deps,
+      getOutstanding: async () => docs,
+      getStaffOutstanding: async () => [],
+      getRecipients: async () => ({ emails: ["manager@test.local"] }),
+      claim: async () => 987655,
+      send: async ({ html: sentHtml }) => { html = sentHtml; },
+      appUrl: () => "https://app.example",
+    });
+    return html;
+  };
+  const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  const assertSafeDigest = (html, docs) => {
+    assert.ok(Buffer.byteLength(html, "utf8") <= MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES, "within the byte cap");
+    assert.doesNotMatch(html, loneSurrogate, "no character cut in half");
+    assert.doesNotMatch(html, /&(?!amp;|lt;|gt;|quot;|#39;)/, "every & starts an escape");
+    assert.doesNotMatch(html, /<(?!\/?(?:!DOCTYPE|html|body|h2|p|table|tbody|tr|td|div|a)\b)/i, "no markup but the template's");
+    for (const tag of ["tr", "td", "div", "p", "table", "a"]) {
+      assert.equal((html.match(new RegExp(`<${tag}\\b`, "g")) ?? []).length,
+        (html.match(new RegExp(`</${tag}>`, "g")) ?? []).length, `<${tag}> balanced`);
+    }
+    const total = docs.reduce((sum, doc) => sum + doc.outstandingCount, 0);
+    assert.match(html, new RegExp(`${total} outstanding acknowledgements? across ${docs.length} required documents?`));
+    assert.match(html, /<a href="https:\/\/app\.example\/safe-track"[^>]*>Open the secure SafeTrack register<\/a>/);
+  };
+  const hostileTitle = `Fire & evacuation <script>alert("x")</script> "Zoë's" plan — `;
+  const unicodeNames = ["Zoë Ågren-Søndergård", "王小明", "Мария Иванова", "<b>Ølaf</b> & co", "Ana 👩🏽‍⚕️ Ruiz",
+    // An emoji straddling the 120-character name limit must not be cut in half.
+    `${"x".repeat(119)}😀 tail`];
+  const unicodeDocs = Array.from({ length: 400 }, (_, index) => ({
+    title: `${hostileTitle}${index} ${"安全手順書".repeat(60)}`,
+    docType: "Risk Assessment",
+    siteName: `Café & Bäckerei <Nord> ${"é".repeat(300)}`,
+    outstanding: unicodeNames,
+    outstandingCount: 12,
+    acknowledgedCount: 3,
+    staffTotal: 15,
+  }));
+  const unicodeHtml = await managerHtmlFor(unicodeDocs);
+  assertSafeDigest(unicodeHtml, unicodeDocs);
+  assert.match(unicodeHtml, /Additional documents not shown/);
+  assert.match(unicodeHtml, /Fire &amp; evacuation &lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt; &quot;Zoë&#39;s&quot;/);
+  assert.match(unicodeHtml, /Zoë Ågren-Søndergård, 王小明, Мария Иванова, &lt;b&gt;Ølaf&lt;\/b&gt; &amp; co, Ana 👩🏽‍⚕️ Ruiz/);
+  assert.match(unicodeHtml, /x{119}, and 6 more staff/, "the split emoji is dropped whole");
+  assert.doesNotMatch(unicodeHtml, /<script|<b>|<Nord>/);
+  // Right at the limit: the cut always falls between whole documents, and the
+  // digest uses the space instead of stopping well short of it.
+  const shownRows = (unicodeHtml.match(/<tr>/g) ?? []).length;
+  const oneRow = Buffer.byteLength(unicodeHtml.match(/<tr>[\s\S]*?<\/tr>/)[0], "utf8");
+  assert.ok(shownRows > 0 && shownRows < unicodeDocs.length);
+  assert.ok(Buffer.byteLength(unicodeHtml, "utf8") > MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES - 2 * oneRow, "fills to near the cap");
+  // A digest that fits exactly when one row shorter.
+  const nearCapDocs = unicodeDocs.slice(0, shownRows + 1);
+  const nearCapHtml = await managerHtmlFor(nearCapDocs);
+  assertSafeDigest(nearCapHtml, nearCapDocs);
+  assert.equal((nearCapHtml.match(/<tr>/g) ?? []).length, shownRows);
+  assert.match(nearCapHtml, /Additional documents not shown here: 1 document with 12 outstanding acknowledgements/);
+  const fitsHtml = await managerHtmlFor(unicodeDocs.slice(0, shownRows));
+  assertSafeDigest(fitsHtml, unicodeDocs.slice(0, shownRows));
+  assert.doesNotMatch(fitsHtml, /Additional documents not shown/);
+  // Replit #341: thousands of documents render in one bounded pass.
+  const manyDocs = Array.from({ length: 20_000 }, (_, index) => ({
+    title: `Doc ${index}`, docType: "SOP", siteName: null,
+    outstanding: ["Sam"], outstandingCount: 1, acknowledgedCount: 0, staffTotal: 1,
+  }));
+  const started = performance.now();
+  const manyHtml = await managerHtmlFor(manyDocs);
+  const elapsedMs = performance.now() - started;
+  console.log(`20,000-document digest built in ${elapsedMs.toFixed(0)} ms`);
+  assertSafeDigest(manyHtml, manyDocs);
+  const manyShown = (manyHtml.match(/<tr>/g) ?? []).length;
+  assert.ok(manyShown > 100 && manyShown < manyDocs.length);
+  assert.match(manyHtml, new RegExp(`Additional documents not shown here: ${manyDocs.length - manyShown} documents with ${manyDocs.length - manyShown} outstanding acknowledgements`));
+  // One pass takes a few ms; rebuilding the digest per document took ~170 ms.
+  assert.ok(elapsedMs < 100, `digest took ${elapsedMs} ms`);
   let fullyAcknowledgedSendCalled = false;
   const fullyAcknowledged = await runSafeTrackAckReminderJob({
     ...deps,
@@ -172,9 +269,21 @@ try {
   console.log("SafeTrack acknowledgement reminder integration checks passed.");
 } finally {
   if (pool) {
-    for (const id of clientIds) {
-      await pool.query("DELETE FROM safe_track_ack_reminder_log WHERE client_id = $1", [id]).catch(() => {});
-      await pool.query("DELETE FROM clients WHERE id = $1", [id]).catch(() => {});
+    // The run's sites, roster and SafeTrack rows leave audit_log rows that
+    // block a plain DELETE FROM clients (tests/fixture-ownership.mjs).
+    let cleanupConnection = null;
+    try {
+      for (const id of clientIds) {
+        await pool.query("DELETE FROM safe_track_ack_reminder_log WHERE client_id = $1", [id]).catch(() => {});
+      }
+      cleanupConnection = await pool.connect();
+      await cleanupConnection.query(buildOwnedFixturePurgeSql({ runId, clientIds }));
+    } catch (err) {
+      await cleanupConnection?.query("ROLLBACK").catch(() => {});
+      console.error("Cleanup failed:", err);
+      process.exitCode = 1;
+    } finally {
+      cleanupConnection?.release();
     }
     await pool.end().catch(() => {});
   }

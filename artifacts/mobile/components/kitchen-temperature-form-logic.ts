@@ -62,6 +62,20 @@ export function hydrateColdReadings(
   };
 }
 
+/** The reheating target the form shows: the limit stamped on the diary once
+ *  it exists (historical records keep theirs), otherwise the scope's
+ *  configured limit, which is what the server stamps on a new diary when the
+ *  app sends none; the numeric rule only when neither is available. */
+export function reheatingTargetLabel(
+  recordLimit: unknown,
+  configuredLimit: string | null | undefined,
+  ruleLabel: string | null,
+): string {
+  if (typeof recordLimit === 'string' && recordLimit.trim()) return recordLimit;
+  if (configuredLimit?.trim()) return configuredLimit;
+  return ruleLabel ?? 'Review numeric rules';
+}
+
 export function buildKitchenTemperatureWrite(
   scope: { saveUrl(recordId: number | null): string },
   recordId: number | null | undefined,

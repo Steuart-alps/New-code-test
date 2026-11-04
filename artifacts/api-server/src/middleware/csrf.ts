@@ -7,6 +7,10 @@ const PUBLIC_LINK_PREFIXES = [
   "/api/sign-off/",
   "/api/fix-track/action/",
   "/api/fix-track/quotes/public/",
+  "/api/privacy-intake/",
+  "/api/certificate-upload/",
+  "/api/site-sign-in/",
+  "/api/contractor-tests/",
 ];
 
 function getHeaderValue(value: string | string[] | undefined): string | undefined {

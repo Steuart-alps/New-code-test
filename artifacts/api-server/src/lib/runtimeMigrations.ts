@@ -1,9 +1,10 @@
-import { db } from "@workspace/db";
+import { db, setSessionLockTimeout } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { ensureRuntimeBaseline } from "./runtimeBaseline";
-import { migrateAuditLog } from "./auditLogMigration";
+import { migrateAuditLog, migrateExtendedAuditLog } from "./auditLogMigration";
 import { migrateLegacyPatHistory } from "./patLegacyHistoryMigration";
+import { migrateSubmitterDepartments } from "./submitterDepartmentMigration";
 import { migratePatRoomHistory } from "./patRoomHistoryMigration";
 import { migratePatFailureHistory } from "./patFailureHistoryMigration";
 import { migratePatReplacementHistory } from "./patReplacementHistoryMigration";
@@ -15,6 +16,7 @@ import {
   tokenPayloadNeedsReencryption,
   validateTokenEncryptionConfig,
   describeTokenKeyConfiguration,
+  TokenPayloadError,
 } from "./bearerTokens";
 
 // ── Queued contractor credentials: bounded startup passes ─────────────────────
@@ -323,17 +325,177 @@ async function scrubQueuedRow(tx: MigrationTx, row: any): Promise<boolean> {
   return (result.rows as any[]).length > 0;
 }
 
+// ── Contractor-link key configuration ────────────────────────────────────────
+// A bad or missing contractor token key configuration (or a queued envelope
+// naming a key this server no longer holds) disables contractor links only:
+// it is logged loudly and reported in /readyz details, but never blocks the
+// schema migrations. Nothing is written in that state — encryptTokenPayload
+// refuses an invalid configuration and the queue passes are skipped — so a
+// working link is never stored unencrypted (see
+// .agents/memory/contractor-token-key-rotation.md).
+let contractorTokenProblem: string | null = null;
+
+/** Why contractor links are disabled after the last migration run, or null. */
+export function getContractorTokenProblem(): string | null {
+  return contractorTokenProblem;
+}
+
+function describeContractorTokenError(err: unknown): string {
+  if (err instanceof TokenPayloadError) {
+    return err.reason === "unknown_key"
+      ? "A queued contractor email names an encryption key version this server does not hold"
+      : "A queued contractor email could not be re-encrypted";
+  }
+  // Configuration errors are fixed strings naming environment variables only.
+  return err instanceof Error ? err.message : "Contractor token encryption is misconfigured";
+}
+
+function isContractorKeyError(err: unknown): boolean {
+  if (err instanceof TokenPayloadError) return true;
+  try {
+    validateTokenEncryptionConfig();
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+async function runContractorCredentialPasses(): Promise<void> {
+  contractorTokenProblem = null;
+  try {
+    // Validate even on a new database with no encrypted rows, so a broken key
+    // rotation is reported at start-up rather than only at dispatch.
+    validateTokenEncryptionConfig();
+    await ensureQueueMigrationIndexes();
+    await sweepPlainTextQueuedCredentials();
+    await scrubLegacyQueuedCredentials();
+    await reencryptQueuedTokenPayloads();
+  } catch (err) {
+    // Only key problems disable contractor links; a database error still
+    // fails the migration run like any other statement.
+    if (!isContractorKeyError(err)) throw err;
+    contractorTokenProblem = describeContractorTokenError(err);
+    logger.error(
+      { err, problem: contractorTokenProblem },
+      "CONTRACTOR LINKS DISABLED: contractor token encryption key configuration is invalid; queued contractor credentials were not migrated. Fix CONTRACTOR_TOKEN_ENCRYPTION_KEY / _VERSION / _PREVIOUS_KEYS and restart.",
+    );
+  }
+}
+
+// ── Lock-safe migration session ───────────────────────────────────────────────
+// Every boot re-runs ~200 idempotent DDL statements. During a deploy overlap the
+// old instance is still serving, so each statement waits at most
+// MIGRATION_LOCK_TIMEOUT for a lock (instead of queueing behind, and blocking,
+// live traffic); the whole idempotent run is retried a few times before
+// start-up fails.
+const MIGRATION_LOCK_TIMEOUT = "5s";
+const MIGRATION_ATTEMPTS = 3;
+
+function isLockTimeout(err: unknown): boolean {
+  for (let e: any = err; e; e = e.cause) {
+    if (e.code === "55P03") return true;
+  }
+  return false;
+}
+
+/** Split a statement's comma-separated clauses at paren depth 0, outside quotes. */
+function splitTopLevel(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (ch === "," && depth === 0) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts.map((part) => part.trim());
+}
+
+/**
+ * True for `ALTER TABLE t ADD COLUMN IF NOT EXISTS ...` statements (only ADD
+ * COLUMN clauses, no parameters) whose every column already exists. Skipping
+ * them is exactly what IF NOT EXISTS would do, minus the ACCESS EXCLUSIVE lock.
+ */
+export function isRedundantAddColumn(statement: string, params: unknown[], existing: ReadonlySet<string>): boolean {
+  if (params.length > 0) return false;
+  const match = /^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?"?([A-Za-z_][A-Za-z0-9_]*)"?\s+([\s\S]*?);?\s*$/i.exec(statement);
+  if (!match) return false;
+  const table = match[1].toLowerCase();
+  const clauses = splitTopLevel(match[2]);
+  if (clauses.length === 0) return false;
+  for (const clause of clauses) {
+    const column = /^ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+"?([A-Za-z_][A-Za-z0-9_]*)"?\s/i.exec(`${clause} `);
+    if (!column || !existing.has(`${table}.${column[1].toLowerCase()}`)) return false;
+  }
+  return true;
+}
+
+async function withMigrationSession<T>(run: () => Promise<T>): Promise<T> {
+  const columns = await db.execute(sql`
+    SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public'
+  `);
+  const existing = new Set(
+    (columns.rows as Array<{ table_name: string; column_name: string }>)
+      .map((row) => `${row.table_name.toLowerCase()}.${row.column_name.toLowerCase()}`),
+  );
+  const dialect = (db as any).dialect;
+  const hadOwnExecute = Object.prototype.hasOwnProperty.call(db, "execute");
+  const originalExecute = db.execute;
+  const execute = originalExecute.bind(db);
+  (db as any).execute = (query: any) => {
+    try {
+      const rendered = typeof query === "string"
+        ? { sql: query, params: [] }
+        : dialect?.sqlToQuery?.(typeof query?.getSQL === "function" ? query.getSQL() : query);
+      if (rendered && isRedundantAddColumn(rendered.sql, rendered.params ?? [], existing)) {
+        return Promise.resolve({ rows: [], rowCount: 0, command: "ALTER", fields: [] });
+      }
+    } catch {
+      // Unrenderable here: just run it.
+    }
+    return execute(query);
+  };
+  setSessionLockTimeout(MIGRATION_LOCK_TIMEOUT);
+  try {
+    return await run();
+  } finally {
+    setSessionLockTimeout(null);
+    if (hadOwnExecute) (db as any).execute = originalExecute;
+    else delete (db as any).execute;
+  }
+}
+
 /**
  * Idempotent runtime migrations for additive schema changes.
- * Safe to run on every boot — uses IF NOT EXISTS guards.
+ * Safe to run on every boot — uses IF NOT EXISTS guards. Statements wait at
+ * most MIGRATION_LOCK_TIMEOUT for a lock; the run is retried on lock timeouts.
  */
 export async function runRuntimeMigrations() {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await withMigrationSession(runRuntimeMigrationsOnce);
+    } catch (err) {
+      if (attempt >= MIGRATION_ATTEMPTS || !isLockTimeout(err)) throw err;
+      logger.warn({ attempt }, "Runtime migration lock timeout — retrying");
+      await new Promise((resolve) => setTimeout(resolve, 2_000 * attempt));
+    }
+  }
+}
+
+async function runRuntimeMigrationsOnce() {
   try {
     await ensureRuntimeBaseline();
-
-    // Validate even on a new database with no encrypted rows, so a broken key
-    // rotation cannot let the service report ready and fail only at dispatch.
-    validateTokenEncryptionConfig();
 
     // ---- Customer privacy-governance records ----
     // These records support operational accountability; they do not determine
@@ -425,6 +587,17 @@ export async function runRuntimeMigrations() {
       )
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_privacy_rights_requests_client_due" ON "privacy_rights_requests" ("client_id", "due_at")`);
+    // Public rights-request form (link digest, assignee) and request source.
+    await db.execute(sql`ALTER TABLE "privacy_programs" ADD COLUMN IF NOT EXISTS "intake_token_hash" text`);
+    await db.execute(sql`ALTER TABLE "privacy_programs" ADD COLUMN IF NOT EXISTS "intake_published_at" timestamptz`);
+    await db.execute(sql`ALTER TABLE "privacy_programs" ADD COLUMN IF NOT EXISTS "intake_published_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
+    await db.execute(sql`ALTER TABLE "privacy_programs" ADD COLUMN IF NOT EXISTS "intake_assignee_id" integer REFERENCES "users"("id") ON DELETE SET NULL`);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_privacy_programs_intake_token" ON "privacy_programs" ("intake_token_hash")`);
+    await db.execute(sql`ALTER TABLE "privacy_rights_requests" ADD COLUMN IF NOT EXISTS "source" text NOT NULL DEFAULT 'staff'`);
+    await db.execute(sql`ALTER TABLE "privacy_rights_requests" ADD COLUMN IF NOT EXISTS "public_reference" text`);
+    await db.execute(sql`ALTER TABLE "privacy_rights_requests" ADD COLUMN IF NOT EXISTS "assigned_to" integer REFERENCES "users"("id") ON DELETE SET NULL`);
+    await db.execute(sql`ALTER TABLE "privacy_rights_requests" ADD COLUMN IF NOT EXISTS "admin_notified_at" timestamptz`);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_privacy_rights_requests_public_reference" ON "privacy_rights_requests" ("public_reference")`);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "client_data_deletion_requests" (
         "id" serial PRIMARY KEY,
@@ -449,6 +622,43 @@ export async function runRuntimeMigrations() {
     await db.execute(sql`
       CREATE UNIQUE INDEX IF NOT EXISTS "UIDX_client_data_deletion_active"
         ON "client_data_deletion_requests" ("client_id") WHERE "status" IN ('pending','approved')
+    `);
+    // Durable outcome of each executed account deletion (see runDataDeletionJob).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "client_data_deletion_outcomes" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE RESTRICT,
+        "request_id" integer REFERENCES "client_data_deletion_requests"("id") ON DELETE RESTRICT,
+        "reason" text NOT NULL,
+        "approved_by" integer,
+        "outcome" text NOT NULL,
+        "started_at" timestamptz NOT NULL,
+        "finished_at" timestamptz NOT NULL DEFAULT now(),
+        "rows_deleted" integer NOT NULL DEFAULT 0,
+        "objects_deleted" integer NOT NULL DEFAULT 0,
+        "objects_skipped" integer NOT NULL DEFAULT 0,
+        "error" text
+      )
+    `);
+    // Separate from CREATE TABLE so a drizzle-pushed table (production) gets them too.
+    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" DROP CONSTRAINT IF EXISTS "CHK_client_deletion_outcome_reason"`);
+    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" ADD CONSTRAINT "CHK_client_deletion_outcome_reason" CHECK ("reason" IN ('approved_request','retention_schedule','test_business'))`);
+    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" DROP CONSTRAINT IF EXISTS "CHK_client_deletion_outcome"`);
+    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" ADD CONSTRAINT "CHK_client_deletion_outcome" CHECK ("outcome" IN ('completed','failed'))`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_client_data_deletion_outcomes_client" ON "client_data_deletion_outcomes" ("client_id", "finished_at")`);
+    await db.execute(sql`
+      CREATE OR REPLACE FUNCTION "prevent_client_deletion_outcome_mutation"()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION 'Account deletion outcomes are append-only';
+      END;
+      $$
+    `);
+    await db.execute(sql`DROP TRIGGER IF EXISTS "client_data_deletion_outcomes_immutable" ON "client_data_deletion_outcomes"`);
+    await db.execute(sql`
+      CREATE TRIGGER "client_data_deletion_outcomes_immutable"
+      BEFORE UPDATE OR DELETE ON "client_data_deletion_outcomes"
+      FOR EACH ROW EXECUTE FUNCTION "prevent_client_deletion_outcome_mutation"()
     `);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "privacy_retention_schedules" (
@@ -572,11 +782,33 @@ export async function runRuntimeMigrations() {
         "expires_at" timestamp NOT NULL,
         "used_at"    timestamp,
         "created_at" timestamp NOT NULL DEFAULT now(),
+        "purpose"    text NOT NULL DEFAULT 'reset',
+        "revoked_at" timestamp,
+        "email_failed_at" timestamp,
         CONSTRAINT "password_reset_tokens_token_unique" UNIQUE ("token")
       )
     `);
     await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "used_at" timestamp`);
     await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "created_at" timestamp NOT NULL DEFAULT now()`);
+    // Setup (invite) links are told apart from forgot-password links so User
+    // Management can show which staff are still waiting to set a password.
+    // Rows from before the column existed are classed by lifetime: invites
+    // last 24 hours and reset links 1 hour, so only an invite exceeds 2 hours.
+    // Reset rows always stay at 1 hour, so re-running this changes nothing.
+    await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "purpose" text NOT NULL DEFAULT 'reset'`);
+    await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "revoked_at" timestamp`);
+    await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "email_failed_at" timestamp`);
+    await db.execute(sql`
+      UPDATE "password_reset_tokens" SET "purpose" = 'invite'
+      WHERE "purpose" = 'reset' AND "expires_at" - "created_at" > interval '2 hours'
+    `);
+    // Reset and invitation links are stored as "sha256:<hex>"; hash legacy
+    // plaintext rows in place so unexpired links keep working.
+    await db.execute(sql`
+      UPDATE "password_reset_tokens"
+      SET "token" = 'sha256:' || encode(sha256(convert_to("token", 'UTF8')), 'hex')
+      WHERE "token" NOT LIKE 'sha256:%'
+    `);
 
     // Shared authentication throttles keep sign-in quotas consistent across
     // API processes. Only HMACed IP/namespace keys are persisted.
@@ -648,6 +880,93 @@ export async function runRuntimeMigrations() {
       )
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_download_tokens_expiry" ON "storage_download_tokens" ("expires_at")`);
+    // Retained-storage usage ledger and per-tenant reconciliation snapshots
+    // (lib/storageUsageSnapshot.ts).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_usage_objects" (
+        "object_path" text PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "size_bytes" bigint NOT NULL,
+        "present" boolean NOT NULL,
+        "changed_at" timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT "storage_usage_objects_size_nonnegative" CHECK ("size_bytes" >= 0)
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_usage_objects_tenant" ON "storage_usage_objects" ("client_id", "present")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_usage_pending" (
+        "id" text PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "started_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_usage_pending_tenant" ON "storage_usage_pending" ("client_id", "started_at")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_usage_snapshots" (
+        "client_id" integer PRIMARY KEY REFERENCES "clients"("id") ON DELETE CASCADE,
+        "reconciled_at" timestamptz,
+        "used_bytes" bigint NOT NULL DEFAULT 0,
+        "object_count" integer NOT NULL DEFAULT 0,
+        "drift_bytes" bigint NOT NULL DEFAULT 0,
+        "drift_objects" integer NOT NULL DEFAULT 0,
+        "last_drift_at" timestamptz,
+        "last_failed_at" timestamptz,
+        "refresh_lease_token" text,
+        "refresh_lease_until" timestamptz,
+        "updated_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    // Paid extra storage reduced at the next renewal (routes/billing.ts).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_capacity_reductions" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "request_id" text NOT NULL,
+        "subscription_id" text NOT NULL,
+        "subscription_item_id" text NOT NULL,
+        "from_gib" integer NOT NULL,
+        "to_gib" integer NOT NULL,
+        "minimum_gib" integer NOT NULL,
+        "used_bytes" bigint NOT NULL,
+        "effective_at" timestamptz NOT NULL,
+        "requested_by" integer,
+        "requested_at" timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT "storage_capacity_reductions_lower" CHECK ("to_gib" >= 0 AND "to_gib" < "from_gib" AND "to_gib" >= "minimum_gib")
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_storage_capacity_reductions_request" ON "storage_capacity_reductions" ("request_id")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_capacity_reductions_tenant" ON "storage_capacity_reductions" ("client_id", "subscription_id", "effective_at")`);
+    // Storage warning level emails to managers (lib/storageWarningEmails.ts).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_warning_notices" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "threshold_bytes" bigint NOT NULL,
+        "used_bytes" bigint NOT NULL,
+        "recipient_count" integer NOT NULL,
+        "sent_at" timestamptz NOT NULL DEFAULT now(),
+        "cleared_at" timestamptz
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_storage_warning_notices_open" ON "storage_warning_notices" ("client_id") WHERE "cleared_at" IS NULL`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_warning_notices_tenant" ON "storage_warning_notices" ("client_id", "sent_at")`);
+    // Storage full / automatic top-up events (lib/storageLimit.ts).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_limit_events" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "kind" text NOT NULL,
+        "used_bytes" bigint NOT NULL,
+        "capacity_bytes" bigint NOT NULL,
+        "gib_added" integer,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "cleared_at" timestamptz,
+        "emailed_at" timestamptz,
+        CONSTRAINT "ck_storage_limit_events_kind" CHECK ("kind" IN ('full', 'topped_up', 'top_up_failed'))
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_storage_limit_events_open_full" ON "storage_limit_events" ("client_id") WHERE "kind" = 'full' AND "cleared_at" IS NULL`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_limit_events_tenant" ON "storage_limit_events" ("client_id", "created_at")`);
     // Bound the immutable response ledger and remove spent opaque credentials.
     await db.execute(sql`DELETE FROM "storage_download_events" WHERE "created_at" < (date_trunc('month', now()) - interval '15 months')`);
     await db.execute(sql`DELETE FROM "storage_download_tokens" WHERE "expires_at" < now()`);
@@ -1029,6 +1348,8 @@ export async function runRuntimeMigrations() {
     await migrateMobilePasskeyChallenges();
     await migrateIncidents();
     await migrateComplianceAuditTrail();
+    // Before the audit-log migration, which installs its triggers.
+    await migrateKitchenClosedDays();
     await migrateAuditLog();
     await migrateSousVide();
     await migrateFoodSafetySiteScoping();
@@ -1263,6 +1584,7 @@ export async function runRuntimeMigrations() {
       )
     `);
     await migrateDoctrackSafetrackMerge();
+    await restoreDoctrackSafetrackCopyDepartments();
     await migrateLegionellaOutlets();
     await migrateComplianceHub();
     await migrateTrackActions();
@@ -1323,16 +1645,13 @@ export async function runRuntimeMigrations() {
       DROP CONSTRAINT IF EXISTS "contractor_email_queue_email_type_check"`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue"
       ADD CONSTRAINT "contractor_email_queue_email_type_check"
-      CHECK ("email_type" IN ('assignment','reminder','quote_request','cancellation'))`);
+      CHECK ("email_type" IN ('assignment','reminder','quote_request','cancellation','certificate_followup'))`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue" ALTER COLUMN "quote_token" DROP NOT NULL`);
     await migrateComplianceScheduleTokens();
     // This credential-scrubbing migration assumes one application instance starts
     // at a time and finishes migrations before readiness. Zero-downtime deployment
     // alongside an older writer is intentionally not supported.
-    await ensureQueueMigrationIndexes();
-    await sweepPlainTextQueuedCredentials();
-    await scrubLegacyQueuedCredentials();
-    await reencryptQueuedTokenPayloads();
+    await runContractorCredentialPasses();
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_contractor_email_queue_quote_token_hash" ON contractor_email_queue ("quote_token_hash")`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue"
       DROP CONSTRAINT IF EXISTS "contractor_email_queue_entity_type_check",
@@ -1546,11 +1865,626 @@ export async function runRuntimeMigrations() {
       )
     `);
 
+    // ---- Compliance content fixes (Oct 2026) ----
+    // Optional repeat interval on compliance checks: completing a check with
+    // an interval reopens it, due that many months after completion.
+    await db.execute(sql`ALTER TABLE "compliance_items" ADD COLUMN IF NOT EXISTS "frequency_months" integer`);
+    // Optional RIDDOR 2013 category on incidents (sets the reporting deadline),
+    // snapshotted on each append-only RIDDOR decision event.
+    await db.execute(sql`ALTER TABLE "incidents" ADD COLUMN IF NOT EXISTS "riddor_category" text`);
+    await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "riddor_category" text`);
+
+    // ---- Daily checklist slot lookup index ----
+    // Deliberately NOT unique: daily_checklists had no unique key and older
+    // databases may hold duplicate (client, site, type, date) rows, which a
+    // unique index would reject at start-up. POST /daily-track-am|pm dedupes
+    // in a transaction (lib/dailyChecklistWrite.ts); this index serves that
+    // lookup and the date-range reports.
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "IDX_daily_checklists_client_date_site_type"
+      ON "daily_checklists" ("client_id", "check_date", "site_id", "checklist_type")
+    `);
+
+    // ---- Dashboard and reminder read indexes ----
+    // /dashboard/summary and the daily check reminders filter these tables by
+    // tenant (and site/date/status). Plain CREATE INDEX IF NOT EXISTS: the
+    // tables are small, so the brief build lock is acceptable. Mirrored in the
+    // Drizzle schema where the table is declared there.
+    for (const statement of [
+      // daily_checklists is covered by IDX_daily_checklists_client_date_site_type above.
+      sql`CREATE INDEX IF NOT EXISTS "IDX_fix_track_issues_client_status" ON "fix_track_issues" ("client_id", "status")`,
+      sql`CREATE INDEX IF NOT EXISTS "IDX_doc_track_documents_client" ON "doc_track_documents" ("client_id")`,
+      sql`CREATE INDEX IF NOT EXISTS "IDX_compliance_items_client" ON "compliance_items" ("client_id")`,
+      sql`CREATE INDEX IF NOT EXISTS "IDX_hot_tub_checks_client_date" ON "hot_tub_checks" ("client_id", "check_date")`,
+      sql`CREATE INDEX IF NOT EXISTS "IDX_sites_client" ON "sites" ("client_id")`,
+      sql`CREATE INDEX IF NOT EXISTS "IDX_fire_safety_client_site_type_date" ON "fire_safety_checks" ("client_id", "site_id", "check_type", "check_date")`,
+    ]) {
+      await db.execute(statement);
+    }
+
+    // ---- Daily checklist mobile outbox replays ----
+    // The mobile app queues AM/PM checklist submissions offline under a stable
+    // device entry ID. Storing it lets POST recognise a replay of a submission
+    // it already applied (after a lost response) instead of answering 409.
+    // Nullable: web submissions carry none.
+    await db.execute(sql`ALTER TABLE "daily_checklist_submissions" ADD COLUMN IF NOT EXISTS "client_entry_id" text`);
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS "UQ_daily_checklist_submissions_client_entry_id"
+      ON "daily_checklist_submissions" ("client_id", "client_entry_id")
+      WHERE "client_entry_id" IS NOT NULL
+    `);
+
+    // ---- Mobile outbox replays for other check submissions (Oct 2026) ----
+    // Fire, legionella, hot tub, PAT and incident records sent from the
+    // mobile outbox carry a stable device entry ID plus a fingerprint of the
+    // payload (lib/clientEntryReplay.ts), so a retry after a lost response
+    // returns the stored row instead of creating a duplicate. Nullable: web
+    // submissions carry none. Schema: the matching lib/db tables.
+    for (const table of ["fire_safety_checks", "legionella_checks", "hot_tub_checks", "pat_tests", "incidents"]) {
+      await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "client_entry_id" text`));
+      await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "client_entry_hash" text`));
+      await db.execute(sql.raw(`
+        CREATE UNIQUE INDEX IF NOT EXISTS "UQ_${table}_client_entry_id"
+        ON "${table}" ("client_id", "client_entry_id")
+        WHERE "client_entry_id" IS NOT NULL
+      `));
+    }
+
+    // ---- Scheduled jobs: run history, delivery leases, trial-ended notice ----
+    // scheduled_job_runs backs the stale-job note in /readyz and weekly-job
+    // catch-up; scheduled_email_claims holds expiring reminder-email leases
+    // (lib/emailDeliveryClaims.ts); trial_ended_email_sent_at dedupes the
+    // one-shot "your trial has ended" email.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "scheduled_job_runs" (
+        "job_name" text PRIMARY KEY,
+        "last_started_at" timestamptz,
+        "last_success_at" timestamptz,
+        "last_failure_at" timestamptz,
+        "updated_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "scheduled_email_claims" (
+        "job" text NOT NULL,
+        "delivery_key" text NOT NULL,
+        "lease_token" text,
+        "lease_expires_at" timestamptz,
+        "sent_at" timestamptz,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY ("job", "delivery_key")
+      )
+    `);
+    await db.execute(sql`ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "trial_ended_email_sent_at" timestamp`);
+
+    // ---- Site registers (Oct 2026): allergens, COSHH, asbestos ----
+    // Schema: lib/db/src/schema/registers.ts. Rows are soft-deleted
+    // (deleted_at); allergen_item_changes is the append-only tick change log.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "allergen_items" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "name" text NOT NULL,
+        "description" text,
+        "allergens" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "ppds" boolean NOT NULL DEFAULT false,
+        "last_reviewed_at" date,
+        "reviewed_by" text,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now(),
+        "deleted_at" timestamp
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "allergen_items_client_site_idx" ON "allergen_items" ("client_id", "site_id")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "allergen_item_changes" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "item_id" integer NOT NULL REFERENCES "allergen_items"("id") ON DELETE CASCADE,
+        "change_type" text NOT NULL,
+        "allergens_before" jsonb,
+        "allergens_after" jsonb,
+        "reason" text,
+        "changed_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "changed_by_name" text,
+        "created_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "allergen_item_changes_item_idx" ON "allergen_item_changes" ("client_id", "item_id")`);
+    // KitchenTrack ingredients, recipes, menus and chart sign-offs (Oct 2026).
+    // A dish with recipe lines takes its allergens from its ingredients
+    // (lib/allergenRecipes.ts); chart_changed_at against the latest sign-off
+    // shows a chart as "changed since last checked".
+    await db.execute(sql`ALTER TABLE "allergen_items" ADD COLUMN IF NOT EXISTS "may_contain" jsonb NOT NULL DEFAULT '[]'::jsonb`);
+    await db.execute(sql`ALTER TABLE "allergen_items" ADD COLUMN IF NOT EXISTS "chart_changed_at" timestamp NOT NULL DEFAULT now()`);
+    await db.execute(sql`ALTER TABLE "allergen_item_changes" ADD COLUMN IF NOT EXISTS "may_contain_before" jsonb`);
+    await db.execute(sql`ALTER TABLE "allergen_item_changes" ADD COLUMN IF NOT EXISTS "may_contain_after" jsonb`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "allergen_ingredients" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "name" text NOT NULL,
+        "supplier" text,
+        "product_code" text,
+        "contains" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "may_contain" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "notes" text,
+        "last_checked_at" date,
+        "checked_by" text,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now(),
+        "deleted_at" timestamp
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "allergen_ingredients_client_site_idx" ON "allergen_ingredients" ("client_id", "site_id")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "allergen_ingredient_changes" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "ingredient_id" integer NOT NULL REFERENCES "allergen_ingredients"("id") ON DELETE CASCADE,
+        "change_type" text NOT NULL,
+        "contains_before" jsonb,
+        "contains_after" jsonb,
+        "may_contain_before" jsonb,
+        "may_contain_after" jsonb,
+        "reason" text,
+        "dishes_updated" integer NOT NULL DEFAULT 0,
+        "changed_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "changed_by_name" text,
+        "created_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "allergen_ingredient_changes_ingredient_idx" ON "allergen_ingredient_changes" ("client_id", "ingredient_id")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "allergen_item_ingredients" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "item_id" integer NOT NULL REFERENCES "allergen_items"("id") ON DELETE CASCADE,
+        "ingredient_id" integer NOT NULL REFERENCES "allergen_ingredients"("id") ON DELETE CASCADE,
+        "quantity" numeric(12, 3),
+        "unit" text,
+        "position" integer NOT NULL DEFAULT 0
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "allergen_item_ingredients_item_ingredient_idx" ON "allergen_item_ingredients" ("item_id", "ingredient_id")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "allergen_item_ingredients_ingredient_idx" ON "allergen_item_ingredients" ("client_id", "ingredient_id")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "allergen_menus" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "name" text NOT NULL,
+        "contents_changed_at" timestamp NOT NULL DEFAULT now(),
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now(),
+        "deleted_at" timestamp
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "allergen_menus_client_site_idx" ON "allergen_menus" ("client_id", "site_id")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "allergen_menu_items" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "menu_id" integer NOT NULL REFERENCES "allergen_menus"("id") ON DELETE CASCADE,
+        "item_id" integer NOT NULL REFERENCES "allergen_items"("id") ON DELETE CASCADE
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "allergen_menu_items_menu_item_idx" ON "allergen_menu_items" ("menu_id", "item_id")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "allergen_menu_items_item_idx" ON "allergen_menu_items" ("client_id", "item_id")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "allergen_chart_signoffs" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "menu_id" integer REFERENCES "allergen_menus"("id") ON DELETE SET NULL,
+        "dish_count" integer NOT NULL DEFAULT 0,
+        "note" text,
+        "checked_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "checked_by_name" text NOT NULL,
+        "created_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "allergen_chart_signoffs_chart_idx" ON "allergen_chart_signoffs" ("client_id", "site_id", "menu_id", "created_at")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "coshh_substances" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "product_name" text NOT NULL,
+        "supplier" text,
+        "hazard_pictograms" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "where_used" text,
+        "sds_object_path" text,
+        "sds_file_name" text,
+        "sds_file_size" bigint,
+        "sds_mime_type" text,
+        "assessment_date" date,
+        "review_due" date,
+        "controls" text,
+        "status" text NOT NULL DEFAULT 'in_use',
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now(),
+        "deleted_at" timestamp
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "coshh_substances_client_site_idx" ON "coshh_substances" ("client_id", "site_id")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "asbestos_records" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "built_before_2000" text NOT NULL DEFAULT 'unknown',
+        "no_asbestos_expected" boolean NOT NULL DEFAULT false,
+        "survey_type" text,
+        "survey_date" date,
+        "surveyor" text,
+        "report_object_path" text,
+        "report_file_name" text,
+        "report_file_size" bigint,
+        "report_mime_type" text,
+        "plan_review_due" date,
+        "notes" text,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now(),
+        "deleted_at" timestamp
+      )
+    `);
+    // One current (not deleted) asbestos record per site.
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "asbestos_records_current_site_uq" ON "asbestos_records" ("client_id", "site_id") WHERE "deleted_at" IS NULL AND "site_id" IS NOT NULL`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "asbestos_register_entries" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "record_id" integer NOT NULL REFERENCES "asbestos_records"("id") ON DELETE CASCADE,
+        "location" text NOT NULL,
+        "material" text NOT NULL,
+        "condition" text NOT NULL DEFAULT 'good',
+        "risk_score" integer,
+        "priority" text NOT NULL DEFAULT 'low',
+        "action" text NOT NULL DEFAULT 'manage',
+        "last_inspected" date,
+        "notes" text,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now(),
+        "deleted_at" timestamp
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "asbestos_register_entries_record_idx" ON "asbestos_register_entries" ("client_id", "record_id")`);
+
+    // ---- Consultant practice branding (Oct 2026) ----
+    // One row per consultant user: practice name and a finalised private logo
+    // object, shown as "Managed by" to the businesses linked to them.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "consultant_branding" (
+        "consultant_user_id" integer PRIMARY KEY REFERENCES "users"("id") ON DELETE CASCADE,
+        "practice_name" text,
+        "logo_object_path" text,
+        "logo_content_type" text,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+
+    // ---- Setup wizard and staff tasks (Oct 2026) ----
+    // clients.setup_completed_at: null shows the first-run setup wizard to
+    // admins. The backfill runs only in the transaction that adds the column,
+    // so businesses that already have sites or compliance checks never see the
+    // wizard, while new sign-ups (seeded with starter checks at registration)
+    // keep seeing it after later restarts.
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = current_schema() AND table_name = 'clients' AND column_name = 'setup_completed_at'
+        ) THEN
+          ALTER TABLE "clients" ADD COLUMN "setup_completed_at" timestamp;
+          UPDATE "clients" c SET "setup_completed_at" = now()
+          WHERE c."setup_completed_at" IS NULL
+            AND (EXISTS (SELECT 1 FROM "sites" s WHERE s."client_id" = c."id")
+              OR EXISTS (SELECT 1 FROM "compliance_items" i WHERE i."client_id" = c."id"));
+        END IF;
+      END $$
+    `);
+    // Staff tasks: one-off or daily/weekly/monthly; occurrences are derived on
+    // read, only completions are stored (one per task per occurrence date).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "tasks" (
+        "id"               serial PRIMARY KEY,
+        "client_id"        integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id"          integer REFERENCES "sites"("id") ON DELETE CASCADE,
+        "title"            text NOT NULL,
+        "instruction"      text,
+        "module"           text,
+        "assignee_user_id" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "assignee_role"    text,
+        "recurrence"       text NOT NULL DEFAULT 'once',
+        "starts_on"        date NOT NULL,
+        "active"           boolean NOT NULL DEFAULT true,
+        "created_by"       integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at"       timestamp NOT NULL DEFAULT now(),
+        "updated_at"       timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_tasks_client" ON "tasks" ("client_id")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_tasks_assignee" ON "tasks" ("assignee_user_id")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "task_completions" (
+        "id"                serial PRIMARY KEY,
+        "client_id"         integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "task_id"           integer NOT NULL REFERENCES "tasks"("id") ON DELETE CASCADE,
+        "occurrence_date"   date NOT NULL,
+        "completed_by"      integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "completed_by_name" text NOT NULL,
+        "note"              text,
+        "completed_at"      timestamp NOT NULL DEFAULT now(),
+        "created_at"        timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_task_completions_task_date" ON "task_completions" ("task_id", "occurrence_date")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_task_completions_client" ON "task_completions" ("client_id")`);
+
+    // KitchenTrack cooking limit: the column default still held the old
+    // "Above 75°C (10 seconds)" text; match the app's default for new rows.
+    // Existing rows keep the limit they were recorded against.
+    await db.execute(sql`ALTER TABLE "food_safety_records" ALTER COLUMN "cooking_limit" SET DEFAULT '75°C or above (core)'`);
+
+    // ---- Push/runtime column parity (Oct 2026) ----
+    // Production's base schema comes from drizzle-kit push, so these tables
+    // already have the Drizzle columns there and the older CREATE TABLE text
+    // above never runs. A database built by runtime migrations alone got the
+    // older column set instead and lacked the columns the routes write
+    // (hot_tubs.description, hot_tub_checks.ph_value, SafeTrack description,
+    // scope, version...). Add them so both paths end with the Drizzle columns.
+    // The older runtime-only columns are left in place; migrateLegacyColumnLayouts
+    // copies any values they hold into these columns once.
+    await db.execute(sql`
+      ALTER TABLE "hot_tubs"
+        ADD COLUMN IF NOT EXISTS "description" text
+    `);
+    await db.execute(sql`
+      ALTER TABLE "hot_tub_checks"
+        ADD COLUMN IF NOT EXISTS "ph_value" numeric(4, 2),
+        ADD COLUMN IF NOT EXISTS "sanitiser_level" numeric(6, 2),
+        ADD COLUMN IF NOT EXISTS "temperature" numeric(5, 2)
+    `);
+    await db.execute(sql`
+      ALTER TABLE "safe_risk_assessments"
+        ADD COLUMN IF NOT EXISTS "description" text,
+        ADD COLUMN IF NOT EXISTS "assessed_by" text,
+        ADD COLUMN IF NOT EXISTS "version" text NOT NULL DEFAULT '1.0',
+        ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL
+    `);
+    await db.execute(sql`
+      ALTER TABLE "safe_sops"
+        ADD COLUMN IF NOT EXISTS "scope" text,
+        ADD COLUMN IF NOT EXISTS "published_at" timestamp,
+        ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL
+    `);
+    await db.execute(sql`
+      ALTER TABLE "safe_handbook"
+        ADD COLUMN IF NOT EXISTS "section" text,
+        ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL
+    `);
+    // The runtime CREATE TABLE gave these no default; Drizzle inserts rely on it.
+    await db.execute(sql`ALTER TABLE "safe_sops" ALTER COLUMN "version" SET DEFAULT '1.0'`);
+    await db.execute(sql`ALTER TABLE "safe_handbook" ALTER COLUMN "version" SET DEFAULT '1.0'`);
+    // bike_services has no Drizzle table and was created with performed_by and
+    // cost (pounds), but the BikeTrack service routes and web app have always
+    // used serviced_by, cost_pence (as GreenTrack does) and created_by, so every
+    // service log failed on every database. The old columns are never written.
+    await db.execute(sql`
+      ALTER TABLE "bike_services"
+        ADD COLUMN IF NOT EXISTS "serviced_by" text,
+        ADD COLUMN IF NOT EXISTS "cost_pence" integer,
+        ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL
+    `);
+
+    // ---- Asbestos survey history (Oct 2026) ----
+    // Replacing (or detaching) an asbestos survey report keeps the previous
+    // survey and its file listed: one append-only row per replaced report.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "asbestos_survey_history" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "record_id" integer NOT NULL REFERENCES "asbestos_records"("id") ON DELETE CASCADE,
+        "survey_type" text,
+        "survey_date" date,
+        "surveyor" text,
+        "report_object_path" text NOT NULL,
+        "report_file_name" text,
+        "report_file_size" bigint,
+        "report_mime_type" text,
+        "replaced_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "replaced_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "asbestos_survey_history_record_idx" ON "asbestos_survey_history" ("client_id", "record_id")`);
+
+    // ---- COSHHTrack (Oct 2026): after coshh_substances, which it references ----
+    await migrateCoshhTrack();
+
+    // ---- Track owners and in-app notifications (Oct 2026) ----
+    await migrateTrackOwnersAndNotifications();
+    await migrateCertificateOutcomes();
+    await migrateFireCallPoints();
+    await migrateEquipmentLabels();
+    await migrateInspectionReports();
+    await migrateAiUsage();
+    await migrateBillingAlerts();
+    await migrateCertificateInbox();
+    await migrateContractorSignIn();
+    await migrateContractorTestVisits();
+    await migrateContractorVisitNotNeeded();
+    await migrateGreenkeepingDailyChecks();
+    await migrateRecordSignatures();
+    await addFireAlarmPanelToSavedPremisesChecks();
+
+    // ---- Frost warnings (Nov 2026) ----
+    await migrateFrostWarnings();
+
+    // ---- One Owner login for several businesses (Nov 2026) ----
+    // Mirrors lib/db/src/schema/owner-businesses.ts.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "owner_businesses" (
+        "id" serial PRIMARY KEY,
+        "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "added_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "owner_businesses_user_client_uq" ON "owner_businesses" ("user_id", "client_id")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "owner_businesses_client_idx" ON "owner_businesses" ("client_id")`);
+
+    // ---- Accident book addresses (Nov 2026) ----
+    // Mirrors lib/db/src/schema/incidents.ts involvedAddress / reporterAddress.
+    await db.execute(sql`ALTER TABLE "incidents" ADD COLUMN IF NOT EXISTS "involved_address" text`);
+    await db.execute(sql`ALTER TABLE "incidents" ADD COLUMN IF NOT EXISTS "reporter_address" text`);
+
+    // ---- A compliance check done in house by a competent person (Oct 2026) ----
+    // Mirrors lib/db/src/schema/compliance-items.ts completedInHouseBy.
+    await db.execute(sql`ALTER TABLE "compliance_items" ADD COLUMN IF NOT EXISTS "completed_in_house_by" text`);
+
+    // ---- The person responsible for an action, issue or check (Oct 2026) ----
+    await migrateAssignees();
+
+    // ---- FixTrack contractor visit date and completion (Oct 2026) ----
+    await migrateFixTrackContractorProgress();
+
+    // ---- Department recorded with each submission (Oct 2026) ----
+    // After every reported table exists; see submitterDepartmentMigration.ts.
+    await migrateSubmitterDepartments();
+
+    // Last: every audited table must exist by now (see auditLogMigration.ts).
+    await migrateExtendedAuditLog();
+
+    // Last, so every current column exists and audited tables log the copies.
+    await migrateLegacyColumnLayouts();
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");
     throw err;
   }
+}
+
+// ---- COSHHTrack ----
+async function migrateCoshhTrack() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "coshh_assessments" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "substance_id" integer REFERENCES "coshh_substances"("id") ON DELETE SET NULL,
+      "task" text NOT NULL,
+      "who_at_risk" text,
+      "exposure_routes" jsonb NOT NULL DEFAULT '[]'::jsonb,
+      "how_often" text,
+      "hazard_statements" text,
+      "signal_word" text,
+      "health_effects" text,
+      "exposure_limits" text,
+      "controls" text,
+      "ppe" jsonb NOT NULL DEFAULT '[]'::jsonb,
+      "ppe_details" text,
+      "risk_level" text NOT NULL DEFAULT 'medium',
+      "health_surveillance_required" boolean NOT NULL DEFAULT false,
+      "monitoring_required" boolean NOT NULL DEFAULT false,
+      "lev_required" boolean NOT NULL DEFAULT false,
+      "storage" text,
+      "spill_procedure" text,
+      "first_aid" text,
+      "disposal" text,
+      "assessor" text,
+      "assessment_date" date NOT NULL,
+      "review_due" date,
+      "status" text NOT NULL DEFAULT 'current',
+      "document_object_path" text,
+      "document_file_name" text,
+      "document_file_size" bigint,
+      "document_mime_type" text,
+      "notes" text,
+      "draft_source" text,
+      "drafted_at" timestamp,
+      "checked_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "checked_by_name" text,
+      "checked_at" timestamp,
+      "revision" integer NOT NULL DEFAULT 1,
+      "sign_off_departments" jsonb NOT NULL DEFAULT '[]'::jsonb,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now(),
+      "deleted_at" timestamp
+    )
+  `);
+  await db.execute(sql`
+    ALTER TABLE "coshh_assessments"
+      ADD COLUMN IF NOT EXISTS "revision" integer NOT NULL DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS "sign_off_departments" jsonb NOT NULL DEFAULT '[]'::jsonb
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "coshh_assessments_client_site_idx" ON "coshh_assessments" ("client_id", "site_id")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "coshh_checks" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "assessment_id" integer REFERENCES "coshh_assessments"("id") ON DELETE SET NULL,
+      "check_type" text NOT NULL,
+      "check_date" date NOT NULL,
+      "subject" text,
+      "carried_out_by" text,
+      "result" text NOT NULL DEFAULT 'pass',
+      "action_required" text,
+      "next_due_date" date,
+      "report_object_path" text,
+      "report_file_name" text,
+      "report_file_size" bigint,
+      "report_mime_type" text,
+      "notes" text,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now(),
+      "deleted_at" timestamp
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "coshh_checks_client_site_idx" ON "coshh_checks" ("client_id", "site_id", "check_type")`);
+  // A failed check opens a COSHHTrack action, like the other result-based
+  // tracks. coshh_checks is created after migrateTrackActions has installed
+  // those triggers, so it gets its own here.
+  await db.execute(sql`DROP TRIGGER IF EXISTS sync_track_action_on_result ON "coshh_checks"`);
+  await db.execute(sql`
+    CREATE TRIGGER sync_track_action_on_result
+    AFTER INSERT OR UPDATE OF "result" ON "coshh_checks"
+    FOR EACH ROW EXECUTE FUNCTION sync_track_action_from_source('coshh', 'result', 'coshh_checks')
+  `);
+  // Staff read-and-sign records; each also writes a TrainTrack sign-off.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "coshh_acknowledgements" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "assessment_id" integer NOT NULL REFERENCES "coshh_assessments"("id") ON DELETE CASCADE,
+      "revision" integer NOT NULL,
+      "staff_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL,
+      "staff_name" text NOT NULL,
+      "signature" text,
+      "acknowledged_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "train_track_record_id" integer REFERENCES "train_track_records"("id") ON DELETE SET NULL,
+      "acknowledged_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "coshh_acknowledgements_person_revision_idx"
+    ON "coshh_acknowledgements" ("assessment_id", "revision", "staff_roster_id")
+  `);
 }
 
 // ---- Shared operational action register ----
@@ -1689,6 +2623,7 @@ async function migrateTrackActions() {
   await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "resolver_signature" text`);
   await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "fix_track_issue_id" integer REFERENCES "fix_track_issues"("id") ON DELETE SET NULL`);
   await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "fix_track_disposition" text`);
+  await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "media_urls" jsonb NOT NULL DEFAULT '[]'::jsonb`);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_track_actions_fix_track_issue" ON "track_actions" ("fix_track_issue_id") WHERE "fix_track_issue_id" IS NOT NULL`);
   await db.execute(sql`
     UPDATE "track_actions" a
@@ -1817,6 +2752,14 @@ async function migrateTrackActions() {
         action_due_date := (record_json->>'follow_up_date')::date;
       END IF;
       source_site_id := nullif(record_json->>'site_id', '')::integer;
+      IF TG_ARGV[0] = 'coshh' THEN
+        action_title := CASE record_json->>'check_type'
+          WHEN 'lev_examination' THEN 'Extraction (LEV) examination failed'
+          WHEN 'health_surveillance' THEN 'Health check needs follow-up'
+          WHEN 'exposure_monitoring' THEN 'Exposure monitoring result needs action'
+          ELSE 'COSHH check needs action'
+        END || coalesce(': ' || nullif(record_json->>'subject', ''), '');
+      END IF;
       -- Green PUWER checks are machine-scoped. Resolve their site through the
       -- machine when the check row itself has no site_id, so department
       -- filtering remains as strict as for directly site-scoped records.
@@ -1938,6 +2881,107 @@ async function migrateTrackActions() {
         END IF;
       END LOOP;
     END $$
+  `);
+  await migrateTrackActionsForFindings();
+}
+
+
+// Findings that are not a pass/fail result still need an action on their
+// track: a premises inspection that records action required, any pest
+// sighting not already resolved, and a pest contractor's visit
+// recommendations. Keyed by source row, so an update never adds a second
+// action. Whether the work goes to FixTrack is the user's call.
+async function migrateTrackActionsForFindings() {
+  await db.execute(sql`
+    CREATE OR REPLACE FUNCTION raise_track_action_for_finding()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    DECLARE
+      action_module text;
+      action_title text;
+      action_instruction text;
+      action_severity text := 'action_required';
+      action_site_id integer := NEW.site_id;
+    BEGIN
+      IF TG_TABLE_NAME = 'premises_inspections' THEN
+        IF nullif(trim(coalesce(NEW.action_required, '')), '') IS NULL OR NEW.status = 'closed' THEN
+          RETURN NEW;
+        END IF;
+        action_module := 'premises';
+        action_title := 'Premises inspection: ' || coalesce(nullif(trim(NEW.area), ''), initcap(replace(NEW.inspection_type, '_', ' ')));
+        action_instruction := concat_ws(E'\n',
+          'Inspection on ' || NEW.inspection_date::text || coalesce(' by ' || nullif(trim(NEW.inspected_by), ''), '') || '.',
+          'Action required: ' || trim(NEW.action_required),
+          'Hazard: ' || nullif(trim(NEW.hazard_details), ''),
+          'Findings: ' || nullif(trim(NEW.findings), ''));
+      ELSIF TG_TABLE_NAME = 'pest_activity' THEN
+        IF NEW.resolved THEN
+          RETURN NEW;
+        END IF;
+        action_module := 'pest';
+        action_title := 'Pest activity: ' || initcap(replace(NEW.pest_type, '_', ' '))
+          || coalesce(' at ' || nullif(trim(NEW.location), ''), '');
+        action_instruction := concat_ws(E'\n',
+          'Recorded on ' || NEW.recorded_date::text || coalesce(' by ' || nullif(trim(NEW.recorded_by), ''), '') || ': '
+            || replace(NEW.evidence_type, '_', ' ') || ', severity ' || NEW.severity || '.',
+          'Action taken so far: ' || nullif(trim(NEW.action_taken), ''),
+          'Notes: ' || nullif(trim(NEW.notes), ''));
+        IF lower(NEW.severity) IN ('high', 'critical', 'severe') THEN
+          action_severity := 'urgent';
+        END IF;
+      ELSIF TG_TABLE_NAME = 'pest_visits' THEN
+        IF nullif(trim(coalesce(NEW.recommendations, '')), '') IS NULL THEN
+          RETURN NEW;
+        END IF;
+        action_module := 'pest';
+        action_title := 'Pest control visit recommendations';
+        action_instruction := concat_ws(E'\n',
+          'Visit on ' || NEW.visit_date::text
+            || coalesce(' by ' || nullif(trim(concat_ws(', ', nullif(trim(NEW.contractor_name), ''), nullif(trim(NEW.contractor_company), ''))), ''), '') || '.',
+          'Recommendations: ' || trim(NEW.recommendations),
+          'Findings: ' || nullif(trim(NEW.findings), ''));
+      ELSE
+        RETURN NEW;
+      END IF;
+      IF action_site_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM sites WHERE id = action_site_id AND client_id = NEW.client_id
+      ) THEN
+        action_site_id := NULL;
+      END IF;
+      INSERT INTO track_actions (
+        client_id, site_id, module, source_kind, source_record_id, title, instruction,
+        provenance, severity, status, created_by
+      ) VALUES (
+        NEW.client_id, action_site_id, action_module, TG_TABLE_NAME, NEW.id, action_title, action_instruction,
+        'product_default', action_severity, 'open', NEW.created_by
+      )
+      ON CONFLICT ("client_id", "module", "source_kind", "source_record_id")
+        WHERE "source_kind" IS NOT NULL AND "source_record_id" IS NOT NULL
+      DO NOTHING;
+      RETURN NEW;
+    END;
+    $$
+  `);
+  await db.execute(sql`DROP TRIGGER IF EXISTS raise_track_action_for_finding ON "premises_inspections"`);
+  await db.execute(sql`
+    CREATE TRIGGER raise_track_action_for_finding
+    AFTER INSERT OR UPDATE OF action_required, status ON "premises_inspections"
+    FOR EACH ROW EXECUTE FUNCTION raise_track_action_for_finding()
+  `);
+  await db.execute(sql`DROP TRIGGER IF EXISTS raise_track_action_for_finding ON "pest_activity"`);
+  await db.execute(sql`
+    CREATE TRIGGER raise_track_action_for_finding
+    AFTER INSERT ON "pest_activity"
+    FOR EACH ROW EXECUTE FUNCTION raise_track_action_for_finding()
+  `);
+  // Only visits saved from now on: older recommendations are not turned into
+  // a batch of new actions.
+  await db.execute(sql`DROP TRIGGER IF EXISTS raise_track_action_for_finding ON "pest_visits"`);
+  await db.execute(sql`
+    CREATE TRIGGER raise_track_action_for_finding
+    AFTER INSERT OR UPDATE OF recommendations ON "pest_visits"
+    FOR EACH ROW EXECUTE FUNCTION raise_track_action_for_finding()
   `);
 }
 
@@ -2245,6 +3289,36 @@ async function migrateTreeTrack() {
     END $$
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_tree_inspections_client" ON "tree_inspections" ("client_id")`);
+  // The tree register, and where each inspection's tree or issue is.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "trees" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "ref" text NOT NULL,
+      "species" text,
+      "location" text,
+      "what3words" text,
+      "latitude" double precision,
+      "longitude" double precision,
+      "risk_zone" text NOT NULL DEFAULT 'medium',
+      "inspection_interval_months" integer NOT NULL DEFAULT 12,
+      "notes" text,
+      "removed_at" date,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_trees_client" ON "trees" ("client_id")`);
+  await db.execute(sql`
+    ALTER TABLE "tree_inspections"
+    ADD COLUMN IF NOT EXISTS "tree_id" integer REFERENCES "trees"("id") ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS "what3words" text,
+    ADD COLUMN IF NOT EXISTS "latitude" double precision,
+    ADD COLUMN IF NOT EXISTS "longitude" double precision
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_tree_inspections_tree" ON "tree_inspections" ("tree_id")`);
 }
 
 // ---- BikeTrack ----
@@ -2265,6 +3339,15 @@ async function migrateBikeTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bikes_client" ON "bikes" ("client_id")`);
+  // The first BikeTrack tables (Replit, before September 2026) used other
+  // column names, so CREATE TABLE IF NOT EXISTS kept them. Add today's columns
+  // (nullable where the old rows have no value yet); migrateLegacyColumnLayouts
+  // copies the old values across. Nothing here changes a current database.
+  await db.execute(sql`
+    ALTER TABLE "bikes"
+      ADD COLUMN IF NOT EXISTS "ref" text,
+      ADD COLUMN IF NOT EXISTS "type" text NOT NULL DEFAULT 'hybrid'
+  `);
 
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "bike_hire_records" (
@@ -2290,6 +3373,18 @@ async function migrateBikeTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bike_hire_client" ON "bike_hire_records" ("client_id")`);
+  await db.execute(sql`
+    ALTER TABLE "bike_hire_records"
+      ADD COLUMN IF NOT EXISTS "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS "guest_name" text,
+      ADD COLUMN IF NOT EXISTS "guest_contact" text,
+      ADD COLUMN IF NOT EXISTS "hire_date" date,
+      ADD COLUMN IF NOT EXISTS "return_date_expected" date,
+      ADD COLUMN IF NOT EXISTS "return_date_actual" date,
+      ADD COLUMN IF NOT EXISTS "deposit_pence" integer,
+      ADD COLUMN IF NOT EXISTS "deposit_returned" boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL
+  `);
   await db.execute(sql`ALTER TABLE "bike_hire_records" ADD COLUMN IF NOT EXISTS "overdue_notified_at" timestamp`);
   await db.execute(sql`ALTER TABLE "bike_hire_records" ADD COLUMN IF NOT EXISTS "overdue_notification_claim_token" text`);
   await db.execute(sql`ALTER TABLE "bike_hire_records" ADD COLUMN IF NOT EXISTS "overdue_notification_claimed_at" timestamp`);
@@ -2356,6 +3451,24 @@ async function migrateBikeTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bike_checks_bike" ON "bike_checks" ("bike_id")`);
+  await db.execute(sql`
+    ALTER TABLE "bike_checks"
+      ADD COLUMN IF NOT EXISTS "overall_result" text NOT NULL DEFAULT 'pass',
+      ADD COLUMN IF NOT EXISTS "brakes_front" text,
+      ADD COLUMN IF NOT EXISTS "brakes_rear" text,
+      ADD COLUMN IF NOT EXISTS "tyre_front" text,
+      ADD COLUMN IF NOT EXISTS "tyre_rear" text,
+      ADD COLUMN IF NOT EXISTS "chain_gears" text,
+      ADD COLUMN IF NOT EXISTS "lights_front" text,
+      ADD COLUMN IF NOT EXISTS "lights_rear" text,
+      ADD COLUMN IF NOT EXISTS "frame" text,
+      ADD COLUMN IF NOT EXISTS "saddle_seatpost" text,
+      ADD COLUMN IF NOT EXISTS "handlebars" text,
+      ADD COLUMN IF NOT EXISTS "pedals" text,
+      ADD COLUMN IF NOT EXISTS "helmet_provided" text,
+      ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS "updated_at" timestamp NOT NULL DEFAULT now()
+  `);
 }
 
 async function migrateBikeServices() {
@@ -2377,6 +3490,114 @@ async function migrateBikeServices() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bike_services_bike" ON "bike_services" ("bike_id")`);
+}
+
+// ---- Older column layouts (Replit era) ----
+// Some installs still hold records in columns from the first table layouts
+// (see tests/upgrade-fixtures/legacy-shapes.ts). Routes read only today's
+// columns, so those records looked empty or missing. Copy each old value into
+// its current column once, without changing or removing the old column: the
+// original stays as recorded (5-year audit), and on audited tables each copy
+// is logged with its before and after values.
+//
+// Each copy runs once per database: a comment on the old column records that
+// it was done, so a value someone clears afterwards is not copied back on the
+// next start. Databases that never had the old layout (including production,
+// built by drizzle-kit push) skip every block.
+const LEGACY_COPY_MARK = "Retired column: copied into the current column by runtime migrations";
+
+function copyLegacyColumnsOnce(table: string, oldColumns: string[], statements: string[]) {
+  const [marker] = oldColumns;
+  const present = oldColumns
+    .map((column) => `EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('public.${table}') AND attname = '${column}' AND NOT attisdropped)`)
+    .join("\n      AND ");
+  return sql.raw(`
+    DO $legacy_copy$ BEGIN
+      IF ${present}
+      AND col_description(to_regclass('public.${table}'),
+        (SELECT attnum FROM pg_attribute WHERE attrelid = to_regclass('public.${table}') AND attname = '${marker}'))
+        IS DISTINCT FROM '${LEGACY_COPY_MARK}' THEN
+        ${statements.map((statement) => `EXECUTE $stmt$${statement}$stmt$;`).join("\n        ")}
+        EXECUTE $stmt$COMMENT ON COLUMN "${table}"."${marker}" IS '${LEGACY_COPY_MARK}'$stmt$;
+      END IF;
+    END $legacy_copy$
+  `);
+}
+
+async function migrateLegacyColumnLayouts() {
+  // LegionellaTrack: temperature_c (one decimal place) became temperature.
+  await db.execute(copyLegacyColumnsOnce("legionella_checks", ["temperature_c"], [
+    `UPDATE legionella_checks SET temperature = temperature_c WHERE temperature IS NULL AND temperature_c IS NOT NULL`,
+  ]));
+  // Hot tubs: temperature_c, ph_level and a chlorine or bromine level became
+  // temperature, ph_value and sanitiser_level.
+  await db.execute(copyLegacyColumnsOnce("hot_tub_checks", ["temperature_c", "ph_level", "chlorine_level", "bromine_level"], [
+    `UPDATE hot_tub_checks SET
+       temperature = coalesce(temperature, temperature_c),
+       ph_value = coalesce(ph_value, ph_level),
+       sanitiser_level = coalesce(sanitiser_level, chlorine_level, bromine_level)
+     WHERE (temperature IS NULL AND temperature_c IS NOT NULL)
+        OR (ph_value IS NULL AND ph_level IS NOT NULL)
+        OR (sanitiser_level IS NULL AND coalesce(chlorine_level, bromine_level) IS NOT NULL)`,
+  ]));
+  // BikeTrack services: performed_by and cost (pounds) became serviced_by and
+  // cost_pence. work_carried_out and parts_replaced have no current column and
+  // stay where they are.
+  await db.execute(copyLegacyColumnsOnce("bike_services", ["performed_by", "cost"], [
+    `UPDATE bike_services SET
+       serviced_by = coalesce(serviced_by, performed_by),
+       cost_pence = coalesce(cost_pence, round(cost * 100)::integer)
+     WHERE (serviced_by IS NULL AND performed_by IS NOT NULL) OR (cost_pence IS NULL AND cost IS NOT NULL)`,
+  ]));
+  // BikeTrack bikes: the old name was the bike's label (now ref) and
+  // bike_type its type. serial_number, colour and size stay where they are.
+  await db.execute(copyLegacyColumnsOnce("bikes", ["bike_type", "name"], [
+    `ALTER TABLE bikes ALTER COLUMN name DROP NOT NULL`,
+    `UPDATE bikes SET ref = coalesce(ref, nullif(name, ''), 'Bike ' || id), type = bike_type WHERE ref IS NULL`,
+  ]));
+  // BikeTrack hires: hirer_* and the hire_start/expected_return/actual_return
+  // timestamps became guest_* and dates; deposit_taken (pounds) became pence.
+  // hire_fee and the pre/post check flags stay where they are.
+  await db.execute(copyLegacyColumnsOnce("bike_hire_records",
+    ["hirer_name", "hirer_contact", "hire_start", "expected_return", "actual_return", "deposit_taken"], [
+    `ALTER TABLE bike_hire_records ALTER COLUMN hirer_name DROP NOT NULL`,
+    `UPDATE bike_hire_records SET
+       guest_name = coalesce(guest_name, hirer_name),
+       guest_contact = coalesce(guest_contact, hirer_contact),
+       hire_date = coalesce(hire_date, hire_start::date),
+       return_date_expected = coalesce(return_date_expected, expected_return::date),
+       return_date_actual = coalesce(return_date_actual, actual_return::date),
+       deposit_pence = coalesce(deposit_pence, round(deposit_taken * 100)::integer)
+     WHERE guest_name IS NULL`,
+  ]));
+  // BikeTrack checks: result became overall_result (added with a 'pass'
+  // default above, so copy every row once). items_checked stays where it is.
+  await db.execute(copyLegacyColumnsOnce("bike_checks", ["result"], [
+    `UPDATE bike_checks SET overall_result = result WHERE overall_result IS DISTINCT FROM result`,
+  ]));
+  // KitchenTrack: the first diary held one reading per appliance per day in
+  // fixed columns. Each becomes a row in today's sections (the single daily
+  // reading shows in the AM column, tagged with its old column), and the old
+  // notes and probe-cleaned answer join the day's notes.
+  await db.execute(copyLegacyColumnsOnce("food_safety_records",
+    ["fridge1_temp", "fridge2_temp", "fridge3_temp", "freezer1_temp", "freezer2_temp", "hot_holding_temp", "probe_cleaned", "notes"], [
+    `UPDATE food_safety_records f SET
+       cold_food = f.cold_food || coalesce((
+         SELECT jsonb_agg(jsonb_build_object('unit', r.unit, 'tempAm', r.reading::text, 'tempPm', '',
+           'correctiveAction', '', '_legacyColumn', r.col) ORDER BY r.ord)
+         FROM (VALUES (1, 'Fridge 1', f.fridge1_temp, 'fridge1_temp'), (2, 'Fridge 2', f.fridge2_temp, 'fridge2_temp'),
+           (3, 'Fridge 3', f.fridge3_temp, 'fridge3_temp'), (4, 'Freezer 1', f.freezer1_temp, 'freezer1_temp'),
+           (5, 'Freezer 2', f.freezer2_temp, 'freezer2_temp')) AS r(ord, unit, reading, col)
+         WHERE r.reading IS NOT NULL), '[]'::jsonb),
+       hot_holding = f.hot_holding || CASE WHEN f.hot_holding_temp IS NULL THEN '[]'::jsonb
+         ELSE jsonb_build_array(jsonb_build_object('item', 'Hot holding', 'coreTemp', f.hot_holding_temp::text,
+           'timeOfCheck', '', '_legacyColumn', 'hot_holding_temp')) END,
+       correctives = nullif(concat_ws(E'\n', nullif(f.correctives, ''),
+         CASE WHEN nullif(f.notes, '') IS NOT NULL THEN 'Diary notes: ' || f.notes END,
+         CASE f.probe_cleaned WHEN true THEN 'Probe cleaned: yes' WHEN false THEN 'Probe cleaned: no' END), '')
+     WHERE coalesce(f.fridge1_temp, f.fridge2_temp, f.fridge3_temp, f.freezer1_temp, f.freezer2_temp, f.hot_holding_temp) IS NOT NULL
+        OR nullif(f.notes, '') IS NOT NULL OR f.probe_cleaned IS NOT NULL`,
+  ]));
 }
 
 // ---- Two-factor authentication ----
@@ -2761,6 +3982,20 @@ async function migrateDocDepartment() {
   `);
 }
 
+// Mobile replay keys (lib/clientEntryReplay.ts) for a runtime-only table: a
+// stable device entry ID plus a payload fingerprint, unique per client when
+// present, so a phone resending after a lost response gets the stored row
+// back instead of creating a duplicate. Web submissions leave both null.
+async function addClientEntryReplayColumns(table: string) {
+  await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "client_entry_id" text`));
+  await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "client_entry_hash" text`));
+  await db.execute(sql.raw(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_${table}_client_entry_id"
+    ON "${table}" ("client_id", "client_entry_id")
+    WHERE "client_entry_id" IS NOT NULL
+  `));
+}
+
 // ---- Pool Track ----
 async function migratePoolTrack() {
   await db.execute(sql`
@@ -2792,6 +4027,7 @@ async function migratePoolTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_pool_checks_client_date"
     ON "pool_checks" ("client_id", "check_date")
   `);
+  await addClientEntryReplayColumns("pool_checks");
 }
 
 // ---- Green Track ----
@@ -2856,6 +4092,10 @@ async function migrateGreenTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_green_pre_use_client_date"
     ON "green_pre_use_checks" ("client_id", "check_date")
   `);
+  // Who submitted the check (the operator may be someone else); needed to
+  // recognise a phone's own resend.
+  await db.execute(sql`ALTER TABLE "green_pre_use_checks" ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
+  await addClientEntryReplayColumns("green_pre_use_checks");
 
   // Scheduled service records
   await db.execute(sql`
@@ -2905,6 +4145,16 @@ async function migrateGreenTrack() {
     ON "green_defects" ("client_id", "status")
   `);
 
+  // Machine services done in house or by a contractor (October 2026). An
+  // in-house service keeps its checklist (lib/api-zod green-service-checklist)
+  // and whether the machine was safe to use; each problem found on it becomes
+  // a defect linked back to the service. Older records leave these empty.
+  await db.execute(sql`ALTER TABLE "green_service_records" ADD COLUMN IF NOT EXISTS "done_by" text`);
+  await db.execute(sql`ALTER TABLE "green_service_records" ADD COLUMN IF NOT EXISTS "contractor_id" integer REFERENCES "contractors"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "green_service_records" ADD COLUMN IF NOT EXISTS "checklist" jsonb`);
+  await db.execute(sql`ALTER TABLE "green_service_records" ADD COLUMN IF NOT EXISTS "safe_to_use" boolean`);
+  await db.execute(sql`ALTER TABLE "green_defects" ADD COLUMN IF NOT EXISTS "service_record_id" integer REFERENCES "green_service_records"("id") ON DELETE SET NULL`);
+
   // PUWER statutory thorough examinations
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "green_puwer_inspections" (
@@ -2929,6 +4179,19 @@ async function migrateGreenTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_green_puwer_client_machine"
     ON "green_puwer_inspections" ("client_id", "machine_id")
   `);
+  // NSTS sprayer tests: a sprayer's category and purchase date set when its
+  // tests are due, and any inspection can carry its certificate (PDF or image).
+  await db.execute(sql`
+    ALTER TABLE "green_machines"
+      ADD COLUMN IF NOT EXISTS "sprayer_category" text,
+      ADD COLUMN IF NOT EXISTS "purchase_date" date
+  `);
+  await db.execute(sql`
+    ALTER TABLE "green_puwer_inspections"
+      ADD COLUMN IF NOT EXISTS "certificate_object_path" text,
+      ADD COLUMN IF NOT EXISTS "certificate_file_name" text,
+      ADD COLUMN IF NOT EXISTS "certificate_mime_type" text
+  `);
 
   // Fuel & oil usage logs
   await db.execute(sql`
@@ -2949,6 +4212,128 @@ async function migrateGreenTrack() {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS "IDX_green_fuel_client_machine"
     ON "green_fuel_logs" ("client_id", "machine_id")
+  `);
+
+  // Hour meter readings: logged on their own, or on the daily pre-use check.
+  // Fuel logs and service records already carry their own engine hours.
+  await db.execute(sql`ALTER TABLE "green_pre_use_checks" ADD COLUMN IF NOT EXISTS "hour_meter" double precision`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "green_hour_readings" (
+      "id"                    serial PRIMARY KEY,
+      "client_id"             integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "machine_id"            integer NOT NULL REFERENCES "green_machines"("id") ON DELETE CASCADE,
+      "reading_date"          date NOT NULL,
+      "hours"                 double precision NOT NULL,
+      "recorded_by"           text,
+      "recorded_by_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL,
+      "notes"                 text,
+      "created_by"            integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"            timestamp NOT NULL DEFAULT now(),
+      "updated_at"            timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_green_hour_readings_client_machine"
+    ON "green_hour_readings" ("client_id", "machine_id", "reading_date")
+  `);
+
+  // Spraying book and stock: products (pesticides, fertiliser, top dressing,
+  // seed...), deliveries, stock counts and write-offs, and application records
+  // whose product quantities come off stock. Stock on hand is worked out from
+  // the movements less the quantities applied, so nothing is stored twice.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "green_products" (
+      "id"                serial PRIMARY KEY,
+      "client_id"         integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "name"              text NOT NULL,
+      "category"          text NOT NULL DEFAULT 'other',
+      "unit"              text NOT NULL DEFAULT 'L',
+      "mapp_number"       text,
+      "active_ingredient" text,
+      "supplier"          text,
+      "reorder_level"     double precision,
+      "notes"             text,
+      "active"            boolean NOT NULL DEFAULT true,
+      "created_by"        integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"        timestamp NOT NULL DEFAULT now(),
+      "updated_at"        timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_green_products_client" ON "green_products" ("client_id")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "green_stock_movements" (
+      "id"                    serial PRIMARY KEY,
+      "client_id"             integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "product_id"            integer NOT NULL REFERENCES "green_products"("id") ON DELETE CASCADE,
+      "movement_date"         date NOT NULL,
+      "kind"                  text NOT NULL,
+      "quantity"              double precision NOT NULL,
+      "counted_quantity"      double precision,
+      "supplier"              text,
+      "batch_number"          text,
+      "reference"             text,
+      "recorded_by"           text,
+      "recorded_by_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL,
+      "notes"                 text,
+      "created_by"            integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"            timestamp NOT NULL DEFAULT now(),
+      "updated_at"            timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_green_stock_movements_client_product"
+    ON "green_stock_movements" ("client_id", "product_id", "movement_date")
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "green_applications" (
+      "id"                    serial PRIMARY KEY,
+      "client_id"             integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "application_date"      date NOT NULL,
+      "start_time"            text,
+      "end_time"              text,
+      "method"                text NOT NULL DEFAULT 'spray',
+      "machine_id"            integer REFERENCES "green_machines"("id") ON DELETE SET NULL,
+      "areas"                 jsonb NOT NULL DEFAULT '[]'::jsonb,
+      "area_details"          text,
+      "area_hectares"         double precision,
+      "water_volume_litres"   double precision,
+      "nozzle"                text,
+      "reason"                text,
+      "operator_name"         text,
+      "operator_roster_id"    integer REFERENCES "staff_roster"("id") ON DELETE SET NULL,
+      "operator_certificate"  text,
+      "weather"               text,
+      "wind"                  text,
+      "temperature_c"         double precision,
+      "notes"                 text,
+      "created_by"            integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"            timestamp NOT NULL DEFAULT now(),
+      "updated_at"            timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_green_applications_client_date"
+    ON "green_applications" ("client_id", "application_date")
+  `);
+  // A product used in an application cannot be deleted (archive it instead).
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "green_application_products" (
+      "id"             serial PRIMARY KEY,
+      "client_id"      integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "application_id" integer NOT NULL REFERENCES "green_applications"("id") ON DELETE CASCADE,
+      "product_id"     integer NOT NULL REFERENCES "green_products"("id") ON DELETE RESTRICT,
+      "rate_per_hectare" double precision,
+      "quantity_used"  double precision NOT NULL,
+      "created_at"     timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_green_application_products_application"
+    ON "green_application_products" ("application_id")
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_green_application_products_client_product"
+    ON "green_application_products" ("client_id", "product_id")
   `);
 }
 
@@ -2983,6 +4368,7 @@ async function migrateSwimTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_swim_sessions_client_date"
     ON "swim_sessions" ("client_id", "session_date")
   `);
+  await addClientEntryReplayColumns("swim_sessions");
 
   // Periodic lifeguard surveillance checks (every 15-20 min during session)
   await db.execute(sql`
@@ -3254,7 +4640,8 @@ async function migrateFixTrackV2() {
     ON "fix_track_issue_activity" ("issue_id", "created_at")
   `);
   // Earlier installs constrained activity to status/note. The contractor mail
-  // workflow is also an audit trail, so replace that generated constraint
+  // workflow, and deleting a photo or video from a finished issue, are also
+  // part of the audit trail, so replace that generated constraint
   // explicitly rather than relying on CREATE TABLE IF NOT EXISTS.
   await db.execute(sql`
     ALTER TABLE "fix_track_issue_activity"
@@ -3266,7 +4653,8 @@ async function migrateFixTrackV2() {
       CHECK ("event_type" IN (
         'status', 'note',
         'email_requested', 'email_approved', 'email_rejected',
-        'email_invalidated', 'email_sent'
+        'email_invalidated', 'email_sent', 'email_failed',
+        'media_deleted'
       ))
   `);
   await db.execute(sql`
@@ -3545,6 +4933,8 @@ async function migrateClientDocuments() {
     CREATE INDEX IF NOT EXISTS "IDX_client_documents_client"
     ON "client_documents" ("client_id", "created_at")
   `);
+  // Optional document type ("haccp" or "recipe_spec"); NULL = general document.
+  await db.execute(sql`ALTER TABLE "client_documents" ADD COLUMN IF NOT EXISTS "category" text`);
 }
 
 async function migrateIncidents() {
@@ -3609,6 +4999,11 @@ async function migrateIncidents() {
   await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "decision_at" timestamp`);
   await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "submitted_at" timestamp`);
   await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "submission_evidence" text`);
+  // HSE receipt bound to a submission event; set only on insert.
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "receipt_object_path" text`);
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "receipt_file_name" text`);
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "receipt_content_type" text`);
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "receipt_source" text`);
   await db.execute(sql`
     UPDATE "incident_riddor_events" e
     SET "decision_at" = e."created_at"
@@ -3653,6 +5048,9 @@ async function migrateIncidents() {
         WHERE "id" = NEW."incident_id" AND "client_id" = NEW."client_id"
       ) THEN
         RAISE EXCEPTION 'RIDDOR event tenant must match its incident';
+      END IF;
+      IF NEW."receipt_object_path" IS NOT NULL AND NEW."event_type" <> 'submission' THEN
+        RAISE EXCEPTION 'An HSE receipt can only be bound to a submission event';
       END IF;
       RETURN NEW;
     END;
@@ -3862,6 +5260,9 @@ async function migratePATtrack() {
       "created_at" timestamp NOT NULL DEFAULT now(), "updated_at" timestamp NOT NULL DEFAULT now()
     )
   `);
+  // Added later: a template's area type is copied into a room when the
+  // template is chosen. Existing templates keep NULL until someone sets one.
+  await db.execute(sql`ALTER TABLE "pat_equipment_templates" ADD COLUMN IF NOT EXISTS "area_type" text`);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "pat_equipment_template_items" (
       "id" serial PRIMARY KEY, "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
@@ -4025,6 +5426,8 @@ async function migrateComplianceHub() {
       CONSTRAINT "CK_compliance_action_severity" CHECK ("severity" IN ('low', 'medium', 'high', 'critical'))
     )
   `);
+  // Set when the action raised a FixTrack job (every track except GreenTrack).
+  await db.execute(sql`ALTER TABLE "compliance_actions" ADD COLUMN IF NOT EXISTS "fix_track_issue_id" integer REFERENCES "fix_track_issues"("id") ON DELETE SET NULL`);
   // Older generic action forms accepted free-form incident references. Preserve
   // ambiguous/orphaned values for admin review; normalize only references that
   // unambiguously identify an incident belonging to the same tenant.
@@ -4193,6 +5596,28 @@ async function migrateMaintenanceManager() {
     ALTER TABLE "users"
       ADD COLUMN IF NOT EXISTS "is_department_manager" boolean NOT NULL DEFAULT false
   `);
+  await db.execute(sql`
+    ALTER TABLE "users"
+      ADD COLUMN IF NOT EXISTS "all_departments" boolean NOT NULL DEFAULT false
+  `);
+  await db.execute(sql`
+    ALTER TABLE "users"
+      ADD COLUMN IF NOT EXISTS "staff_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "user_departments" (
+      "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+      "department_id" integer NOT NULL REFERENCES "departments"("id") ON DELETE CASCADE,
+      PRIMARY KEY ("user_id", "department_id")
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_user_departments_department" ON "user_departments" ("department_id")`);
+  // Departments sit under a site; existing ones keep spanning every site.
+  await db.execute(sql`
+    ALTER TABLE "departments"
+      ADD COLUMN IF NOT EXISTS "site_id" integer REFERENCES "sites"("id") ON DELETE CASCADE
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_departments_site" ON "departments" ("site_id")`);
 }
 
 async function migrateMobileSessions() {
@@ -4212,6 +5637,17 @@ async function migrateMobileSessions() {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS "IDX_mobile_sessions_expires_at"
     ON "mobile_sessions" ("expires_at")
+  `);
+  // When the user last proved their password (and second factor). Refreshing
+  // a token carries it forward, so renewal is capped from the original login.
+  await db.execute(sql`ALTER TABLE "mobile_sessions" ADD COLUMN IF NOT EXISTS "authenticated_at" timestamp`);
+  // Bearer tokens are stored as "sha256:<hex>" (lib/sessionRevocation.ts).
+  // Hash any legacy plaintext rows in place; signed-in phones keep working
+  // because lookups hash the presented token.
+  await db.execute(sql`
+    UPDATE "mobile_sessions"
+    SET "token" = 'sha256:' || encode(sha256(convert_to("token", 'UTF8')), 'hex')
+    WHERE "token" NOT LIKE 'sha256:%'
   `);
 }
 
@@ -4260,6 +5696,40 @@ async function migrateMobilePasskeyChallenges() {
     ON "mobile_passkey_challenges" ("expires_at")
   `);
 }
+
+// KitchenTrack non-operating days (lib/db/src/schema/kitchen-closed-days.ts).
+// Removal is a soft delete, so the partial unique indexes only cover active
+// closures; one per scope and day, scoped like the diary's own indexes.
+async function migrateKitchenClosedDays() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "kitchen_closed_days" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE CASCADE,
+      "closed_date" date NOT NULL,
+      "reason" text NOT NULL,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "removed_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "removed_at" timestamp
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_kitchen_closed_days_client_date"
+      ON "kitchen_closed_days" ("client_id", "closed_date")
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_kitchen_closed_days_org_date"
+      ON "kitchen_closed_days" ("client_id", "closed_date")
+      WHERE "site_id" IS NULL AND "removed_at" IS NULL
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_kitchen_closed_days_site_date"
+      ON "kitchen_closed_days" ("client_id", "site_id", "closed_date")
+      WHERE "site_id" IS NOT NULL AND "removed_at" IS NULL
+  `);
+}
+
 async function migrateFoodSafetySiteScoping() {
   // 1. Nullable site_id column (whole-org diary keeps site_id NULL).
   await db.execute(sql`
@@ -4343,7 +5813,9 @@ async function migrateOffboardingColumns() {
       ADD COLUMN IF NOT EXISTS "cancellation_warning_sent_at" timestamptz,
       ADD COLUMN IF NOT EXISTS "offboarding_email_sent_at"  timestamptz,
       ADD COLUMN IF NOT EXISTS "data_deletion_scheduled_at" timestamptz,
-      ADD COLUMN IF NOT EXISTS "data_deleted_at"            timestamptz
+      ADD COLUMN IF NOT EXISTS "data_deleted_at"            timestamptz,
+      ADD COLUMN IF NOT EXISTS "files_archived_at"          timestamptz,
+      ADD COLUMN IF NOT EXISTS "deletion_reminder_sent_at"  timestamptz
   `);
   // Per-recipient delivery state permits failed addresses to retry without
   // re-emailing successful recipients, unlike a single client-level marker.
@@ -4410,6 +5882,24 @@ async function migrateLegionellaOutlets() {
     ADD COLUMN IF NOT EXISTS outlet_id integer
     REFERENCES legionella_sentinel_outlets(id) ON DELETE SET NULL
   `);
+  // Condition answers (sediment, biofilm, lid, screens) for inspections,
+  // cleans and flushes; null for temperature checks and older records.
+  await db.execute(sql`ALTER TABLE legionella_checks ADD COLUMN IF NOT EXISTS findings jsonb`);
+  // A database built by drizzle-kit push already has the plain column, so the
+  // ADD COLUMN above is skipped there; add the foreign key on its own.
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'legionella_checks_outlet_id_fkey'
+      ) THEN
+        UPDATE legionella_checks c SET outlet_id = NULL
+        WHERE outlet_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM legionella_sentinel_outlets o WHERE o.id = c.outlet_id);
+        ALTER TABLE legionella_checks ADD CONSTRAINT legionella_checks_outlet_id_fkey
+          FOREIGN KEY (outlet_id) REFERENCES legionella_sentinel_outlets(id) ON DELETE SET NULL;
+      END IF;
+    END $$
+  `);
   // Migrate existing JSON from app_settings (idempotent — skips clients already migrated).
   const settings = await db.execute(sql`
     SELECT client_id, value FROM app_settings
@@ -4464,7 +5954,10 @@ async function migrateTrackControlProfiles() {
 // Copies existing safe_risk_assessments, safe_sops, and safe_handbook rows into
 // doc_track_documents (which already has the matching categories).  Uses a
 // migrated_doc_id tracking column on each source table so the migration is
-// fully idempotent and can be re-run safely.
+// fully idempotent and can be re-run safely.  Each copy keeps its source's
+// effective department (its own department, else its site's) so a
+// department-scoped SafeTrack document never becomes visible to every staff
+// member on the public sign-off link.
 async function migrateDoctrackSafetrackMerge() {
   // 1. Add tracking columns to source tables.
   await db.execute(sql`ALTER TABLE safe_risk_assessments ADD COLUMN IF NOT EXISTS migrated_doc_id integer`);
@@ -4473,7 +5966,14 @@ async function migrateDoctrackSafetrackMerge() {
 
   // 2. Migrate risk assessments.
   {
-    const rows = await db.execute(sql`SELECT * FROM safe_risk_assessments WHERE migrated_doc_id IS NULL`);
+    const rows = await db.execute(sql`
+      SELECT d.*, COALESCE(dep.name, site_dep.name) AS effective_department
+      FROM safe_risk_assessments d
+      LEFT JOIN departments dep ON dep.id = d.department_id AND dep.client_id = d.client_id
+      LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+      LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+      WHERE d.migrated_doc_id IS NULL
+    `);
     for (const ra of (rows.rows ?? []) as any[]) {
       const desc = [
         ra.hazard           ? `Hazard: ${ra.hazard}` : null,
@@ -4485,12 +5985,12 @@ async function migrateDoctrackSafetrackMerge() {
 
       const ins = await db.execute(sql`
         INSERT INTO doc_track_documents
-          (client_id, site_id, title, category, description,
+          (client_id, department, site_id, title, category, description,
            object_path, file_name, file_size, mime_type,
            requires_acknowledgement, reviewed_by, review_date,
            next_review_date, status, created_at, updated_at)
         VALUES
-          (${ra.client_id}, ${ra.site_id}, ${ra.title ?? "Untitled"}, 'risk_assessment', ${desc},
+          (${ra.client_id}, ${ra.effective_department ?? null}, ${ra.site_id}, ${ra.title ?? "Untitled"}, 'risk_assessment', ${desc},
            ${ra.object_path ?? null}, ${ra.file_name ?? null}, ${ra.file_size ?? null}, ${ra.mime_type ?? null},
            ${ra.requires_acknowledgement ?? false}, ${ra.reviewed_by ?? null}, ${ra.review_date ?? null},
            ${ra.next_review_date ?? null}, ${ra.status ?? "active"}, ${ra.created_at ?? sql`now()`}, ${ra.updated_at ?? sql`now()`})
@@ -4505,17 +6005,24 @@ async function migrateDoctrackSafetrackMerge() {
 
   // 3. Migrate SOPs.
   {
-    const rows = await db.execute(sql`SELECT * FROM safe_sops WHERE migrated_doc_id IS NULL`);
+    const rows = await db.execute(sql`
+      SELECT d.*, COALESCE(dep.name, site_dep.name) AS effective_department
+      FROM safe_sops d
+      LEFT JOIN departments dep ON dep.id = d.department_id AND dep.client_id = d.client_id
+      LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+      LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+      WHERE d.migrated_doc_id IS NULL
+    `);
     for (const sop of (rows.rows ?? []) as any[]) {
       const desc = [sop.content || null, sop.notes || null].filter(Boolean).join("\n") || null;
       const ins = await db.execute(sql`
         INSERT INTO doc_track_documents
-          (client_id, site_id, title, category, description,
+          (client_id, department, site_id, title, category, description,
            object_path, file_name, file_size, mime_type,
            requires_acknowledgement, reviewed_by, review_date,
            next_review_date, status, created_at, updated_at)
         VALUES
-          (${sop.client_id}, ${sop.site_id ?? null}, ${sop.title ?? "Untitled"}, 'sop', ${desc},
+          (${sop.client_id}, ${sop.effective_department ?? null}, ${sop.site_id ?? null}, ${sop.title ?? "Untitled"}, 'sop', ${desc},
            ${sop.object_path ?? null}, ${sop.file_name ?? null}, ${sop.file_size ?? null}, ${sop.mime_type ?? null},
            ${sop.requires_acknowledgement ?? false}, ${sop.reviewed_by ?? null}, ${sop.review_date ?? null},
            ${sop.next_review_date ?? null}, ${sop.status ?? "active"}, ${sop.created_at ?? sql`now()`}, ${sop.updated_at ?? sql`now()`})
@@ -4530,17 +6037,23 @@ async function migrateDoctrackSafetrackMerge() {
 
   // 4. Migrate handbook entries.
   {
-    const rows = await db.execute(sql`SELECT * FROM safe_handbook WHERE migrated_doc_id IS NULL`);
+    const rows = await db.execute(sql`
+      SELECT d.*, site_dep.name AS effective_department
+      FROM safe_handbook d
+      LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+      LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+      WHERE d.migrated_doc_id IS NULL
+    `);
     for (const hb of (rows.rows ?? []) as any[]) {
       const desc = [hb.content || null, hb.notes || null].filter(Boolean).join("\n") || null;
       const ins = await db.execute(sql`
         INSERT INTO doc_track_documents
-          (client_id, site_id, title, category, description,
+          (client_id, department, site_id, title, category, description,
            object_path, file_name, file_size, mime_type,
            requires_acknowledgement, reviewed_by, review_date,
            next_review_date, status, created_at, updated_at)
         VALUES
-          (${hb.client_id}, ${hb.site_id ?? null}, ${hb.title ?? "Untitled"}, 'handbook', ${desc},
+          (${hb.client_id}, ${hb.effective_department ?? null}, ${hb.site_id ?? null}, ${hb.title ?? "Untitled"}, 'handbook', ${desc},
            ${hb.object_path ?? null}, ${hb.file_name ?? null}, ${hb.file_size ?? null}, ${hb.mime_type ?? null},
            ${hb.requires_acknowledgement ?? false}, ${hb.reviewed_by ?? null}, ${hb.review_date ?? null},
            ${hb.next_review_date ?? null}, ${hb.status ?? "active"}, ${hb.created_at ?? sql`now()`}, ${hb.updated_at ?? sql`now()`})
@@ -4593,6 +6106,14 @@ async function migrateDoctrackSafetrackMerge() {
       ADD COLUMN IF NOT EXISTS updated_by integer REFERENCES users(id) ON DELETE SET NULL,
       ADD COLUMN IF NOT EXISTS updated_at timestamp
   `);
+  // Optional screenshot (a verified, tenant-owned image) and the web build the
+  // report came from.
+  await db.execute(sql`
+    ALTER TABLE feedback_reports
+      ADD COLUMN IF NOT EXISTS screenshot_object_path text,
+      ADD COLUMN IF NOT EXISTS screenshot_file_name text,
+      ADD COLUMN IF NOT EXISTS app_version text
+  `);
   await migrateFeedbackReviewHistory();
 
   // 5. Migrate acknowledgements — only for rows whose source doc was already migrated.
@@ -4621,6 +6142,67 @@ async function migrateDoctrackSafetrackMerge() {
 }
 
 /**
+ * One-off repair: DocTrack copies made by migrateDoctrackSafetrackMerge before
+ * it carried departments have department NULL, which the public sign-off link
+ * treats as "everyone". Give each such copy its source's current effective
+ * department (its own, else its site's). Only that column of copies still NULL
+ * is written; nothing is deleted, and copies whose source is global stay
+ * global. Runs once, recorded in runtime_migration_progress, so a manager who
+ * later makes a copy global on purpose is not overridden on the next boot.
+ * Returns the number of copies restored, or null when it had already run.
+ */
+const SAFETRACK_COPY_DEPARTMENTS = "doctrack_safetrack_copy_departments_v1";
+
+export async function restoreDoctrackSafetrackCopyDepartments(): Promise<number | null> {
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS "runtime_migration_progress" (
+    "name" text PRIMARY KEY,
+    "last_id" integer NOT NULL DEFAULT 0,
+    "updated_at" timestamp NOT NULL DEFAULT now()
+  )`);
+  const restored = await db.transaction(async (tx) => {
+    const claimed = await tx.execute(sql`INSERT INTO runtime_migration_progress (name)
+      VALUES (${SAFETRACK_COPY_DEPARTMENTS}) ON CONFLICT (name) DO NOTHING RETURNING name`);
+    if (claimed.rows.length === 0) return null;
+    const updated = await tx.execute(sql`
+      WITH sources AS (
+        SELECT d.migrated_doc_id AS copy_id, d.client_id, 'risk_assessment'::text AS category,
+               COALESCE(dep.name, site_dep.name) AS department
+        FROM safe_risk_assessments d
+        LEFT JOIN departments dep ON dep.id = d.department_id AND dep.client_id = d.client_id
+        LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+        LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+        WHERE d.migrated_doc_id IS NOT NULL
+        UNION ALL
+        SELECT d.migrated_doc_id, d.client_id, 'sop'::text, COALESCE(dep.name, site_dep.name)
+        FROM safe_sops d
+        LEFT JOIN departments dep ON dep.id = d.department_id AND dep.client_id = d.client_id
+        LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+        LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+        WHERE d.migrated_doc_id IS NOT NULL
+        UNION ALL
+        SELECT d.migrated_doc_id, d.client_id, 'handbook'::text, site_dep.name
+        FROM safe_handbook d
+        LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+        LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+        WHERE d.migrated_doc_id IS NOT NULL
+      )
+      UPDATE doc_track_documents c
+      SET department = sources.department
+      FROM sources
+      WHERE c.id = sources.copy_id
+        AND c.client_id = sources.client_id
+        AND c.category = sources.category
+        AND c.department IS NULL
+        AND sources.department IS NOT NULL
+      RETURNING c.id
+    `);
+    return updated.rows.length;
+  });
+  if (restored !== null) logger.info({ restored }, "Restored departments on SafeTrack copies in DocTrack");
+  return restored;
+}
+
+/**
  * Compliance visit-scheduling links: store only the SHA-256 digest of each
  * token (digestBearerToken's format). Replay-safe: legacy raw tokens are
  * hashed and cleared in one statement, so links already delivered keep
@@ -4639,4 +6221,689 @@ export async function migrateComplianceScheduleTokens(): Promise<number> {
     WHERE "schedule_token" IS NOT NULL
     RETURNING id`);
   return migrated.rows.length;
+}
+
+/**
+ * Track owners (who receives a module's reminders) and in-app notifications
+ * (header bell / mobile push). Mirrors lib/db/src/schema/track-notifications.ts
+ * column for column, so pushed and runtime-only databases match.
+ */
+/**
+ * The person an action, FixTrack issue or compliance check is assigned to, as
+ * a user of the business (lib/assignees.ts), so their reminders reach them.
+ * The existing text name stays: it is what screens show, and it holds a typed
+ * name for someone without an account.
+ */
+async function migrateAssignees() {
+  for (const table of ["track_actions", "fix_track_issues", "compliance_items"]) {
+    await db.execute(sql.raw(
+      `ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "assignee_user_id" integer REFERENCES "users"("id") ON DELETE SET NULL`,
+    ));
+    await db.execute(sql.raw(
+      `CREATE INDEX IF NOT EXISTS "IDX_${table}_assignee" ON "${table}" ("assignee_user_id") WHERE "assignee_user_id" IS NOT NULL`,
+    ));
+  }
+}
+
+/**
+ * A contractor emailed a FixTrack job picks their visit date from the email,
+ * and marks it done the same way; both are shown on the issue. Mirrors
+ * lib/db/src/schema/fix-track.ts.
+ */
+async function migrateFixTrackContractorProgress() {
+  await db.execute(sql`ALTER TABLE "fix_track_issues" ADD COLUMN IF NOT EXISTS "contractor_visit_date" date`);
+  await db.execute(sql`ALTER TABLE "fix_track_issues" ADD COLUMN IF NOT EXISTS "contractor_completed_at" timestamp`);
+}
+
+async function migrateTrackOwnersAndNotifications() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "track_owners" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "module" text NOT NULL,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE CASCADE,
+      "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_track_owners_client_module_site"
+    ON "track_owners" ("client_id", "module", "site_id") WHERE "site_id" IS NOT NULL
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_track_owners_client_module_all_sites"
+    ON "track_owners" ("client_id", "module") WHERE "site_id" IS NULL
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "user_notifications" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+      "module" text,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "kind" text NOT NULL,
+      "title" text NOT NULL,
+      "body" text,
+      "link_path" text,
+      "dedupe_key" text NOT NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "read_at" timestamp
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_user_notifications_user_dedupe"
+    ON "user_notifications" ("user_id", "dedupe_key")
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_user_notifications_user_client_created"
+    ON "user_notifications" ("user_id", "client_id", "created_at")
+  `);
+}
+
+// ---- Certificate outcomes and defects (Oct 2026) ----
+// An item certificate records its overall outcome; existing rows are
+// "not_stated" and keep behaving as satisfactory. Defects listed on a
+// certificate open FixTrack jobs and keep the check needing action until they
+// are closed. Mirrors lib/db/src/schema/certificates.ts.
+// FireTrack (Oct 2026): weekly alarm tests name the call point tested, and
+// drills record whether night staff took part. Existing records keep nulls.
+async function migrateFireCallPoints() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "fire_call_points" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE CASCADE,
+      "name" text NOT NULL,
+      "archived_at" timestamp,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_fire_call_points_client_site" ON "fire_call_points" ("client_id", "site_id")`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "call_point_id" integer REFERENCES "fire_call_points"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "call_point" text`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "night_staff" text`);
+  // Oct 2026: each call point's location and its place in the site's test
+  // rotation. Sites whose call points have no order yet are numbered
+  // alphabetically, the order the list showed before.
+  await db.execute(sql`ALTER TABLE "fire_call_points" ADD COLUMN IF NOT EXISTS "location" text`);
+  await db.execute(sql`ALTER TABLE "fire_call_points" ADD COLUMN IF NOT EXISTS "sort_order" integer NOT NULL DEFAULT 0`);
+  await db.execute(sql`
+    UPDATE "fire_call_points" p SET "sort_order" = n.position
+    FROM (
+      SELECT id, row_number() OVER (PARTITION BY client_id, site_id ORDER BY name, id) AS position,
+             max(sort_order) OVER (PARTITION BY client_id, site_id) AS highest
+      FROM "fire_call_points"
+    ) n
+    WHERE n.id = p.id AND n.highest = 0
+  `);
+  // Oct 2026: the sound level heard on a weekly alarm test, and call points
+  // near sleeping areas (75 dB at the bedhead). Existing rows stay blank.
+  await db.execute(sql`ALTER TABLE "fire_call_points" ADD COLUMN IF NOT EXISTS "sleeping_area" boolean NOT NULL DEFAULT false`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_db" real`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_method" text`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_bedhead" boolean`);
+  // Oct 2026: fire drills record the time of the drill, how long the
+  // evacuation took and which roster staff were present. Older drills stay
+  // blank. Mirrors lib/db/src/schema/fire-safety-checks.ts.
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "drill_time" text`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "evacuation_seconds" integer`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "fire_drill_attendance" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "fire_check_id" integer NOT NULL REFERENCES "fire_safety_checks"("id") ON DELETE CASCADE,
+      "staff_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL,
+      "staff_name" text NOT NULL,
+      "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_fire_drill_attendance_check" ON "fire_drill_attendance" ("fire_check_id")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_fire_drill_attendance_client_staff" ON "fire_drill_attendance" ("client_id", "staff_roster_id")`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_fire_drill_attendance_check_staff" ON "fire_drill_attendance" ("fire_check_id", "staff_roster_id")`);
+  // Oct 2026: whether each site has sleeping accommodation and a night porter
+  // (blank until answered), and night fire walks' walk time (22:00, 02:00
+  // or 06:00). Mirrors
+  // lib/db/src/schema/sites.ts and fire-safety-checks.ts.
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "sleeping_accommodation" boolean`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "night_porter" boolean`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "night_porter_since" timestamp`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "walk_time" text`);
+  // Oct 2026: when each site's opening and closing checks are due ("HH:MM";
+  // blank = 06:00 and 18:00). Mirrors lib/db/src/schema/sites.ts.
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "opening_checks_due" text`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "closing_checks_due" text`);
+  // ... and when the reminder about them goes out (blank = 11:00 and 21:00).
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "opening_reminder_at" text`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "closing_reminder_at" text`);
+}
+
+// Frost warnings (Nov 2026): each site's location, looked up from the postcode
+// in its address, and the overnight forecast checked each afternoon.
+// Mirrors lib/db/src/schema/sites.ts and frost-forecasts.ts.
+async function migrateFrostWarnings() {
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "location_postcode" text`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "latitude" double precision`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "longitude" double precision`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "frost_forecasts" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer NOT NULL REFERENCES "sites"("id") ON DELETE CASCADE,
+      "night_of" date NOT NULL,
+      "lowest_c" real NOT NULL,
+      "coldest_at" timestamptz,
+      "warn" boolean NOT NULL DEFAULT false,
+      "checked_at" timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_frost_forecasts_site_night" ON "frost_forecasts" ("site_id", "night_of")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_frost_forecasts_client_night" ON "frost_forecasts" ("client_id", "night_of")`);
+}
+
+// Equipment list and QR labels (Oct 2026). Water checks and Compliance Checks
+// point at an equipment item; labels point at a record in any track.
+async function migrateEquipmentLabels() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "equipment_items" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "name" text NOT NULL,
+      "type" text NOT NULL DEFAULT 'other',
+      "location" text,
+      "make" text,
+      "model" text,
+      "serial_no" text,
+      "notes" text,
+      "active" boolean NOT NULL DEFAULT true,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_equipment_items_client_site" ON "equipment_items" ("client_id", "site_id")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "equipment_labels" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "code" text NOT NULL,
+      "kind" text NOT NULL,
+      "target_ref" text NOT NULL,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "replaced_at" timestamp
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_equipment_labels_code" ON "equipment_labels" ("code")`);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_equipment_labels_active_target"
+    ON "equipment_labels" ("client_id", "kind", "target_ref") WHERE "replaced_at" IS NULL
+  `);
+  for (const table of ["legionella_checks", "compliance_items"]) {
+    await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "equipment_id" integer`));
+    // A database built by drizzle-kit push already has the plain column, so
+    // the foreign key is added on its own.
+    await db.execute(sql.raw(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${table}_equipment_id_fkey') THEN
+          ALTER TABLE "${table}" ADD CONSTRAINT "${table}_equipment_id_fkey"
+            FOREIGN KEY ("equipment_id") REFERENCES "equipment_items"("id") ON DELETE SET NULL;
+        END IF;
+      END $$
+    `));
+    await db.execute(sql.raw(`CREATE INDEX IF NOT EXISTS "IDX_${table}_equipment" ON "${table}" ("client_id", "equipment_id") WHERE "equipment_id" IS NOT NULL`));
+  }
+}
+
+async function migrateCertificateOutcomes() {
+  await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "outcome" text NOT NULL DEFAULT 'not_stated'`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "certificate_defects" (
+      "id" serial PRIMARY KEY,
+      "certificate_id" integer NOT NULL REFERENCES "certificates"("id") ON DELETE CASCADE,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "code" text NOT NULL,
+      "description" text NOT NULL,
+      "location" text,
+      "fix_track_issue_id" integer REFERENCES "fix_track_issues"("id") ON DELETE SET NULL,
+      "resolved_at" timestamp,
+      "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificate_defects_certificate" ON "certificate_defects" ("client_id", "certificate_id")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificate_defects_fix_track_issue" ON "certificate_defects" ("fix_track_issue_id")`);
+}
+
+// Uploaded audit and inspection reports whose required actions become track
+// actions (source_kind 'inspection_report:...'), plus who drafted and confirmed them.
+async function migrateInspectionReports() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "inspection_reports" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "report_type" text NOT NULL,
+      "title" text NOT NULL,
+      "report_date" date,
+      "object_path" text NOT NULL,
+      "file_name" text,
+      "file_size" bigint,
+      "mime_type" text,
+      "draft_actions" jsonb NOT NULL DEFAULT '[]'::jsonb,
+      "ai_status" text NOT NULL DEFAULT 'not_requested',
+      "ai_summary" text,
+      "ai_model" text,
+      "ai_error" text,
+      "ai_requested_at" timestamp,
+      "ai_read_count" integer NOT NULL DEFAULT 0,
+      "ai_input_tokens" integer,
+      "ai_output_tokens" integer,
+      "uploaded_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "uploaded_by_name" text NOT NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_inspection_reports_client" ON "inspection_reports" ("client_id", "created_at")`);
+  await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "draft_source" text`);
+  await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "confirmed_by_name" text`);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_track_actions_inspection_report"
+    ON "track_actions" ("client_id", "source_record_id") WHERE "source_kind" LIKE 'inspection_report:%'
+  `);
+}
+
+// What each request to Claude cost a business, for the AI add-on's monthly
+// allowance (lib/aiAllowance.ts). Rows older than two years are not needed:
+// allowance lapses 12 months after the end of its month.
+async function migrateAiUsage() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "ai_usage" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "user_id" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "feature" text NOT NULL,
+      "status" text NOT NULL DEFAULT 'pending',
+      "model" text,
+      "input_tokens" integer NOT NULL DEFAULT 0,
+      "output_tokens" integer NOT NULL DEFAULT 0,
+      "cache_read_tokens" integer NOT NULL DEFAULT 0,
+      "cache_write_tokens" integer NOT NULL DEFAULT 0,
+      "web_searches" integer NOT NULL DEFAULT 0,
+      "cost_usd_micros" bigint NOT NULL,
+      "created_at" timestamptz NOT NULL DEFAULT now(),
+      "settled_at" timestamptz,
+      CONSTRAINT "ck_ai_usage_status" CHECK ("status" IN ('pending', 'done', 'failed')),
+      CONSTRAINT "ck_ai_usage_cost_nonnegative" CHECK ("cost_usd_micros" >= 0)
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_ai_usage_client_created" ON "ai_usage" ("client_id", "created_at")`);
+  await db.execute(sql`DELETE FROM "ai_usage" WHERE "created_at" < now() - interval '25 months'`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "ai_top_ups" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "user_id" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "request_id" text NOT NULL,
+      "automatic" boolean NOT NULL DEFAULT false,
+      "amount_pence" integer NOT NULL,
+      "allowance_pence" integer NOT NULL,
+      "currency" text NOT NULL DEFAULT 'gbp',
+      "status" text NOT NULL DEFAULT 'pending',
+      "created_at" timestamptz NOT NULL DEFAULT now(),
+      "settled_at" timestamptz,
+      CONSTRAINT "ck_ai_top_ups_status" CHECK ("status" IN ('pending', 'paid', 'failed', 'unknown')),
+      CONSTRAINT "ck_ai_top_ups_amounts" CHECK ("amount_pence" > 0 AND "allowance_pence" >= 0)
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_ai_top_ups_client_request" ON "ai_top_ups" ("client_id", "request_id")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_ai_top_ups_client_created" ON "ai_top_ups" ("client_id", "created_at")`);
+  // Unused allowance and top-ups carry over for 12 months (lib/aiAllowance.ts).
+  await db.execute(sql`ALTER TABLE "ai_top_ups" ADD COLUMN IF NOT EXISTS "expires_at" timestamptz`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "ai_allowance_grants" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "period_key" text NOT NULL,
+      "allowance_pence" integer NOT NULL,
+      "starts_at" timestamptz NOT NULL,
+      "expires_at" timestamptz NOT NULL,
+      "created_at" timestamptz NOT NULL DEFAULT now(),
+      CONSTRAINT "ck_ai_allowance_grants_amount" CHECK ("allowance_pence" >= 0)
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_ai_allowance_grants_client_period" ON "ai_allowance_grants" ("client_id", "period_key")`);
+  await db.execute(sql`DELETE FROM "ai_allowance_grants" WHERE "expires_at" < now() - interval '25 months'`);
+}
+
+// Billing changes ALPS is told about (lib/billingAlerts.ts): one row per new
+// subscription, cancellation and plan change, so a repeated webhook sends one
+// email, and the Monday digest lists the week from these rows.
+async function migrateBillingAlerts() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "billing_alerts" (
+      "id" serial PRIMARY KEY,
+      "kind" text NOT NULL,
+      "alert_key" text NOT NULL,
+      "client_id" integer REFERENCES "clients"("id") ON DELETE SET NULL,
+      "business_name" text,
+      "summary" text,
+      "monthly_pence" integer NOT NULL DEFAULT 0,
+      "reason" text,
+      "created_at" timestamptz NOT NULL DEFAULT now(),
+      CONSTRAINT "uq_billing_alerts_kind_key" UNIQUE ("kind", "alert_key")
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_billing_alerts_created" ON "billing_alerts" ("created_at")`);
+}
+
+// Certificates emailed to a business's certificate address or uploaded by a
+// contractor through their "Upload certificate" link (lib/certificateInbox.ts).
+// Mirrors lib/db/src/schema/certificate-inbox.ts.
+async function migrateCertificateInbox() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "certificate_inbox_addresses" (
+      "client_id" integer PRIMARY KEY REFERENCES "clients"("id") ON DELETE CASCADE,
+      "local_part" text NOT NULL,
+      "created_at" timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_certificate_inbox_addresses_local_part" ON "certificate_inbox_addresses" ("local_part")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "certificate_inbox_emails" (
+      "id" serial PRIMARY KEY,
+      "provider_email_id" text NOT NULL,
+      "client_id" integer REFERENCES "clients"("id") ON DELETE CASCADE,
+      "from_address" text NOT NULL,
+      "subject" text,
+      "status" text NOT NULL DEFAULT 'pending',
+      "attempts" integer NOT NULL DEFAULT 0,
+      "last_error" text,
+      "received_at" timestamptz NOT NULL DEFAULT now(),
+      "processed_at" timestamptz,
+      CONSTRAINT "ck_certificate_inbox_emails_status" CHECK ("status" IN ('pending', 'done', 'failed', 'ignored'))
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_certificate_inbox_emails_provider" ON "certificate_inbox_emails" ("provider_email_id")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_certificate_inbox_emails_status" ON "certificate_inbox_emails" ("status", "received_at")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "certificate_upload_links" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "item_id" integer NOT NULL REFERENCES "compliance_items"("id") ON DELETE CASCADE,
+      "contractor_id" integer REFERENCES "contractors"("id") ON DELETE SET NULL,
+      "token_hash" text NOT NULL,
+      "uploads" integer NOT NULL DEFAULT 0,
+      "expires_at" timestamptz NOT NULL,
+      "created_at" timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_certificate_upload_links_token" ON "certificate_upload_links" ("token_hash")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_certificate_upload_links_item" ON "certificate_upload_links" ("client_id", "item_id")`);
+  // Replies to contractor emails: the link's code tags the Reply-To, and a
+  // received reply records which link (and so which check) it answers.
+  await db.execute(sql`ALTER TABLE "certificate_upload_links" ADD COLUMN IF NOT EXISTS "reply_ref" text`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_certificate_upload_links_reply_ref" ON "certificate_upload_links" ("reply_ref")`);
+  await db.execute(sql`
+    ALTER TABLE "certificate_inbox_emails" ADD COLUMN IF NOT EXISTS "upload_link_id" integer
+      REFERENCES "certificate_upload_links"("id") ON DELETE SET NULL
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "certificate_inbox_items" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "source" text NOT NULL,
+      "status" text NOT NULL,
+      "email_id" integer REFERENCES "certificate_inbox_emails"("id") ON DELETE SET NULL,
+      "upload_link_id" integer REFERENCES "certificate_upload_links"("id") ON DELETE SET NULL,
+      "external_ref" text NOT NULL,
+      "sender_email" text,
+      "sender_name" text,
+      "contractor_id" integer REFERENCES "contractors"("id") ON DELETE SET NULL,
+      "item_id" integer REFERENCES "compliance_items"("id") ON DELETE SET NULL,
+      "subject" text,
+      "message_text" text,
+      "file_name" text,
+      "content_type" text,
+      "object_path" text,
+      "byte_size" integer,
+      "reading" jsonb,
+      "reading_error" text,
+      "certificate_id" integer REFERENCES "certificates"("id") ON DELETE SET NULL,
+      "handled_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "handled_at" timestamptz,
+      "received_at" timestamptz NOT NULL DEFAULT now(),
+      CONSTRAINT "ck_certificate_inbox_items_source" CHECK ("source" IN ('email', 'upload')),
+      CONSTRAINT "ck_certificate_inbox_items_status" CHECK ("status" IN ('reading', 'ready', 'held', 'message', 'filed', 'dismissed'))
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_certificate_inbox_items_ref" ON "certificate_inbox_items" ("client_id", "external_ref")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_certificate_inbox_items_client_status" ON "certificate_inbox_items" ("client_id", "status")`);
+}
+
+// Contractor sign-in on arrival (routes/contractor-sign-in.ts).
+// Mirrors lib/db/src/schema/contractor-sign-in.ts.
+async function migrateContractorSignIn() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "contractor_sign_in_sites" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer NOT NULL REFERENCES "sites"("id") ON DELETE CASCADE,
+      "link_token" text NOT NULL,
+      "enabled" boolean NOT NULL DEFAULT true,
+      "fire_procedure" text,
+      "updated_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamptz NOT NULL DEFAULT now(),
+      "updated_at" timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_contractor_sign_in_sites_site" ON "contractor_sign_in_sites" ("site_id")`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_contractor_sign_in_sites_link_token" ON "contractor_sign_in_sites" ("link_token")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "contractor_sign_ins" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "site_name" text NOT NULL,
+      "contractor_id" integer REFERENCES "contractors"("id") ON DELETE SET NULL,
+      "visitor_name" text NOT NULL,
+      "company" text NOT NULL,
+      "phone" text,
+      "email" text,
+      "visit_reason" text,
+      "fire_procedure_text" text,
+      "asbestos_status" text NOT NULL,
+      "asbestos_snapshot" jsonb NOT NULL DEFAULT '{}'::jsonb,
+      "signature" text NOT NULL,
+      "signed_in_at" timestamptz NOT NULL DEFAULT now(),
+      "signed_out_at" timestamptz,
+      "signed_out_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "sign_out_token_hash" text NOT NULL,
+      CONSTRAINT "ck_contractor_sign_ins_asbestos_status" CHECK ("asbestos_status" IN ('register', 'none_expected', 'missing'))
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_contractor_sign_ins_site_time" ON "contractor_sign_ins" ("client_id", "site_id", "signed_in_at")`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_contractor_sign_ins_sign_out_token" ON "contractor_sign_ins" ("sign_out_token_hash")`);
+}
+
+// A contractor logging tests through a link (routes/contractor-tests.ts).
+// Mirrors lib/db/src/schema/contractor-test-visits.ts and the
+// contractor_test_visit_id columns on pat_tests and contractor_sign_ins.
+async function migrateContractorTestVisits() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "contractor_test_visits" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer NOT NULL REFERENCES "sites"("id") ON DELETE CASCADE,
+      "module" text NOT NULL DEFAULT 'pat',
+      "contractor_id" integer REFERENCES "contractors"("id") ON DELETE SET NULL,
+      "contractor_name" text NOT NULL,
+      "contractor_email" text,
+      "starts_on" date NOT NULL,
+      "ends_on" date NOT NULL,
+      "expires_at" timestamptz NOT NULL,
+      "link_token_hash" text NOT NULL,
+      "status" text NOT NULL DEFAULT 'open',
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamptz NOT NULL DEFAULT now(),
+      "signed_off_at" timestamptz,
+      "signed_off_name" text,
+      "signed_off_company" text,
+      "signed_off_signature" text,
+      "certificate_ref" text,
+      "next_test_due" date,
+      "sign_off_notes" text,
+      "certificate_object_path" text,
+      "certificate_file_name" text,
+      "pat_certificate_id" integer REFERENCES "pat_certificates"("id") ON DELETE SET NULL,
+      "ended_at" timestamptz,
+      "ended_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      CONSTRAINT "ck_contractor_test_visits_module" CHECK ("module" IN ('pat')),
+      CONSTRAINT "ck_contractor_test_visits_status" CHECK ("status" IN ('open', 'signed_off', 'ended'))
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_contractor_test_visits_link_token" ON "contractor_test_visits" ("link_token_hash")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_contractor_test_visits_site" ON "contractor_test_visits" ("client_id", "site_id", "created_at")`);
+  await db.execute(sql`ALTER TABLE "pat_tests" ADD COLUMN IF NOT EXISTS "contractor_test_visit_id" integer`);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_pat_tests_contractor_visit_appliance"
+    ON "pat_tests" ("contractor_test_visit_id", "appliance_id")
+    WHERE "contractor_test_visit_id" IS NOT NULL
+  `);
+  await db.execute(sql`ALTER TABLE "contractor_sign_ins" ADD COLUMN IF NOT EXISTS "contractor_test_visit_id" integer`);
+}
+
+// Drawn signatures on recorded checks (lib/recordSignatures.ts).
+// Mirrors lib/db/src/schema/record-signatures.ts.
+async function migrateRecordSignatures() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "record_signatures" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "token" text NOT NULL,
+      "user_id" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "signer_name" text NOT NULL,
+      "strokes" jsonb NOT NULL,
+      "record_type" text,
+      "record_id" integer,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "created_at" timestamptz NOT NULL DEFAULT now(),
+      "claimed_at" timestamptz,
+      "signed_at" timestamptz
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_record_signatures_token" ON "record_signatures" ("token")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_record_signatures_record" ON "record_signatures" ("client_id", "record_type", "record_id")`);
+}
+
+/** Inspections marked "No contractor needed" on the Contractors page (lib/contractorVisits.ts). */
+async function migrateContractorVisitNotNeeded() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "contractor_visit_not_needed" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "visit_key" text NOT NULL,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE CASCADE,
+      "compliance_item_id" integer REFERENCES "compliance_items"("id") ON DELETE CASCADE,
+      "marked_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "uq_contractor_visit_not_needed_visit"
+      ON "contractor_visit_not_needed" ("client_id", "visit_key", "site_id") WHERE "compliance_item_id" IS NULL
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "uq_contractor_visit_not_needed_check"
+      ON "contractor_visit_not_needed" ("compliance_item_id") WHERE "compliance_item_id" IS NOT NULL
+  `);
+}
+
+// Greenkeeping daily checks (lib/greenkeepingChecks.ts): which department does
+// a site's checklists of an area (mirrors lib/db/src/schema/daily-checklists.ts),
+// and machines marked "not in use" for a day's pre-start checks.
+async function migrateGreenkeepingDailyChecks() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "daily_checklist_teams" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer NOT NULL REFERENCES "sites"("id") ON DELETE CASCADE,
+      "area" text NOT NULL,
+      "department_id" integer NOT NULL REFERENCES "departments"("id") ON DELETE CASCADE,
+      "updated_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "updated_at" timestamptz NOT NULL DEFAULT now(),
+      CONSTRAINT "ck_daily_checklist_teams_area" CHECK ("area" IN ('greenkeeping', 'kitchen', 'premises'))
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_daily_checklist_teams_site_area" ON "daily_checklist_teams" ("site_id", "area")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "green_machine_not_in_use" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "machine_id" integer NOT NULL REFERENCES "green_machines"("id") ON DELETE CASCADE,
+      "check_date" date NOT NULL,
+      "reason" text,
+      "marked_by_name" text,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_green_machine_not_in_use_machine_date" ON "green_machine_not_in_use" ("machine_id", "check_date")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_green_machine_not_in_use_client_date" ON "green_machine_not_in_use" ("client_id", "check_date")`);
+}
+
+/**
+ * One-off (Oct 2026): FireTrack's weekly alarm panel check is retired because
+ * the panel is looked at on every premises opening and closing check. A
+ * business that saved its own premises opening or closing list (Settings on
+ * the card) does not get the new default item, so it is added to each saved
+ * list that has no panel item yet, after the call point item (else at the
+ * end). Nothing is removed. Runs once, recorded in runtime_migration_progress,
+ * so a manager who later takes the item out is not overridden on the next
+ * boot. Returns the number of lists changed, or null when it had already run.
+ */
+const PREMISES_ALARM_PANEL_ITEM = "premises_checks_fire_alarm_panel_v1";
+/** Mirrors the default premises opening and closing items in the web app. */
+export const FIRE_ALARM_PANEL_CHECK_LABEL =
+  "Fire alarm panel shows normal: no fault, fire or disabled zone lights (report any fault at once)";
+
+export async function addFireAlarmPanelToSavedPremisesChecks(): Promise<number | null> {
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS "runtime_migration_progress" (
+    "name" text PRIMARY KEY,
+    "last_id" integer NOT NULL DEFAULT 0,
+    "updated_at" timestamp NOT NULL DEFAULT now()
+  )`);
+  const item = JSON.stringify({ label: FIRE_ALARM_PANEL_CHECK_LABEL, checked: false });
+  const changed = await db.transaction(async (tx) => {
+    const claimed = await tx.execute(sql`INSERT INTO runtime_migration_progress (name)
+      VALUES (${PREMISES_ALARM_PANEL_ITEM}) ON CONFLICT (name) DO NOTHING RETURNING name`);
+    if (claimed.rows.length === 0) return null;
+    const updated = await tx.execute(sql`
+      UPDATE checklist_templates t
+      SET items = (
+        SELECT jsonb_agg(x.elem ORDER BY x.ord)
+        FROM (
+          SELECT e.elem, e.ord::numeric AS ord
+          FROM jsonb_array_elements(t.items) WITH ORDINALITY AS e(elem, ord)
+          UNION ALL
+          SELECT ${item}::jsonb, COALESCE((
+            SELECT max(e.ord) FROM jsonb_array_elements(t.items) WITH ORDINALITY AS e(elem, ord)
+            WHERE e.elem->>'label' ILIKE '%call point%' OR e.elem->>'label' ILIKE '%break glass%'
+          ), jsonb_array_length(t.items)) + 0.5
+        ) x
+      ), updated_at = now()
+      WHERE t.checklist_type IN ('premises_opening', 'premises_closing')
+        AND jsonb_typeof(t.items) = 'array'
+        AND NOT EXISTS (
+          SELECT 1 FROM jsonb_array_elements(t.items) AS e(elem) WHERE e.elem->>'label' ILIKE '%panel%'
+        )
+      RETURNING t.id
+    `);
+    return updated.rows.length;
+  });
+  if (changed !== null) logger.info({ changed }, "Added the fire alarm panel item to saved premises opening and closing checks");
+  return changed;
 }

@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
+import { useSiteFilterId, useWorkingSiteId } from "@/hooks/use-working-site";
 import { format } from "date-fns";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,7 @@ import {
   Activity, HeartPulse, ShieldAlert, Search, XCircle, Anchor,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { camelCaseRows } from "@/lib/camel-case-rows";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -32,21 +34,27 @@ import {
   getGetPoolTrackConfigQueryKey,
   useUpdatePoolTrackConfig,
 } from "@workspace/api-client-react";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { RequiredRecordPhotoEvidence, useNewRecordPhotoEvidence } from "@/components/required-record-photo-evidence";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
-import { beginApiMutation } from "@/lib/api";
+import { useSayItFill, withSpokenNote, type SayItFill } from "@/lib/say-it-fill";
+import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { sortedEntries } from "@/lib/sort-options";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ── API helpers ────────────────────────────────────────────────────────────────
 
 const apiBase = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
 async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
   const mutationSucceeded = beginApiMutation(init?.method, path);
-  const res = await fetch(`${apiBase}${path}`, {
+  const res = await fetchWithOverrideReason(withActiveClient(`${apiBase}${path}`, init?.body), await withCsrfToken({
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
-  });
+  }));
+  notifyAuthStatus(res);
   const ct = res.headers.get("content-type") ?? "";
   const data = ct.includes("application/json") ? await res.json() : null;
   if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
@@ -270,10 +278,12 @@ function PoolConfigDialog({ onChanged }: { onChanged: () => void }) {
 }
 
 function PoolRecordDialog({
-  siteId, onSaved, existing, open: controlledOpen, onOpenChange: controlledOnOpenChange, defaultCheckType,
+  siteId, onSaved, existing, open: controlledOpen, onOpenChange: controlledOnOpenChange, defaultCheckType, spoken,
 }: {
   siteId?: number; onSaved: () => void; existing?: PoolCheck;
   open?: boolean; onOpenChange?: (v: boolean) => void; defaultCheckType?: string;
+  /** Readings said to Say it, filled in when the dialog opens. */
+  spoken?: SayItFill | null;
 }) {
   const isEdit = !!existing;
   const { user } = useAuth();
@@ -287,6 +297,9 @@ function PoolRecordDialog({
   const [checkDate, setCheckDate] = useState(existing?.check_date ?? todayIso());
   const [checkTime, setCheckTime] = useState(existing?.check_time ?? nowTime());
   const [selectedSite, setSelectedSite] = useState<number | undefined>(existing?.site_id ?? siteId);
+  const workingSiteId = useWorkingSiteId();
+  // A new check starts on the page's site filter, else the user's working site.
+  useEffect(() => { if (open && !isEdit) setSelectedSite(siteId ?? workingSiteId ?? undefined); }, [open]);
   const [ph, setPh] = useState(existing?.ph_level ?? "");
   const [freeChlor, setFreeChlor] = useState(existing?.free_chlorine ?? "");
   const [combChlor, setCombChlor] = useState(existing?.combined_chlorine ?? "");
@@ -299,11 +312,23 @@ function PoolRecordDialog({
   const [actionsTaken, setActionsTaken] = useState(existing?.actions_taken ?? "");
   const [notes, setNotes] = useState(existing?.notes ?? "");
   const [overrideResult, setOverrideResult] = useState<string | null>(null);
+  const media = useRecordMedia("pool_check");
   const { toast } = useToast();
   const { data: sites } = useListSites();
   const { data: config } = useGetPoolTrackConfig();
 
   useEffect(() => { if (!open || isEdit || !config) return; if (!performedBy && config.pool_default_performer) setPerformedBy(config.pool_default_performer); }, [open]);
+  useEffect(() => {
+    if (!open || isEdit || !spoken) return;
+    const v = spoken.values;
+    const text = (key: string) => (typeof v[key] === "number" ? String(v[key]) : "");
+    setPh(text("ph")); setFreeChlor(text("freeChlorine")); setCombChlor(text("combinedChlorine"));
+    setWaterTemp(text("waterTemp")); setAirTemp(text("airTemp"));
+    if (typeof v.turbidity === "string") setTurbidity(v.turbidity);
+    if (spoken.siteId) setSelectedSite(spoken.siteId);
+    setCheckDate(todayIso()); setCheckTime(nowTime()); setOverrideResult(null);
+    setNotes(withSpokenNote("", spoken.text));
+  }, [open, spoken]);
 
   const parsedPh = ph ? parseFloat(ph) : null;
   const parsedFree = freeChlor ? parseFloat(freeChlor) : null;
@@ -319,21 +344,22 @@ function PoolRecordDialog({
   const handleSubmit = async () => {
     try {
       const payload = {
-        checkType, checkDate, checkTime: checkTime || undefined, siteId: selectedSite,
+        checkType, checkDate, checkTime: checkTime || undefined, siteId: selectedSite ?? null,
         phLevel: parsedPh, freeChlorine: parsedFree, combinedChlorine: parsedComb,
         waterTempC: parsedWT, airTempC: airTemp ? parseFloat(airTemp) : null,
         turbidity: turbidity || null, poolOpen, performedBy: performedBy || null, staffRosterId: staffRosterId,
-        actionsTaken: actionsTaken || undefined, result: effectiveResult, notes: notes || undefined,
+        // null (not undefined) so clearing a field on edit actually clears it
+        actionsTaken: actionsTaken || null, result: effectiveResult, notes: notes || null,
       };
       if (isEdit) await apiFetch(`/pool-track/${existing!.id}`, { method: "PUT", body: JSON.stringify(payload) });
-      else await apiFetch("/pool-track", { method: "POST", body: JSON.stringify(payload) });
+      else await media.attach((await apiFetch<{ id?: number }>("/pool-track", { method: "POST", body: JSON.stringify(payload) }))?.id);
       toast({ title: isEdit ? "Record updated" : "Check recorded" });
       setOpen(false); onSaved();
     } catch (err: any) { toast({ title: "Failed", description: err.message, variant: "destructive" }); }
   };
 
   return (
-    <Dialog open={open} onOpenChange={o => setOpen(o)}>
+    <Dialog open={open} onOpenChange={o => { setOpen(o); if (!o) media.clear(); }}>
       <DialogTrigger asChild>
         {isEdit
           ? <Button variant="ghost" size="sm"><Pencil className="w-3.5 h-3.5" /></Button>
@@ -341,14 +367,14 @@ function PoolRecordDialog({
         }
       </DialogTrigger>
       <DialogContent className="max-w-xl rounded-sm max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle className="font-display">{isEdit ? "Edit Pool Check" : "Record Pool Check"}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle className="font-display font-bold">{isEdit ? "Edit Pool Check" : "Record Pool Check"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-4">
           {!isEdit && (
             <div className="space-y-1.5">
               <Label>Check Type</Label>
               <Select value={checkType} onValueChange={setCheckType}>
                 <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>{Object.entries(CHECK_TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+                <SelectContent>{sortedEntries(CHECK_TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
               </Select>
             </div>
           )}
@@ -441,10 +467,11 @@ function PoolRecordDialog({
             <Label>Notes <span className="text-muted-foreground text-xs">optional</span></Label>
             <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="rounded-sm" />
           </div>
+          {isEdit ? <CheckPhotoUploader entityType="pool_check" entityId={existing!.id} /> : media.picker}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={handleSubmit}>{isEdit ? "Update" : "Record Check"}</Button>
+          <Button variant="outline" disabled={media.attaching} onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={media.attaching}>{media.attaching ? "Adding photos…" : isEdit ? "Update" : "Record Check"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -481,17 +508,26 @@ interface SwimStatus { sessionsToday: number; poolsClosedToday: number; surveill
 function SessionDialog({ open, onClose, session, sites, onSaved }: { open: boolean; onClose: () => void; session?: SwimSession | null; sites: { id: number; name: string }[]; onSaved: () => void; }) {
   const { toast } = useToast();
   const today = todayIso();
-  const blank = { siteId: "", sessionDate: today, sessionType: "public_swim", lifeguardName: "", openTime: "", closeTime: "", maxBathers: "", batherCountPeak: "", preSessionResult: "pass", preSessionNotes: "", poolClosed: false, closureReason: "", notes: "" };
+  const workingSiteId = useWorkingSiteId();
+  const blank = { siteId: workingSiteId ? String(workingSiteId) : "", sessionDate: today, sessionType: "public_swim", lifeguardName: "", openTime: "", closeTime: "", maxBathers: "", batherCountPeak: "", preSessionResult: "pass", preSessionNotes: "", poolClosed: false, closureReason: "", notes: "" };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
+  // Staged before the record exists, so a required-photo rule can be met (the API refuses a create without them).
+  const photoEvidence = useNewRecordPhotoEvidence("swim_session", open && !session);
+  const media = useRecordMedia("swim_session", { disabled: saving });
   const reset = () => setForm(session ? { siteId: session.siteId ? String(session.siteId) : "", sessionDate: session.sessionDate, sessionType: session.sessionType, lifeguardName: session.lifeguardName ?? "", openTime: session.openTime ?? "", closeTime: session.closeTime ?? "", maxBathers: session.maxBathers != null ? String(session.maxBathers) : "", batherCountPeak: session.batherCountPeak != null ? String(session.batherCountPeak) : "", preSessionResult: session.preSessionResult === "pass" ? "pass" : "fail", preSessionNotes: session.preSessionNotes ?? "", poolClosed: session.poolClosed, closureReason: session.closureReason ?? "", notes: session.notes ?? "" } : blank);
   const handleSave = async () => {
+    if (!session && (!photoEvidence.ready || photoEvidence.uploading)) return;
     if (!form.sessionDate) { toast({ title: "Session date is required", variant: "destructive" }); return; }
     setSaving(true);
     try {
       const body = { siteId: form.siteId ? parseInt(form.siteId, 10) : null, sessionDate: form.sessionDate, sessionType: form.sessionType, lifeguardName: form.lifeguardName.trim() || null, openTime: form.openTime || null, closeTime: form.closeTime || null, maxBathers: form.maxBathers ? parseInt(form.maxBathers, 10) : null, batherCountPeak: form.batherCountPeak ? parseInt(form.batherCountPeak, 10) : null, preSessionResult: form.preSessionResult, preSessionNotes: form.preSessionNotes.trim() || null, poolClosed: form.poolClosed, closureReason: form.closureReason.trim() || null, notes: form.notes.trim() || null, result: form.poolClosed ? "fail" : form.preSessionResult };
       if (session) await apiFetch(`/swim-track/sessions/${session.id}`, { method: "PUT", body: JSON.stringify(body) });
-      else await apiFetch("/swim-track/sessions", { method: "POST", body: JSON.stringify(body) });
+      else {
+        const created = await apiFetch("/swim-track/sessions", { method: "POST", body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }) });
+        photoEvidence.consume();
+        await media.attach(created?.id);
+      }
       toast({ title: session ? "Session updated" : "Session logged" });
       onSaved(); onClose();
     } catch (err: any) { toast({ title: "Failed to save", description: err.message, variant: "destructive" }); }
@@ -499,7 +535,7 @@ function SessionDialog({ open, onClose, session, sites, onSaved }: { open: boole
   };
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); media.clear(); }}>
         <DialogHeader><DialogTitle>{session ? "Edit Session" : "Log Pool Session"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-1 max-h-[70vh] overflow-y-auto pr-1">
           <div className="grid grid-cols-2 gap-3">
@@ -507,7 +543,7 @@ function SessionDialog({ open, onClose, session, sites, onSaved }: { open: boole
             <div><Label>Session type</Label>
               <Select value={form.sessionType} onValueChange={v => setForm(f => ({ ...f, sessionType: v }))}>
                 <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>{Object.entries(SESSION_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent>
+                <SelectContent>{sortedEntries(SESSION_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             {sites.length > 0 && (
@@ -535,31 +571,48 @@ function SessionDialog({ open, onClose, session, sites, onSaved }: { open: boole
           <div className="flex items-center gap-2"><input type="checkbox" id="poolClosed" checked={form.poolClosed} onChange={e => setForm(f => ({ ...f, poolClosed: e.target.checked }))} className="rounded" /><Label htmlFor="poolClosed" className="cursor-pointer text-sm">Pool closed / session cancelled</Label></div>
           {form.poolClosed && <div><Label>Closure reason</Label><Input className="mt-1 rounded-sm" value={form.closureReason} onChange={e => setForm(f => ({ ...f, closureReason: e.target.value }))} /></div>}
           <div><Label>Notes <span className="text-muted-foreground text-xs">optional</span></Label><Textarea className="mt-1 rounded-sm" rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
+          {!session && <RequiredRecordPhotoEvidence evidence={photoEvidence} />}
+          {session ? <CheckPhotoUploader entityType="swim_session" entityId={session.id} /> : media.picker}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : session ? "Save changes" : "Log session"}</Button>
+          <Button onClick={handleSave} disabled={saving || (!session && (photoEvidence.loading || photoEvidence.uploading || !photoEvidence.ready))}>{saving ? "Saving…" : session ? "Save changes" : "Log session"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-function SurveillanceDialog({ open, onClose, check, sites, onSaved }: { open: boolean; onClose: () => void; check?: SurveillanceCheck | null; sites: { id: number; name: string }[]; onSaved: () => void; }) {
+function SurveillanceDialog({ open, onClose, check, sites, onSaved, spoken }: { open: boolean; onClose: () => void; check?: SurveillanceCheck | null; sites: { id: number; name: string }[]; onSaved: () => void; spoken?: SayItFill | null; }) {
   const { toast } = useToast();
   const today = todayIso();
   const now = nowTime();
-  const blank = { siteId: "", checkDate: today, checkTime: now, batherCount: "", scanCompleted: true, observations: "", checkedBy: "" };
+  const workingSiteId = useWorkingSiteId();
+  const blank = { siteId: workingSiteId ? String(workingSiteId) : "", checkDate: today, checkTime: now, batherCount: "", scanCompleted: true, observations: "", checkedBy: "" };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
-  const reset = () => setForm(check ? { siteId: check.siteId ? String(check.siteId) : "", checkDate: check.checkDate, checkTime: check.checkTime ?? "", batherCount: check.batherCount != null ? String(check.batherCount) : "", scanCompleted: check.scanCompleted, observations: check.observations ?? "", checkedBy: check.checkedBy ?? "" } : blank);
+  // Staged before the record exists, so a required-photo rule can be met (the API refuses a create without them).
+  const photoEvidence = useNewRecordPhotoEvidence("swim_surveillance_check", open && !check);
+  const media = useRecordMedia("swim_surveillance_check", { disabled: saving });
+  const fromVoice = (fill: SayItFill) => ({
+    ...blank, siteId: fill.siteId ? String(fill.siteId) : "",
+    batherCount: typeof fill.values.batherCount === "number" ? String(fill.values.batherCount) : "",
+    scanCompleted: fill.values.scanCompleted !== false,
+    observations: withSpokenNote(typeof fill.values.observations === "string" ? fill.values.observations : "", fill.text),
+  });
+  const reset = () => setForm(check ? { siteId: check.siteId ? String(check.siteId) : "", checkDate: check.checkDate, checkTime: check.checkTime ?? "", batherCount: check.batherCount != null ? String(check.batherCount) : "", scanCompleted: check.scanCompleted, observations: check.observations ?? "", checkedBy: check.checkedBy ?? "" } : spoken ? fromVoice(spoken) : blank);
   const handleSave = async () => {
+    if (!check && (!photoEvidence.ready || photoEvidence.uploading)) return;
     if (!form.checkDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
     setSaving(true);
     try {
       const body = { siteId: form.siteId ? parseInt(form.siteId, 10) : null, checkDate: form.checkDate, checkTime: form.checkTime || null, batherCount: form.batherCount ? parseInt(form.batherCount, 10) : null, scanCompleted: form.scanCompleted, observations: form.observations.trim() || null, checkedBy: form.checkedBy.trim() || null, result: form.scanCompleted ? "pass" : "fail" };
       if (check) await apiFetch(`/swim-track/surveillance/${check.id}`, { method: "PUT", body: JSON.stringify(body) });
-      else await apiFetch("/swim-track/surveillance", { method: "POST", body: JSON.stringify(body) });
+      else {
+        const created = await apiFetch("/swim-track/surveillance", { method: "POST", body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }) });
+        photoEvidence.consume();
+        await media.attach(created?.id);
+      }
       toast({ title: check ? "Check updated" : "Surveillance check logged" });
       onSaved(); onClose();
     } catch (err: any) { toast({ title: "Failed", description: err.message, variant: "destructive" }); }
@@ -567,7 +620,7 @@ function SurveillanceDialog({ open, onClose, check, sites, onSaved }: { open: bo
   };
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
+      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); media.clear(); }}>
         <DialogHeader><DialogTitle>{check ? "Edit Surveillance Check" : "Log Surveillance Check"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-1">
           <div className="grid grid-cols-2 gap-3">
@@ -579,8 +632,10 @@ function SurveillanceDialog({ open, onClose, check, sites, onSaved }: { open: bo
           </div>
           <div className="flex items-center gap-2"><input type="checkbox" id="scanDone" checked={form.scanCompleted} onChange={e => setForm(f => ({ ...f, scanCompleted: e.target.checked }))} className="rounded" /><Label htmlFor="scanDone" className="cursor-pointer text-sm">Full pool scan completed</Label></div>
           <div><Label>Observations <span className="text-muted-foreground text-xs">optional</span></Label><Textarea className="mt-1 rounded-sm" rows={3} value={form.observations} onChange={e => setForm(f => ({ ...f, observations: e.target.value }))} /></div>
+          {!check && <RequiredRecordPhotoEvidence evidence={photoEvidence} />}
+          {check ? <CheckPhotoUploader entityType="swim_surveillance_check" entityId={check.id} /> : media.picker}
         </div>
-        <DialogFooter><Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button><Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : check ? "Save changes" : "Log check"}</Button></DialogFooter>
+        <DialogFooter><Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button><Button onClick={handleSave} disabled={saving || (!check && (photoEvidence.loading || photoEvidence.uploading || !photoEvidence.ready))}>{saving ? "Saving…" : check ? "Save changes" : "Log check"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -589,17 +644,26 @@ function SurveillanceDialog({ open, onClose, check, sites, onSaved }: { open: bo
 function FirstAidDialog({ open, onClose, check, sites, onSaved }: { open: boolean; onClose: () => void; check?: FirstAidCheck | null; sites: { id: number; name: string }[]; onSaved: () => void; }) {
   const { toast } = useToast();
   const blankItems = Object.fromEntries(FIRST_AID_ITEMS.map(i => [i.key, true]));
-  const blank = { siteId: "", checkDate: todayIso(), checkedBy: "", defectsFound: "", notes: "", ...blankItems };
+  const workingSiteId = useWorkingSiteId();
+  const blank = { siteId: workingSiteId ? String(workingSiteId) : "", checkDate: todayIso(), checkedBy: "", defectsFound: "", notes: "", ...blankItems };
   const [form, setForm] = useState<Record<string, any>>(blank);
   const [saving, setSaving] = useState(false);
+  // Staged before the record exists, so a required-photo rule can be met (the API refuses a create without them).
+  const photoEvidence = useNewRecordPhotoEvidence("swim_first_aid_check", open && !check);
+  const media = useRecordMedia("swim_first_aid_check", { disabled: saving });
   const reset = () => setForm(check ? { siteId: check.siteId ? String(check.siteId) : "", checkDate: check.checkDate, checkedBy: check.checkedBy ?? "", defectsFound: check.defectsFound ?? "", notes: check.notes ?? "", aedOk: check.aedOk, firstAidKitOk: check.firstAidKitOk, rescuePoleOk: check.rescuePoleOk, throwBagOk: check.throwBagOk, spineBoardOk: check.spineBoardOk, ringBuoyOk: check.ringBuoyOk, oxygenKitOk: check.oxygenKitOk } : blank);
   const handleSave = async () => {
+    if (!check && (!photoEvidence.ready || photoEvidence.uploading)) return;
     if (!form.checkDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
     setSaving(true);
     try {
       const body = { siteId: form.siteId ? parseInt(form.siteId, 10) : null, checkDate: form.checkDate, checkedBy: form.checkedBy.trim() || null, defectsFound: form.defectsFound.trim() || null, notes: form.notes.trim() || null, ...Object.fromEntries(FIRST_AID_ITEMS.map(i => [i.key, form[i.key]])) };
       if (check) await apiFetch(`/swim-track/first-aid/${check.id}`, { method: "PUT", body: JSON.stringify(body) });
-      else await apiFetch("/swim-track/first-aid", { method: "POST", body: JSON.stringify(body) });
+      else {
+        const created = await apiFetch("/swim-track/first-aid", { method: "POST", body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }) });
+        photoEvidence.consume();
+        await media.attach(created?.id);
+      }
       toast({ title: check ? "Check updated" : "First-aid check saved" });
       onSaved(); onClose();
     } catch (err: any) { toast({ title: "Failed", description: err.message, variant: "destructive" }); }
@@ -607,7 +671,7 @@ function FirstAidDialog({ open, onClose, check, sites, onSaved }: { open: boolea
   };
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
+      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); media.clear(); }}>
         <DialogHeader><DialogTitle>{check ? "Edit First-Aid Check" : "First-Aid Readiness Check"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-1">
           <div className="grid grid-cols-2 gap-3">
@@ -627,8 +691,10 @@ function FirstAidDialog({ open, onClose, check, sites, onSaved }: { open: boolea
           </div>
           <div><Label>Defects / actions required <span className="text-muted-foreground text-xs">optional</span></Label><Textarea className="mt-1 rounded-sm" rows={2} value={form.defectsFound} onChange={e => setForm(f => ({ ...f, defectsFound: e.target.value }))} /></div>
           <div><Label>Notes <span className="text-muted-foreground text-xs">optional</span></Label><Textarea className="mt-1 rounded-sm" rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
+          {!check && <RequiredRecordPhotoEvidence evidence={photoEvidence} />}
+          {check ? <CheckPhotoUploader entityType="swim_first_aid_check" entityId={check.id} /> : media.picker}
         </div>
-        <DialogFooter><Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button><Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : check ? "Save changes" : "Save check"}</Button></DialogFooter>
+        <DialogFooter><Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button><Button onClick={handleSave} disabled={saving || (!check && (photoEvidence.loading || photoEvidence.uploading || !photoEvidence.ready))}>{saving ? "Saving…" : check ? "Save changes" : "Save check"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -636,18 +702,27 @@ function FirstAidDialog({ open, onClose, check, sites, onSaved }: { open: boolea
 
 function IncidentDialog({ open, onClose, incident, sites, onSaved }: { open: boolean; onClose: () => void; incident?: Incident | null; sites: { id: number; name: string }[]; onSaved: () => void; }) {
   const { toast } = useToast();
-  const blank = { siteId: "", incidentDate: todayIso(), incidentTime: "", incidentType: "near_miss", severity: "low", personsInvolved: "", description: "", actionTaken: "", reportedTo: "", reportedDate: "", outcome: "", notes: "" };
+  const workingSiteId = useWorkingSiteId();
+  const blank = { siteId: workingSiteId ? String(workingSiteId) : "", incidentDate: todayIso(), incidentTime: "", incidentType: "near_miss", severity: "low", personsInvolved: "", description: "", actionTaken: "", reportedTo: "", reportedDate: "", outcome: "", notes: "" };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
+  // Staged before the record exists, so a required-photo rule can be met (the API refuses a create without them).
+  const photoEvidence = useNewRecordPhotoEvidence("swim_incident", open && !incident);
+  const media = useRecordMedia("swim_incident", { disabled: saving });
   const reset = () => setForm(incident ? { siteId: incident.siteId ? String(incident.siteId) : "", incidentDate: incident.incidentDate, incidentTime: incident.incidentTime ?? "", incidentType: incident.incidentType, severity: incident.severity, personsInvolved: incident.personsInvolved ?? "", description: incident.description, actionTaken: incident.actionTaken ?? "", reportedTo: incident.reportedTo ?? "", reportedDate: incident.reportedDate ?? "", outcome: incident.outcome ?? "", notes: incident.notes ?? "" } : blank);
   const handleSave = async () => {
+    if (!incident && (!photoEvidence.ready || photoEvidence.uploading)) return;
     if (!form.incidentDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
     if (!form.description.trim()) { toast({ title: "Description is required", variant: "destructive" }); return; }
     setSaving(true);
     try {
       const body = { siteId: form.siteId ? parseInt(form.siteId, 10) : null, incidentDate: form.incidentDate, incidentTime: form.incidentTime || null, incidentType: form.incidentType, severity: form.severity, personsInvolved: form.personsInvolved.trim() || null, description: form.description.trim(), actionTaken: form.actionTaken.trim() || null, reportedTo: form.reportedTo.trim() || null, reportedDate: form.reportedDate || null, outcome: form.outcome.trim() || null, notes: form.notes.trim() || null };
       if (incident) await apiFetch(`/swim-track/incidents/${incident.id}`, { method: "PUT", body: JSON.stringify(body) });
-      else await apiFetch("/swim-track/incidents", { method: "POST", body: JSON.stringify(body) });
+      else {
+        const created = await apiFetch("/swim-track/incidents", { method: "POST", body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }) });
+        photoEvidence.consume();
+        await media.attach(created?.id);
+      }
       toast({ title: incident ? "Incident updated" : "Incident logged" });
       onSaved(); onClose();
     } catch (err: any) { toast({ title: "Failed", description: err.message, variant: "destructive" }); }
@@ -655,13 +730,13 @@ function IncidentDialog({ open, onClose, incident, sites, onSaved }: { open: boo
   };
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); media.clear(); }}>
         <DialogHeader><DialogTitle>{incident ? "Edit Incident" : "Log Incident / Near Miss"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-1 max-h-[70vh] overflow-y-auto pr-1">
           <div className="grid grid-cols-2 gap-3">
             <div><Label>Incident date *</Label><Input type="date" className="mt-1 rounded-sm" value={form.incidentDate} onChange={e => setForm(f => ({ ...f, incidentDate: e.target.value }))} /></div>
             <div><Label>Time <span className="text-muted-foreground text-xs">optional</span></Label><Input type="time" className="mt-1 rounded-sm" value={form.incidentTime} onChange={e => setForm(f => ({ ...f, incidentTime: e.target.value }))} /></div>
-            <div><Label>Type</Label><Select value={form.incidentType} onValueChange={v => setForm(f => ({ ...f, incidentType: v }))}><SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(INCIDENT_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent></Select></div>
+            <div><Label>Type</Label><Select value={form.incidentType} onValueChange={v => setForm(f => ({ ...f, incidentType: v }))}><SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger><SelectContent>{sortedEntries(INCIDENT_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent></Select></div>
             <div><Label>Severity</Label><Select value={form.severity} onValueChange={v => setForm(f => ({ ...f, severity: v }))}><SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(SEVERITY_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent></Select></div>
             {sites.length > 0 && (<div className="col-span-2"><Label>Site <span className="text-muted-foreground text-xs">optional</span></Label><Select value={form.siteId || "_none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "_none" ? "" : v }))}><SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger><SelectContent><SelectItem value="_none">— All sites —</SelectItem>{sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}</SelectContent></Select></div>)}
           </div>
@@ -674,10 +749,12 @@ function IncidentDialog({ open, onClose, incident, sites, onSaved }: { open: boo
           </div>
           <div><Label>Outcome <span className="text-muted-foreground text-xs">leave blank if still open</span></Label><Textarea className="mt-1 rounded-sm" rows={2} value={form.outcome} onChange={e => setForm(f => ({ ...f, outcome: e.target.value }))} /></div>
           <div><Label>Notes <span className="text-muted-foreground text-xs">optional</span></Label><Textarea className="mt-1 rounded-sm" rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
+          {!incident && <RequiredRecordPhotoEvidence evidence={photoEvidence} />}
+          {incident ? <CheckPhotoUploader entityType="swim_incident" entityId={incident.id} /> : media.picker}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving} className={form.severity === "critical" ? "bg-destructive hover:bg-destructive/90" : ""}>{saving ? "Saving…" : incident ? "Save changes" : "Log incident"}</Button>
+          <Button onClick={handleSave} disabled={saving || (!incident && (photoEvidence.loading || photoEvidence.uploading || !photoEvidence.ready))} className={form.severity === "critical" ? "bg-destructive hover:bg-destructive/90" : ""}>{saving ? "Saving…" : incident ? "Save changes" : "Log incident"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -704,9 +781,12 @@ export default function AquaTrackPage() {
 
   // ── Pool Quality state ──────────────────────────────────────────────────────
   const [filterType, setFilterType] = useState("");
-  const [filterSite, setFilterSite] = useState<number | undefined>();
+  const [filterSite, setFilterSite] = useSiteFilterId();
   const [poolRecordOpen, setPoolRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<string | undefined>();
+  // A water test or surveillance check said to Say it.
+  const [spokenTest, setSpokenTest] = useState<SayItFill | null>(null);
+  const [spokenSurveillance, setSpokenSurveillance] = useState<SayItFill | null>(null);
   const [poolChecks, setPoolChecks] = useState<PoolCheck[]>([]);
   const [poolStatus, setPoolStatus] = useState<any[]>([]);
   const poolRequestSequence = useRef(0);
@@ -746,6 +826,19 @@ export default function AquaTrackPage() {
   const [editSession, setEditSession] = useState<SwimSession | null>(null);
   const [surveillanceDialog, setSurveillanceDialog] = useState(false);
   const [editSurveillance, setEditSurveillance] = useState<SurveillanceCheck | null>(null);
+  useSayItFill(["pool-test", "swim-surveillance"], fill => {
+    if (fill.form === "pool-test") {
+      setActiveTab("water-quality");
+      setQuickCheckType(typeof fill.values.checkType === "string" ? fill.values.checkType : "routine");
+      setSpokenTest(fill);
+      setPoolRecordOpen(true);
+    } else {
+      setActiveTab("surveillance");
+      setEditSurveillance(null);
+      setSpokenSurveillance(fill);
+      setSurveillanceDialog(true);
+    }
+  });
   const [firstAidDialog, setFirstAidDialog] = useState(false);
   const [editFirstAid, setEditFirstAid] = useState<FirstAidCheck | null>(null);
   const [incidentDialog, setIncidentDialog] = useState(false);
@@ -753,10 +846,10 @@ export default function AquaTrackPage() {
   const [deleteId, setDeleteId] = useState<{ type: string; id: number } | null>(null);
 
   const { data: swimStatus, refetch: refetchStatus } = useQuery({ queryKey: ["swim-status"], queryFn: () => apiFetch<SwimStatus>("/swim-track/status"), enabled: hasAqua, refetchInterval: 60_000 });
-  const { data: sessions = [], isLoading: sessionsLoading } = useQuery({ queryKey: ["swim-sessions"], queryFn: () => apiFetch<SwimSession[]>("/swim-track/sessions"), enabled: hasAqua && activeTab === "sessions" });
-  const { data: surveillance = [], isLoading: surveillanceLoading } = useQuery({ queryKey: ["swim-surveillance"], queryFn: () => apiFetch<SurveillanceCheck[]>("/swim-track/surveillance"), enabled: hasAqua && activeTab === "surveillance" });
-  const { data: firstAidChecks = [], isLoading: firstAidLoading } = useQuery({ queryKey: ["swim-first-aid"], queryFn: () => apiFetch<FirstAidCheck[]>("/swim-track/first-aid"), enabled: hasAqua && activeTab === "first-aid" });
-  const { data: incidents = [], isLoading: incidentsLoading } = useQuery({ queryKey: ["swim-incidents"], queryFn: () => apiFetch<Incident[]>("/swim-track/incidents"), enabled: hasAqua && activeTab === "incidents" });
+  const { data: sessions = [], isLoading: sessionsLoading } = useQuery({ queryKey: ["swim-sessions"], queryFn: () => apiFetch("/swim-track/sessions").then(camelCaseRows<SwimSession>), enabled: hasAqua && activeTab === "sessions" });
+  const { data: surveillance = [], isLoading: surveillanceLoading } = useQuery({ queryKey: ["swim-surveillance"], queryFn: () => apiFetch("/swim-track/surveillance").then(camelCaseRows<SurveillanceCheck>), enabled: hasAqua && activeTab === "surveillance" });
+  const { data: firstAidChecks = [], isLoading: firstAidLoading } = useQuery({ queryKey: ["swim-first-aid"], queryFn: () => apiFetch("/swim-track/first-aid").then(camelCaseRows<FirstAidCheck>), enabled: hasAqua && activeTab === "first-aid" });
+  const { data: incidents = [], isLoading: incidentsLoading } = useQuery({ queryKey: ["swim-incidents"], queryFn: () => apiFetch("/swim-track/incidents").then(camelCaseRows<Incident>), enabled: hasAqua && activeTab === "incidents" });
 
   const invalidateSwim = () => { ["swim-sessions", "swim-surveillance", "swim-first-aid", "swim-incidents", "swim-status"].forEach(k => queryClient.invalidateQueries({ queryKey: [k] })); };
 
@@ -789,7 +882,7 @@ export default function AquaTrackPage() {
                 <Lock className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h2 className="text-2xl font-display font-medium mb-2">AquaTrack</h2>
+                <h2 className="text-2xl font-display font-bold mb-2">AquaTrack</h2>
                 <p className="text-muted-foreground mb-1">Pool and swim records — water testing, lifeguard sessions, surveillance, first-aid readiness and incident evidence to support your site operating procedures.</p>
                 <p className="font-medium text-primary">£10 per site per month</p>
               </div>
@@ -826,7 +919,7 @@ export default function AquaTrackPage() {
               <Anchor className="w-6 h-6 text-primary" />
             </div>
             <div>
-              <h1 className="text-lg font-display font-semibold">AquaTrack</h1>
+              <h1 className="text-lg font-display font-bold">AquaTrack</h1>
               <p className="text-sm text-muted-foreground">Pool water quality · Sessions · Surveillance · Safety</p>
             </div>
           </div>
@@ -835,7 +928,7 @@ export default function AquaTrackPage() {
             {activeTab === "water-quality" && (
               <>
                 {canAdmin && <PoolConfigDialog onChanged={fetchPoolData} />}
-                <PoolRecordDialog siteId={filterSite} onSaved={fetchPoolData} open={poolRecordOpen} onOpenChange={setPoolRecordOpen} defaultCheckType={quickCheckType} />
+                <PoolRecordDialog siteId={filterSite} onSaved={fetchPoolData} open={poolRecordOpen} onOpenChange={open => { setPoolRecordOpen(open); if (!open) setSpokenTest(null); }} defaultCheckType={quickCheckType} spoken={spokenTest} />
               </>
             )}
             {activeTab === "sessions" && (
@@ -983,7 +1076,7 @@ export default function AquaTrackPage() {
                       <SelectTrigger className="rounded-sm"><SelectValue placeholder="All types" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All types</SelectItem>
-                        {Object.entries(CHECK_TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                        {sortedEntries(CHECK_TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1005,7 +1098,7 @@ export default function AquaTrackPage() {
 
             {/* Check log */}
             <Card>
-              <CardHeader className="border-b border-border/50 pb-4"><CardTitle className="font-display">Water Quality Log</CardTitle></CardHeader>
+              <CardHeader className="border-b border-border/50 pb-4"><CardTitle className="font-display font-bold">Water Quality Log</CardTitle></CardHeader>
               <CardContent className="p-0">
                 {poolLoading ? (
                   <div className="p-12 flex justify-center"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div>
@@ -1054,6 +1147,7 @@ export default function AquaTrackPage() {
                               )}
                               {check.actions_taken && <div className="text-xs text-muted-foreground"><span className="font-medium">Actions:</span> {check.actions_taken}</div>}
                               {check.notes && <div className="text-xs text-muted-foreground"><span className="font-medium">Notes:</span> {check.notes}</div>}
+                              <RecordSignedBy recordType="pool_check" recordId={check.id} />
                               <CheckPhotoUploader entityType="pool_check" entityId={check.id} compact />
                             </div>
                             <div className="flex items-center gap-1 flex-shrink-0">
@@ -1109,7 +1203,7 @@ export default function AquaTrackPage() {
                         <td className="py-2 pr-4 text-right tabular-nums hidden md:table-cell">{s.batherCountPeak != null ? <>{s.batherCountPeak}{s.maxBathers ? <span className="text-muted-foreground">/{s.maxBathers}</span> : null}</> : <span className="text-muted-foreground">—</span>}</td>
                         <td className="py-2 pr-4"><span className={`text-xs px-1.5 py-0.5 rounded-full ${s.preSessionResult === "pass" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{s.preSessionResult === "pass" ? "Pass" : "Fail"}</span></td>
                         <td className="py-2 pr-4">{s.poolClosed ? <span className="text-xs text-destructive font-medium flex items-center gap-1"><XCircle className="w-3 h-3" />Closed</span> : <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Open</span>}</td>
-                        <td className="py-2 px-2"><CheckPhotoUploader entityType="swim_session" entityId={s.id} compact /></td>
+                        <td className="py-2 px-2"><RecordSignedBy recordType="swim_session" recordId={s.id} compact className="mb-1" /><CheckPhotoUploader entityType="swim_session" entityId={s.id} compact /></td>
                         <td className="py-2 text-right">
                           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setEditSession(s); setSessionDialog(true); }}><Pencil className="w-3.5 h-3.5" /></Button>
                           {canAdmin && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => setDeleteId({ type: "sessions", id: s.id })}><Trash2 className="w-3.5 h-3.5" /></Button>}
@@ -1288,7 +1382,7 @@ export default function AquaTrackPage() {
 
       {/* ── Swim dialogs ─────────────────────────────────────────────────────── */}
       <SessionDialog open={sessionDialog} onClose={() => { setSessionDialog(false); setEditSession(null); }} session={editSession} sites={sites as any[]} onSaved={invalidateSwim} />
-      <SurveillanceDialog open={surveillanceDialog} onClose={() => { setSurveillanceDialog(false); setEditSurveillance(null); }} check={editSurveillance} sites={sites as any[]} onSaved={invalidateSwim} />
+      <SurveillanceDialog open={surveillanceDialog} onClose={() => { setSurveillanceDialog(false); setEditSurveillance(null); setSpokenSurveillance(null); }} check={editSurveillance} sites={sites as any[]} onSaved={invalidateSwim} spoken={spokenSurveillance} />
       <FirstAidDialog open={firstAidDialog} onClose={() => { setFirstAidDialog(false); setEditFirstAid(null); }} check={editFirstAid} sites={sites as any[]} onSaved={invalidateSwim} />
       <IncidentDialog open={incidentDialog} onClose={() => { setIncidentDialog(false); setEditIncident(null); }} incident={editIncident} sites={sites as any[]} onSaved={invalidateSwim} />
 

@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
 import { Feather } from '@expo/vector-icons';
 import { reloadAppAsync } from 'expo';
+import { appVersionLabel } from '@/lib/appVersion';
 
 export type ErrorFallbackProps = {
   error: Error;
@@ -73,11 +74,16 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
         </Text>
 
         <Text style={[styles.message, { color: colors.mutedForeground }]}>
-          Please reload the app to continue.
+          Checks saved on this device are kept. Try again, or restart the
+          app if the problem continues.
         </Text>
 
+        {/* Re-render first: a passing problem (e.g. bad data from one
+            request) recovers without a restart. */}
         <Pressable
-          onPress={handleRestart}
+          testID="error-try-again"
+          onPress={resetError}
+          accessibilityRole="button"
           style={({ pressed }) => [
             styles.button,
             {
@@ -90,9 +96,22 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
           <Text
             style={[styles.buttonText, { color: colors.primaryForeground }]}
           >
-            Try Again
+            Try again
           </Text>
         </Pressable>
+        <Pressable
+          testID="error-restart"
+          onPress={handleRestart}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.secondaryButton, { opacity: pressed ? 0.6 : 1 }]}
+        >
+          <Text style={[styles.buttonText, { color: colors.foreground }]}>
+            Restart app
+          </Text>
+        </Pressable>
+        <Text style={[styles.version, { color: colors.mutedForeground }]}>
+          Version {appVersionLabel()}
+        </Text>
       </View>
 
       {__DEV__ ? (
@@ -218,6 +237,15 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+  },
+  secondaryButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    minWidth: 200,
+  },
+  version: {
+    fontSize: 12,
+    textAlign: 'center',
   },
   buttonText: {
     fontWeight: '600',

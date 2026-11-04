@@ -4,183 +4,13 @@ import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from "@/lib/api";
-import { trackModuleActivation } from "@/lib/analytics";
-import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, KeyRound, Flame, UtensilsCrossed, Droplets, Wrench, Building2, BookOpen, Waves, TreePine, AlertOctagon, Bike, Leaf, PlugZap, Bug, Sunrise, Sunset } from "lucide-react";
+import { forgetPendingCheckout, pendingCheckoutKey, trackCompletedCheckout } from "@/lib/billing-return";
+import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, KeyRound } from "lucide-react";
 import alpsLogo from "@/assets/alps-logo.png";
+import { CHECKOUT_ADDONS, SELECTED_MODULE_CARD, SELECTED_MODULE_CHECKBOX, checkoutPerSiteTotal } from "@/lib/addon-catalog";
+import { SetupServiceCheckoutOption, offerSetupService, type SetupServiceBilling } from "@/components/setup-service-checkout";
 
-const ADDONS = [
-  {
-    key: "firetrack",
-    label: "FireTrack",
-    desc: "Fire safety logbook",
-    icon: Flame,
-    iconColor: "text-orange-600",
-    activeBorder: "border-orange-400",
-    activeBg: "bg-orange-50/60",
-  },
-  {
-    key: "kitchentrack",
-    label: "KitchenTrack",
-    desc: "Food safety diary",
-    icon: UtensilsCrossed,
-    iconColor: "text-amber-600",
-    activeBorder: "border-amber-400",
-    activeBg: "bg-amber-50/60",
-  },
-  {
-    key: "legionellatrack",
-    label: "LegionellaTrack",
-    desc: "Water safety logbook (L8/HSG274)",
-    icon: Droplets,
-    iconColor: "text-sky-600",
-    activeBorder: "border-sky-400",
-    activeBg: "bg-sky-50/60",
-  },
-  {
-    key: "fixtrack",
-    label: "FixTrack",
-    desc: "Maintenance issue reporting",
-    icon: Wrench,
-    iconColor: "text-orange-700",
-    activeBorder: "border-orange-500",
-    activeBg: "bg-orange-50/60",
-  },
-  {
-    key: "premisestrack",
-    label: "PremisesTrack",
-    desc: "Premises safety logbook",
-    icon: Building2,
-    iconColor: "text-violet-700",
-    activeBorder: "border-violet-500",
-    activeBg: "bg-violet-50/60",
-  },
-  {
-    key: "safetrack",
-    label: "SafeTrack",
-    desc: "Risk assessments, SOPs & staff handbook acknowledgements",
-    icon: ShieldCheck,
-    iconColor: "text-blue-700",
-    activeBorder: "border-blue-500",
-    activeBg: "bg-blue-50/60",
-  },
-  {
-    key: "doctrack",
-    label: "DocTrack",
-    desc: "H&S document library with staff sign-off & annual acknowledgements",
-    icon: CheckCircle2,
-    iconColor: "text-indigo-700",
-    activeBorder: "border-indigo-500",
-    activeBg: "bg-indigo-50/60",
-  },
-  {
-    key: "traintrack",
-    label: "TrainTrack",
-    desc: "Staff training & cert expiry",
-    icon: BookOpen,
-    iconColor: "text-emerald-700",
-    activeBorder: "border-emerald-500",
-    activeBg: "bg-emerald-50/60",
-  },
-  {
-    key: "hottubtrack",
-    label: "TubTrack",
-    desc: "Hot tub & spa pool maintenance (HSG282)",
-    icon: Waves,
-    iconColor: "text-cyan-600",
-    activeBorder: "border-cyan-500",
-    activeBg: "bg-cyan-50/60",
-  },
-  {
-    key: "treetrack",
-    label: "TreeTrack",
-    desc: "Tree inspection logbook (BS 3998)",
-    icon: TreePine,
-    iconColor: "text-green-700",
-    activeBorder: "border-green-500",
-    activeBg: "bg-green-50/60",
-  },
-  {
-    key: "incidenttrack",
-    label: "IncidentTrack",
-    desc: "Accident & incident log with RIDDOR reporting",
-    icon: AlertOctagon,
-    iconColor: "text-rose-700",
-    activeBorder: "border-rose-500",
-    activeBg: "bg-rose-50/60",
-  },
-  {
-    key: "biketrack",
-    label: "BikeTrack",
-    desc: "Bike hire service & maintenance records",
-    icon: Bike,
-    iconColor: "text-lime-700",
-    activeBorder: "border-lime-500",
-    activeBg: "bg-lime-50/60",
-  },
-  {
-    key: "aquatrack",
-    label: "AquaTrack",
-    desc: "Pool water quality, sessions, surveillance, first-aid & incidents",
-    icon: Waves,
-    iconColor: "text-blue-600",
-    activeBorder: "border-blue-400",
-    activeBg: "bg-blue-50/60",
-  },
-  {
-    key: "greentrack",
-    label: "GreenTrack",
-    desc: "Grounds & landscaping maintenance records",
-    icon: Leaf,
-    iconColor: "text-green-600",
-    activeBorder: "border-green-400",
-    activeBg: "bg-green-50/60",
-  },
-  {
-    key: "swimtrack",
-    label: "SwimTrack",
-    desc: "Swimming sessions, safety checks & incident records",
-    icon: Waves,
-    iconColor: "text-cyan-700",
-    activeBorder: "border-cyan-500",
-    activeBg: "bg-cyan-50/60",
-  },
-  {
-    key: "pattrack",
-    label: "PATtrack",
-    desc: "Portable appliance testing records",
-    icon: PlugZap,
-    iconColor: "text-yellow-600",
-    activeBorder: "border-yellow-400",
-    activeBg: "bg-yellow-50/60",
-  },
-  {
-    key: "pesttrack",
-    label: "PestTrack",
-    desc: "Pest control monitoring & treatment log",
-    icon: Bug,
-    iconColor: "text-stone-700",
-    activeBorder: "border-stone-500",
-    activeBg: "bg-stone-50/60",
-  },
-  {
-    key: "dailytrack_am",
-    label: "DailyTrack AM",
-    desc: "Opening checks & morning checklists",
-    icon: Sunrise,
-    iconColor: "text-amber-500",
-    activeBorder: "border-amber-400",
-    activeBg: "bg-amber-50/60",
-  },
-  {
-    key: "dailytrack_pm",
-    label: "DailyTrack PM",
-    desc: "Closing checks & evening checklists",
-    icon: Sunset,
-    iconColor: "text-orange-500",
-    activeBorder: "border-orange-400",
-    activeBg: "bg-orange-50/60",
-  },
-];
+const ADDONS = CHECKOUT_ADDONS;
 
 export default function TrialEndedPage() {
   const { user, client, activeClientId, logout, refresh } = useAuth();
@@ -191,28 +21,16 @@ export default function TrialEndedPage() {
   const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
   const [bundle, setBundle] = useState(false);
   const [discountCode, setDiscountCode] = useState("");
-  const checkoutAnalyticsKey = activeClientId === null
-    ? null
-    : `complytrack:analytics:pending-checkout:${activeClientId}`;
+  const [setupService, setSetupService] = useState<SetupServiceBilling>(null);
+  const [addSetupService, setAddSetupService] = useState(false);
+  const checkoutAnalyticsKey = activeClientId === null ? null : pendingCheckoutKey(activeClientId);
 
   const canPay = user?.role === "consultant" || user?.role === "client_admin";
-  const total = bundle ? 50 : 10 + selectedAddons.size * 10;
+  const total = checkoutPerSiteTotal(selectedAddons.size, bundle);
+  // At the cap the server sells the Complete bundle instead (every module).
+  const reachesCap = !bundle && total === checkoutPerSiteTotal(0, true);
+  const [billingUnavailable, setBillingUnavailable] = useState(false);
   const hasAlpsDiscount = discountCode.trim().length > 0;
-
-  const trackCompletedCheckout = () => {
-    if (!checkoutAnalyticsKey || activeClientId === null) return;
-    try {
-      const modules = JSON.parse(window.sessionStorage.getItem(checkoutAnalyticsKey) ?? "[]");
-      if (Array.isArray(modules)) {
-        modules
-          .filter((module): module is string => typeof module === "string")
-          .forEach((module) => trackModuleActivation(activeClientId, module));
-      }
-      window.sessionStorage.removeItem(checkoutAnalyticsKey);
-    } catch {
-      // Tracking cannot interfere with restored paid access.
-    }
-  };
 
   const toggleAddon = (key: string) => {
     setBundle(false);
@@ -229,7 +47,7 @@ export default function TrialEndedPage() {
       setSelectedAddons(new Set());
     } else {
       setBundle(true);
-      setSelectedAddons(new Set(ADDONS.filter(a => !(a as any).comingSoon).map(a => a.key)));
+      setSelectedAddons(new Set(ADDONS.filter(a => !a.comingSoon).map(a => a.key)));
     }
   };
 
@@ -245,16 +63,25 @@ export default function TrialEndedPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("billing") === "success") {
-      recheckAccess().then(trackCompletedCheckout);
-    } else if (params.get("billing") === "cancel" && checkoutAnalyticsKey) {
-      try {
-        window.sessionStorage.removeItem(checkoutAnalyticsKey);
-      } catch {
-        // Storage is only a best-effort analytics deduplication aid.
-      }
+      recheckAccess().then(() => trackCompletedCheckout(activeClientId));
+    } else if (params.get("billing") === "cancel") {
+      forgetPendingCheckout(activeClientId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // "Would you like ALPS to set you up?": ticked already when they asked on the setup page.
+  useEffect(() => {
+    if (!canPay) return;
+    apiFetch("/billing/config")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        const offer = (data?.setupService ?? null) as SetupServiceBilling;
+        setSetupService(offer);
+        setAddSetupService(offerSetupService(offer) && !!offer?.requestedAt);
+      })
+      .catch(() => setSetupService(null));
+  }, [activeClientId, canPay]);
 
   // Pre-tick the modules the account picked on the pricing page at signup.
   useEffect(() => {
@@ -262,9 +89,9 @@ export default function TrialEndedPage() {
     if (!picked || picked.length === 0) return;
     if (picked.includes("bundle")) {
       setBundle(true);
-      setSelectedAddons(new Set(ADDONS.filter(a => !(a as any).comingSoon).map(a => a.key)));
+      setSelectedAddons(new Set(ADDONS.filter(a => !a.comingSoon).map(a => a.key)));
     } else {
-      const known = new Set(ADDONS.filter(a => !(a as any).comingSoon).map(a => a.key));
+      const known = new Set(ADDONS.filter(a => !a.comingSoon).map(a => a.key));
       setSelectedAddons(new Set(picked.filter(k => known.has(k))));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -280,7 +107,7 @@ export default function TrialEndedPage() {
         // to analytics or included in the event itself.
         window.sessionStorage.setItem(
           checkoutAnalyticsKey,
-          JSON.stringify(bundle ? ADDONS.map((addon) => addon.key) : services),
+          JSON.stringify(bundle || reachesCap ? ADDONS.filter((addon) => !addon.comingSoon).map((addon) => addon.key) : services),
         );
       }
 
@@ -291,9 +118,21 @@ export default function TrialEndedPage() {
           bundle,
           services: services.length > 0 ? services : undefined,
           ...(discountCode.trim() ? { discountCode: discountCode.trim() } : {}),
+          ...(addSetupService && offerSetupService(setupService) ? { setupService: true } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 503) {
+        // Billing itself is down (Stripe unavailable): nobody is locked out
+        // for not paying meanwhile, so re-check access rather than fail.
+        setBillingUnavailable(true);
+        if (checkoutAnalyticsKey) {
+          try { window.sessionStorage.removeItem(checkoutAnalyticsKey); } catch { /* best-effort */ }
+        }
+        setCheckingOut(false);
+        await recheckAccess();
+        return;
+      }
       if (!res.ok || !data.url) throw new Error(data.error ?? "Could not start checkout");
       window.location.href = data.url;
     } catch (err: any) {
@@ -324,7 +163,7 @@ export default function TrialEndedPage() {
           <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center bg-[#162D42] text-white">
             <Lock className="h-6 w-6" />
           </div>
-          <h1 className="text-2xl font-display text-[#162D42] mb-3">Your free trial has ended</h1>
+          <h1 className="text-2xl font-display font-bold text-[#162D42] mb-3">Your free trial has ended</h1>
           <p className="text-base leading-relaxed font-light text-muted-foreground">
             {client?.name ? `The trial for ${client.name} has expired. ` : "Your trial has expired. "}
             {canPay
@@ -352,7 +191,7 @@ export default function TrialEndedPage() {
             {/* Add-ons */}
             {ADDONS.map(addon => {
               const Icon = addon.icon;
-              const isComingSoon = (addon as any).comingSoon === true;
+              const isComingSoon = addon.comingSoon === true;
               const active = !isComingSoon && (selectedAddons.has(addon.key) || bundle);
               if (isComingSoon) {
                 return (
@@ -378,11 +217,11 @@ export default function TrialEndedPage() {
                   onClick={() => !bundle && toggleAddon(addon.key)}
                   className={`flex items-center gap-3 p-3 border-2 cursor-pointer transition-all ${
                     bundle ? "opacity-60 cursor-default border-border" :
-                    active ? `${addon.activeBorder} ${addon.activeBg}` : "border-border hover:border-primary/40"
+                    active ? SELECTED_MODULE_CARD : "border-border hover:border-primary/40"
                   }`}
                 >
                   <div className={`w-5 h-5 border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-                    active ? `border-current bg-current ${addon.iconColor}` : "border-border bg-white"
+                    active ? SELECTED_MODULE_CHECKBOX : "border-border bg-white"
                   }`}>
                     {active && <CheckCircle2 className="w-3 h-3 text-white" />}
                   </div>
@@ -415,6 +254,12 @@ export default function TrialEndedPage() {
               <span className="text-sm font-semibold text-emerald-800 flex-shrink-0">£50/mo cap</span>
             </div>
 
+            {reachesCap && (
+              <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-2">
+                Your selection reaches the £{total} per-site cap, so you'll get ComplyTrack Complete — every module — for the same price.
+              </p>
+            )}
+
             {/* Total */}
             <div className="bg-[#162D42] text-white px-4 py-3 flex items-center justify-between">
               <span className="text-sm text-white/70">Per site per month</span>
@@ -422,10 +267,14 @@ export default function TrialEndedPage() {
                 {hasAlpsDiscount && (
                   <span className="text-sm text-white/50 line-through">£{total}</span>
                 )}
-                <span className="text-xl font-display">£{hasAlpsDiscount ? total / 2 : total}</span>
+                <span className="text-xl font-display font-bold">£{hasAlpsDiscount ? total / 2 : total}</span>
                 <span className="text-xs text-white/50">+ VAT</span>
               </div>
             </div>
+
+            {offerSetupService(setupService) && (
+              <SetupServiceCheckoutOption fee={setupService!.fee} checked={addSetupService} onChange={setAddSetupService} />
+            )}
 
             <div className="border border-border bg-white px-4 py-3">
               <label htmlFor="alps-discount-code" className="block text-sm font-medium text-[#162D42]">
@@ -441,8 +290,8 @@ export default function TrialEndedPage() {
               />
               <p className="mt-2 text-xs text-muted-foreground">
                 {hasAlpsDiscount
-                  ? "Your code will be checked before Checkout opens. If valid, 50% off applies to this subscription, including future monthly invoices."
-                  : "If ALPS has given you a discount code, enter it here for 50% off this subscription, including future monthly invoices."}
+                  ? "Your code will be checked before Checkout opens. If valid, 50% off applies to ComplyTrack and your tracks, including future monthly invoices (not the AI add-on or extra storage)."
+                  : "If ALPS has given you a discount code, enter it here for 50% off ComplyTrack and your tracks, including future monthly invoices (not the AI add-on or extra storage)."}
               </p>
             </div>
           </div>
@@ -450,9 +299,18 @@ export default function TrialEndedPage() {
 
         {/* Actions */}
         <div className="px-6 pb-4 pt-4 relative z-10 space-y-3">
+          {billingUnavailable && (
+            <p role="status" className="border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Billing is temporarily unavailable, so you can't subscribe right now. Your access has been kept in the meantime — please try again later.
+            </p>
+          )}
           {(user?.role === "client_admin" || user?.role === "consultant") && (
             <p className="text-center text-sm text-muted-foreground">
-              If your subscription was cancelled, you can{" "}
+              Your records are kept for 12 months after access ends.{" "}
+              <Link href="/settings#data-export" className="underline underline-offset-2" data-testid="link-locked-data-export">
+                Download all your data
+              </Link>{" "}
+              (records, documents and photos) at any time, or{" "}
               <Link href="/settings" className="underline underline-offset-2">request data deletion</Link>.
               {user.role === "consultant" && <> You can also <Link href="/clients" className="underline underline-offset-2">view pending requests</Link>.</>}
             </p>
@@ -487,7 +345,7 @@ export default function TrialEndedPage() {
 
       <div className="mt-8 flex items-center justify-center gap-2 opacity-50">
         <span className="text-sm font-display italic text-[#162D42]">by</span>
-        <img src={alpsLogo} alt="ALPS Consulting" className="h-5 grayscale mix-blend-multiply" />
+        <img src={alpsLogo} alt="ALPS Consultancy" className="h-5 grayscale mix-blend-multiply" />
       </div>
     </div>
   );

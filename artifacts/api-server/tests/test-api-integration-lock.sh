@@ -77,20 +77,28 @@ const directLocked = new Set([
   "test:discounts", "test:compliance-hub", "test:guidance-register",
   "test:daily-checklist-entitlements", "test:export-attachment-acl",
   "test:photo-attachments",
-  "test:fix-track-overdue-alerts", "test:track-summary-delivery",
+  "test:fix-track-overdue-alerts", "test:track-summary-delivery", "test:track-summary-job",
   "test:contractor-upload-signatures", "test:contractor-compliance-reminders",
+  "test:track-controls-mobile", "test:export-module-isolation",
+  "test:water-dept-isolation",
 ]);
 const runnerLocked = new Set([
+  "test:error-reports:ci", "test:manager-role", // boots its own API instances against a fake Sentry ingest
+  "test:two-factor-policy", "test:passkey-webauthn",
+  "test:safe-track-ack-refresh", "test:sign-off-access",
   "test:photo-storage-roundtrip", "test:photo-storage-roundtrip:fake", // runner sources the lock after its config gate
+  "test:fixtrack-video-roundtrip", "test:fixtrack-video-roundtrip:fake", // same runner as the photo round trip
+  "test:track-action-media-roundtrip", "test:track-action-media-roundtrip:fake", // same runner as the photo round trip
   "test:isolation:ci", "test:modules:ci", "test:dept-isolation:ci",
   "test:dailytrack-locks:ci", "test:config:ci", "test:doc-track-status",
   "test:discounts:ci", "test:compliance-hub:ci", "test:track-actions-trigger",
   "test:track-action-templates", "test:room-track", "test:doc-track-object-acl",
   "test:bike-hire-export", "test:riddor-audit-history",
-  "test:compliance-audit-history", "test:twofa-recovery", "test:fix-track-history",
+  "test:compliance-audit-history", "test:compliance-content", "test:setup-tasks", "test:twofa-recovery", "test:fix-track-history",
   "test:contractor-portal", "test:premises-inspection-date-range",
   "test:pat-dept-isolation", "test:data-deletion-request",
   "test:daily-track-month-history", "test:stored-track-lock",
+  "test:daily-checklist-reports",
   "test:privacy-governance:ci", "test:staff-roster-reconciliation",
   "test:staff-pin", "test:staff-attribution", "test:mandatory-2fa",
   "test:mobile-passkeys",
@@ -98,15 +106,23 @@ const runnerLocked = new Set([
   "test:track-export-isolation", "test:pat-export-attachments",
   "test:storage-happy-path", "test:storage-outage-routes",
   "test:pest-control-register", "test:water-safety",
+  "test:water-dept-isolation:ci", "test:viewer-read-only",
   "test:compliance-schedule-tokens", "test:compliance-reminder-cycles",
   "test:contractor-draft-tamper", "test:contractor-key-preflight",
   "test:contractor-queue-migration-bounds", "test:staff-invitations",
-  "test:welcome-email",
+  "test:welcome-email", "test:csv-imports-portfolio",
+  "test:schema:parity", // private initdb cluster; bundles and boots the API twice
+  "test:csrf-enforced:ci",
 ]);
 const freshSchema = new Set([
-  "test:schema:fresh", "test:kitchen-mobile-replay",
+  "test:schema:fresh", "test:schema:pushed", "test:schema:upgrade", "test:departments-under-sites", "test:fix-track-assign-contractor", "test:contractor-sign-in", "test:contractor-tests", "test:doc-sign-offs", "test:green-daily-checks", "test:billing-alerts", "test:delete-test-business", "test:personal-reminders", "test:voice-log", "test:certificate-inbox", "test:fire-retired-checks", "test:auth-me-active-client", "test:ai-addon", "test:inspection-reports", "test:night-fire-walks", "test:frost-warnings", "test:fire-drill-records", "test:roster-check", "test:kitchen-month-summary", "test:dashboard-accuracy:pushed", "test:kitchen-mobile-replay", "test:mobile-check-replay",
   "test:kitchen-temperature-actions", "test:kitchen-hold-controls",
-  "test:kitchen-inspection-export", "test:content-filter",
+  "test:kitchen-inspection-export", "test:kitchen-status-site-scope", "test:dashboard-accuracy", "test:cleaning-schedule-export",
+  "test:inspection-pack-calendar", "test:certificate-outcomes", "test:checklist-results-fixtrack",
+  "test:owner-late-edit-reason", "test:record-signatures", "test:corrective-actions",
+  "test:kitchen-cleaning-export", "test:pat-register-access", "test:green-nsts", "test:green-hours", "test:green-spraying", "test:allergen-recipes", "test:safe-track-induction-browser", "test:equipment-qr-browser", "test:daily-track-month-history:pushed", "test:approved-account-deletion", "test:deletion-reminder", "test:export-parts", "test:cancelled-storage-class", "test:today-by-department", "test:equipment-labels",
+  "test:storage-metering", "test:storage-usage-snapshot", "test:storage-capacity-reduction", "test:storage-warning-emails",
+  "test:content-filter",
   "test:feedback-triage", "test:contractor-token-security",
   "test:contractor-key-rotation",
   "test:fix-track-contractor-approval", // delegates each suite to run-fresh-schema.sh
@@ -118,10 +134,34 @@ const freshSchema = new Set([
   "test:contractor-approval-inbox-browser", // wrapper: browser policy env, then run-fresh-schema.sh
   "test:fixture-cleanup-isolation", // concurrent per-run cleanup on the private cluster
   "test:client-data-deletion-feedback",
+  "test:retention-clock",
+  "test:cancellation-warnings:fresh",
   "test:train-track-roster-identity",
+  "test:registers", // allergen, COSHH and asbestos registers on the private cluster
+  "test:coshh-track", // COSHHTrack assessments and checks on the private cluster
+  "test:security-hardening",
   "test:analytics", // in-process app (per-request CSRF/token env) on the private cluster; runs the analytics:report CLI against it
+  "test:track-notifications", "test:track-notifications:pushed", // in-process app + reminder job (injected clock) on the private cluster
+  "test:track-summary-job:pushed", // real daily job scoped to its own fixtures on the private cluster
+  "test:track-summary-recipients", "test:track-summary-recipients:pushed", // in-process app + daily summary job (capturing sender) on the private cluster
+  "test:fire-call-points", "test:track-task-links", "test:track-due-dates", "test:contractor-visits", "test:certificate-follow-up",
+  "test:hot-tub-registry:pushed", "test:kitchen-cleaning-legacy", "test:contractor-portal:pushed",
+  "test:public-link-access", "test:public-link-rate-limit", // two API instances on the private cluster
+  "test:safe-track-ack-reminders:fresh", "test:storage-price-audit",
 ]);
 const pure = new Set([
+  "test:doc-track-scope", // bundles lib/docTrackScope into a mkdtemp dir; no database or API
+  "test:email-layout", // renders emails in memory; DATABASE_URL only satisfies an import, nothing connects
+  "test:storage-limit-routes", // static source check of src/routes
+  "test:alps-discount-coupon", // bundles the coupon helpers into a mkdtemp dir; no database or API
+  "test:ai-credit", // bundled TypeScript unit test (run-bundled-unit.sh)
+  "test:form-option-defaults", // bundled TypeScript unit test (run-bundled-unit.sh)
+  "test:ai-pricing", // bundled TypeScript unit test (run-bundled-unit.sh)
+  "test:certificate-reading", // bundled TypeScript unit test (run-bundled-unit.sh)
+  "test:register-reading", // bundled TypeScript unit test (run-bundled-unit.sh)
+  "test:report-reading", // bundled TypeScript unit test (run-bundled-unit.sh)
+  "test:stripe-tax-check", // bundles the Stripe Tax check into a mkdtemp dir; never contacts Stripe
+  "test:upload-size-limit", // ObjectStorageService against an in-memory bucket
   "test:api-runner-lock", // validates this lock without application resources
   "test:staged-photo-creation", // real routes/helper with in-memory transaction/storage fakes
   "test:login-rate-limit", // isolated temp bundle and in-process Express fixture
@@ -130,19 +170,30 @@ const pure = new Set([
   "test:billing-addon-catalog", // fake Stripe/database; in-process Express router
   "test:private-file-acl", // real routes with isolated provider/database doubles
   "test:service-price-preflight", // read-only source assertions and fake inputs
+  "test:stripe-backfill-scope", // stubbed sync library and source assertions; no database or Stripe
   "test:biketrack-billing", // fake Stripe/static wiring assertions
   "test:pesttrack-billing", // fake Stripe/static wiring assertions
   "test:pattrack-billing", // static catalogue assertions; unique temp bundle
   "test:track-record-lock", // transpiles one middleware module in memory
+  "test:csv-import-lib", // unique temp bundle; pure CSV import helpers
   "test:passkey-mandatory-2fa", // read-only source assertions
   "test:viewer-route-policy", // read-only route source analysis
   "test:storage-usage", // fake storage file objects; unique temp bundle
   "test:monthly-compliance-summary", // in-memory db/email fakes; unique temp dir
   "test:calendar-invite-compatibility", // run-bundled-unit.sh: unique bundle, placeholder DB URL
   "test:csrf-origin-policy", // run-bundled-unit.sh: in-memory middleware requests
+  "test:task-schedule", // run-bundled-unit.sh: pure date arithmetic
+  "test:byte-range", // run-bundled-unit.sh: pure Range header parsing
   "test:stripe-startup-readiness", // fake Stripe/clock; unique mkdtemp bundle
   "test:photo-roundtrip-config", // config gate only: env parsing, no storage or database
+  "test:storage-happy-path-config", // config gate only: env parsing, no storage or database
   "test:email-escaping", // run-bundled-unit.sh: pure renderers, nothing sent
+  "test:billing-minimum-quantity", // run-bundled-unit.sh: pure added-site coverage rule
+  "test:upload-pixel-cap", // unique temp bundle; in-memory images, no database
+  "test:trial-lock-allowlist", // unique mkdtemp bundle; stubbed lock lookup, no database
+  "test:storage-price-check", // stubbed billing loaders; unique mkdtemp bundle, in-process router
+  "test:openapi-routes", // read-only route source and spec analysis
+  "test:site-move-routes", // read-only route source analysis
 ]);
 // Runners allowed for pure scripts. They must not source the lock, boot the
 // API or read DATABASE_URL; each one writes only to a unique temp directory.
@@ -173,7 +224,7 @@ const freshRunner = "tests/run-fresh-schema.sh";
 {
   const text = read(freshRunner);
   if (!sourcesLock(freshRunner)) fail(`${freshRunner} must source api-integration-lock.sh`);
-  if (!/^initdb /m.test(text) || !/env -i /.test(text)) {
+  if (!/^(?:pg_as )?initdb /m.test(text) || !/env -i /.test(text)) {
     fail(`${freshRunner} must use a private initdb cluster and scrub the caller's environment`);
   }
 }
@@ -187,16 +238,22 @@ for (const [name, command] of scripts) {
     if (!match) fail(`${name} must be \`bash tests/run-db-workflow.sh tests/<file>.mjs\`: ${command}`);
     mjsRefs(match[1]).forEach((entry) => lockedEntrypoints.add(entry));
   } else if (runnerLocked.has(name)) {
-    // Plain --flag arguments are allowed; the runner itself must take the lock.
-    const runner = command.match(/^bash (tests\/run-[A-Za-z0-9._-]+\.sh)(?: --[a-z][a-z0-9-]*)*$/)?.[1];
+    // Plain --flag arguments and suite files are allowed; the runner itself must take the lock.
+    const match = command.match(/^bash (tests\/run-[A-Za-z0-9._-]+\.sh)((?: tests\/[A-Za-z0-9._-]+\.mjs)*)(?: --[a-z][a-z0-9-]*)*$/);
+    const runner = match?.[1];
     if (!runner || runner === freshRunner || !sourcesLock(runner)) {
       fail(`${name} runner must source api-integration-lock.sh: ${command}`);
     }
     mjsRefs(read(runner)).forEach((entry) => lockedEntrypoints.add(entry));
+    mjsRefs(match[2]).forEach((entry) => lockedEntrypoints.add(entry));
   } else if (freshSchema.has(name)) {
-    const direct = command.match(/^bash tests\/run-fresh-schema\.sh((?: tests\/[A-Za-z0-9._-]+\.mjs)*)$/);
-    if (direct) {
-      mjsRefs(direct[1]).forEach((entry) => lockedEntrypoints.add(entry));
+    // FRESH_SCHEMA_* settings (e.g. FRESH_SCHEMA_BASE=push, FRESH_SCHEMA_UPGRADE_FIXTURE)
+    // only change how the private cluster is built or which fixture runs on it.
+    // Several such runs may be chained with &&.
+    const runs = command.split(" && ").map((part) => part.match(
+      /^(?:FRESH_SCHEMA_[A-Z_]+=[A-Za-z0-9-]+ )*bash tests\/run-fresh-schema\.sh((?: (?:\.\.\/compliance-tracker\/)?tests\/[A-Za-z0-9._-]+\.mjs)*)$/));
+    if (runs.every(Boolean)) {
+      runs.forEach((direct) => mjsRefs(direct[1]).forEach((entry) => lockedEntrypoints.add(entry)));
       continue;
     }
     // A wrapper may only hand suites to run-fresh-schema.sh; it must not start
@@ -232,17 +289,23 @@ for (const [name, command] of scripts) {
 // Standalone pure entrypoints use isolated fixtures with no shared database,
 // build output or live storage. Helper modules are only imported by suites.
 const pureEntrypoints = new Set([
+  "stripe-tax-check.mjs",
+  "alps-discount-coupon.mjs", "doc-track-scope.mjs", "email-layout.mjs", "storage-limit-route-inventory.mjs",
   "billing-addon-activation.mjs", "billing-addon-catalog.mjs", "biketrack-billing.mjs", "login-rate-limit.mjs",
-  "pesttrack-billing.mjs", "service-price-preflight.mjs", "track-summary-routing.mjs",
+  "pesttrack-billing.mjs", "service-price-preflight.mjs", "stripe-backfill-scope.mjs", "track-summary-routing.mjs",
   "private-file-acl.mjs", "staged-photo-creation.mjs", "pattrack-billing.mjs",
   "track-record-lock.mjs", "passkey-mandatory-2fa.mjs", "viewer-route-policy.mjs",
   "storage-usage.mjs", "monthly-compliance-summary.mjs",
-  "stripe-startup-readiness.mjs", "photo-roundtrip-config.test.mjs",
+  "stripe-startup-readiness.mjs", "photo-roundtrip-config.test.mjs", "storage-happy-path-config.test.mjs", "upload-pixel-cap.mjs",
+  "trial-lock-allowlist.mjs", "storage-price-check.mjs", "openapi-route-inventory.mjs", "site-move-route-inventory.mjs", "upload-size-limit.mjs",
 ]);
 const helperModules = new Set([
+  "consultant-account.mjs",
+  "pdf-text.mjs",
   "approval-workflow-fixtures.mjs", "doc-train-flows.mjs",
   "private-file-acl-fixture.mjs", "storage-test-availability.mjs",
   "fixture-ownership.mjs", "storage-acl-session.mjs",
+  "webauthn-test-authenticator.mjs",
 ]);
 // Runners kept for manual use without a package script. They must still lock.
 const unscriptedLockedRunners = ["tests/run-audit-log-endpoint.sh"];

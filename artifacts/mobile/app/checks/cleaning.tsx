@@ -310,7 +310,7 @@ export default function CleaningScreen() {
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.navy, paddingTop: topPad + 16 }]}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()}>
             <Feather name="arrow-left" size={22} color="#ffffff" />
           </TouchableOpacity>
           <View style={styles.headerCenter}>
@@ -648,7 +648,7 @@ const styles = StyleSheet.create({
   frequencyButton: { flex: 1, borderWidth: 1, borderRadius: 7, paddingVertical: 10, alignItems: 'center' },
   frequencyText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
   fieldLabel: { fontSize: 13, fontFamily: 'Inter_600SemiBold', marginTop: 4 },
-  nameInput: { height: 48, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, fontSize: 15, fontFamily: 'Inter_400Regular' },
+  nameInput: { minHeight: 48, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, fontSize: 15, fontFamily: 'Inter_400Regular' },
   signedNotice: { borderWidth: 1, borderRadius: 7, padding: 11, flexDirection: 'row', alignItems: 'center', gap: 8 },
   signedText: { flex: 1, fontSize: 13, fontFamily: 'Inter_600SemiBold' },
   progressBarBg: {
@@ -706,9 +706,9 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   actions: { paddingHorizontal: 16, paddingTop: 20, flexDirection: 'row', gap: 10 },
-  secondaryAction: { flex: 1, height: 50, borderWidth: 1, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  secondaryAction: { flex: 1, minHeight: 50, borderWidth: 1, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   secondaryActionText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
-  primaryAction: { flex: 1, height: 50, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  primaryAction: { flex: 1, minHeight: 50, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   primaryActionText: { color: '#ffffff', fontSize: 14, fontFamily: 'Inter_600SemiBold' },
   disabled: { opacity: 0.5 },
   historyRow: {

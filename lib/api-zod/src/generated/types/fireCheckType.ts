@@ -6,6 +6,9 @@
  * OpenAPI spec version: 0.2.0
  */
 
+/**
+ * "fire_walk" is the escape route sign-off (sites with sleeping accommodation). "night_walk" is a night porter's fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see /fire-safety/night-walks).
+ */
 export type FireCheckType = typeof FireCheckType[keyof typeof FireCheckType];
 
 
@@ -15,4 +18,10 @@ export const FireCheckType = {
   extinguishers: 'extinguishers',
   fire_doors: 'fire_doors',
   fire_drill: 'fire_drill',
+  fire_walk: 'fire_walk',
+  alarm_panel: 'alarm_panel',
+  emergency_lights_annual: 'emergency_lights_annual',
+  alarm_service: 'alarm_service',
+  extinguisher_service: 'extinguisher_service',
+  night_walk: 'night_walk',
 } as const;

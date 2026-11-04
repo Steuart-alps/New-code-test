@@ -7,6 +7,7 @@ import { verifyLegacyPatHistoryMigration } from "./pat-legacy-history-migration"
 import { verifyPatRoomHistoryMigration } from "./pat-room-history-migration";
 import { verifyPatFailureHistoryMigration } from "./pat-failure-history-migration";
 import { verifyPatReplacementHistoryMigration } from "./pat-replacement-history-migration";
+import { upgradeShapeFromEnv, seedUpgradeShape, clearCopiedReadingBetweenBoots } from "./upgrade-fixtures/legacy-shapes";
 
 if (process.env.NODE_ENV !== "test" || process.env.FRESH_SCHEMA_TEST !== "1") {
   throw new Error("This entry point is only for isolated schema tests");
@@ -20,15 +21,21 @@ ObjectStorageService.prototype.getObjectEntityFile = async function (path) {
   return {
     name: path,
     exists: async () => [true],
+    // Document uploads sniff the first bytes before the type is accepted.
+    download: async () => [Buffer.from("%PDF-1.7\n%schema fixture\n")],
     getMetadata: async () => [{ metadata: {} }],
     setMetadata: async () => [],
   } as any;
 };
+// Upgrade-path runs start from an older, populated database instead of an empty one.
+const upgradeShape = upgradeShapeFromEnv();
+if (upgradeShape) await seedUpgradeShape(upgradeShape);
 await runRuntimeMigrations();
 await verifyLegacyPatHistoryMigration();
 await verifyPatRoomHistoryMigration();
 await verifyPatFailureHistoryMigration();
 await verifyPatReplacementHistoryMigration();
+if (upgradeShape) await clearCopiedReadingBetweenBoots();
 await runRuntimeMigrations(); // Boot migrations must also be idempotent.
 markApplicationReady();
 const server = app.listen(Number(process.env.PORT), "127.0.0.1");

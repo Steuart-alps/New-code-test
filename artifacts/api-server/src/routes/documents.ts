@@ -3,20 +3,29 @@ import { Readable } from "stream";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { clientDocumentsTable } from "@workspace/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { requireAuth, getClientId, canAccessClient, denyViewers } from "../middleware/requireAuth";
 import {
+  ObjectContentError,
   ObjectStorageService,
   ObjectNotFoundError,
   ObjectOwnershipError,
 } from "../lib/objectStorage";
 import { ObjectPermission } from "../lib/objectAcl";
+import { parseByteRange } from "../lib/byteRange";
 import { createDownloadMeter } from "../lib/downloadUsage";
 
 const router = Router();
 const storage = new ObjectStorageService();
 
+// Optional document types; a document without a type is a general business
+// document. (KitchenTrack's HACCP plans and recipe spec sheets live in
+// DocTrack so staff can read and sign them: lib/docTrackScope.ts.)
+export const DOCUMENT_CATEGORIES = ["haccp", "recipe_spec"] as const;
+const categorySchema = z.enum(DOCUMENT_CATEGORIES);
+
 // ── List documents for the current client ────────────────────────────────────
+// ?category=haccp,recipe_spec lists only documents of those types.
 
 router.get("/documents", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
@@ -25,17 +34,27 @@ router.get("/documents", requireAuth, async (req, res) => {
     return;
   }
 
+  const requested = typeof req.query.category === "string" ? req.query.category.split(",").filter(Boolean) : [];
+  const categories = z.array(categorySchema).safeParse(requested);
+  if (!categories.success) {
+    res.status(400).json({ error: "Unknown document type" });
+    return;
+  }
+
   const docs = await db
     .select()
     .from(clientDocumentsTable)
-    .where(eq(clientDocumentsTable.clientId, clientId))
+    .where(and(
+      eq(clientDocumentsTable.clientId, clientId),
+      categories.data.length ? inArray(clientDocumentsTable.category, categories.data) : undefined,
+    ))
     .orderBy(clientDocumentsTable.createdAt);
 
   res.json(docs);
 });
 
 // ── Register a document after the client has uploaded it to object storage ───
-// Body: { name, description?, objectPath, fileSize?, mimeType? }
+// Body: { name, description?, objectPath, fileSize?, mimeType?, category? }
 
 const CreateDocBody = z.object({
   name: z.string().min(1).max(255),
@@ -43,6 +62,7 @@ const CreateDocBody = z.object({
   objectPath: z.string().min(1),
   fileSize: z.number().int().positive().optional().nullable(),
   mimeType: z.string().optional().nullable(),
+  category: categorySchema.optional().nullable(),
 });
 
 router.post("/documents", requireAuth, denyViewers, async (req, res) => {
@@ -65,7 +85,7 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
     return;
   }
 
-  const { name, description, objectPath, fileSize, mimeType } = parsed.data;
+  const { name, description, objectPath, fileSize, mimeType, category } = parsed.data;
 
   try {
     // Registration is the point at which a presigned upload becomes a tenant
@@ -81,6 +101,10 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
       res.status(404).json({ error: "Uploaded object not found" });
       return;
     }
+    if (err instanceof ObjectContentError) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
     req.log.error({ err }, "Could not finalize document upload");
     res.status(400).json({ error: "Uploaded file could not be verified" });
     return;
@@ -93,6 +117,7 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
     objectPath,
     fileSize: fileSize ?? null,
     mimeType: mimeType ?? null,
+    category: category ?? null,
     uploadedById: user.id,
     uploadedByName: user.name,
   }).returning();
@@ -222,18 +247,8 @@ router.get("/documents/:id/download", requireAuth, async (req, res) => {
     }
     const [metadata] = await file.getMetadata();
     const rawRange = req.header("range");
-    let range: { start: number; end: number } | undefined;
-    if (rawRange) {
-      const match = /^bytes=(\d*)-(\d*)$/.exec(rawRange.trim());
-      const size = Number(metadata.size);
-      if (!match || (!match[1] && !match[2])) { res.status(416).setHeader("Content-Range", `bytes */${size}`).end(); return; }
-      const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
-      const end = Math.min(match[2] ? Number(match[2]) : size - 1, size - 1);
-      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= size) {
-        res.status(416).setHeader("Content-Range", `bytes */${size}`).end(); return;
-      }
-      range = { start, end };
-    }
+    const range = parseByteRange(rawRange, Number(metadata.size));
+    if (range === "invalid") { res.status(416).setHeader("Content-Range", `bytes */${metadata.size}`).end(); return; }
     const response = await storage.downloadObject(file, 0 /* no cache for private docs */, range);
 
     // Force a download with the original filename

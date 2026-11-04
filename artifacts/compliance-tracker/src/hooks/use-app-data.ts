@@ -41,6 +41,11 @@ export function useAppMutations() {
 
   const invalidateComplianceItems = () => {
     queryClient.invalidateQueries({ queryKey: [getListComplianceItemsQueryKey()[0]] });
+    // Single-check queries (/api/compliance-items/:id) carry the needs-action
+    // state that certificates and completions change.
+    queryClient.invalidateQueries({
+      predicate: (query) => typeof query.queryKey[0] === "string" && query.queryKey[0].startsWith("/api/compliance-items/"),
+    });
     queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
   };
 
@@ -213,6 +218,7 @@ export function useAppMutations() {
     mutation: {
       onSuccess: (_, { itemId }) => {
         queryClient.invalidateQueries({ queryKey: getListItemCertificatesQueryKey(itemId) });
+        invalidateComplianceItems();
         queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
         toast({ title: "Certificate uploaded" });
       },
@@ -224,6 +230,7 @@ export function useAppMutations() {
     mutation: {
       onSuccess: (_, { itemId }) => {
         queryClient.invalidateQueries({ queryKey: getListItemCertificatesQueryKey(itemId) });
+        invalidateComplianceItems();
         toast({ title: "Certificate updated" });
       },
       onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
@@ -234,6 +241,7 @@ export function useAppMutations() {
     mutation: {
       onSuccess: (_, { itemId }) => {
         queryClient.invalidateQueries({ queryKey: getListItemCertificatesQueryKey(itemId) });
+        invalidateComplianceItems();
         queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
         toast({ title: "Certificate deleted" });
       },

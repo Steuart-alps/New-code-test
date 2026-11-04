@@ -1,8 +1,9 @@
 // Native mobile passkeys: a software authenticator plays the phone.
 //
-// Proves that a mobile passkey stands in for the password only: it always ends
-// in the existing TOTP step (or web two-factor setup), never in a bearer
-// session, and that challenges, origins and user verification are enforced.
+// Proves that a mobile passkey stands in for the password only: it ends where a
+// password would (the existing TOTP step, web two-factor setup when the
+// business requires it, otherwise a session), and that challenges, origins and
+// user verification are enforced.
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 
@@ -181,7 +182,7 @@ function getAssertion(authenticator, options, { origin, uv = true, userId, signe
 }
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
-async function registerVerifiedUser(label) {
+async function registerVerifiedUser(label, { requireTwoFactor = false } = {}) {
   const email = `mobile-passkey-${label}-${Date.now()}-${crypto.randomBytes(3).toString("hex")}@test.local`;
   const password = "password-123";
   const cookie = { value: "" };
@@ -197,7 +198,15 @@ async function registerVerifiedUser(label) {
   );
   check(`${label}: email verification succeeds`, verified.status === 200);
   const login = await request("POST", "/auth/login", { body: { email, password }, cookie });
-  check(`${label}: first login requires 2FA setup`, login.data?.requires2faSetup === true);
+  check(`${label}: 2FA is optional for a new business`, login.status === 200 && !login.data?.requires2faSetup,
+    JSON.stringify(login.data));
+  if (requireTwoFactor) {
+    const required = await request("PUT", "/settings", { body: { requireTwoFactor: "true" }, cookie });
+    check(`${label}: the owner requires 2FA`, required.status === 200, JSON.stringify(required.data));
+    await request("POST", "/auth/logout", { cookie });
+    const held = await request("POST", "/auth/login", { body: { email, password }, cookie });
+    check(`${label}: login is now held at 2FA setup`, held.data?.requires2faSetup === true);
+  }
   return { email, password, cookie };
 }
 
@@ -222,7 +231,8 @@ async function main() {
     && links.data[0].target.package_name === process.env.MOBILE_ANDROID_PACKAGE
     && links.data[0].target.sha256_cert_fingerprints[0] === process.env.MOBILE_ANDROID_CERT_SHA256.toUpperCase());
 
-  // ── A TOTP account signs in with password on mobile and adds a passkey ──
+  // ── A TOTP account (2FA turned on voluntarily) signs in with password on
+  //    mobile and adds a passkey ──
   const totpUser = await registerVerifiedUser("totp");
   const { secret, userId } = await enableTotp(totpUser.cookie);
   const pending = await request("POST", "/auth/mobile-login", {
@@ -288,7 +298,7 @@ async function main() {
   check("sign-in options are issued without an account hint",
     authOptions.status === 200 && !(authOptions.data.options.allowCredentials?.length));
   check("sign-in requires user verification", authOptions.data.options.userVerification === "required");
-  check("sign-in options carry the web setup link", authOptions.data.webSetupUrl === `${WEB_ORIGIN}/settings`);
+  check("sign-in options carry the web setup link", authOptions.data.webSetupUrl === `${WEB_ORIGIN}/settings#security`);
 
   const assertion = getAssertion(phone, authOptions.data.options, { origin: IOS_ORIGIN, userId });
   const signedIn = await request("POST", "/auth/mobile-passkeys/authenticate", {
@@ -332,10 +342,43 @@ async function main() {
   check("a mismatched user handle is refused", (await attempt({ userId: userId + 1 })).status === 401);
   const unknown = await attempt({ authenticator: makeAuthenticator() });
   check("an unregistered passkey gets the web setup link",
-    unknown.status === 401 && unknown.data?.webSetupUrl === `${WEB_ORIGIN}/settings`);
+    unknown.status === 401 && unknown.data?.webSetupUrl === `${WEB_ORIGIN}/settings#security`);
 
-  // ── An account without TOTP is sent to web setup, as with a password ──
-  const setupUser = await registerVerifiedUser("setup");
+  // ── Without TOTP and without a requirement, a passkey signs straight in,
+  //    exactly as the password does ──
+  const optionalUser = await registerVerifiedUser("optional");
+  const passwordSession = await request("POST", "/auth/mobile-login", {
+    body: { email: optionalUser.email, password: optionalUser.password },
+  });
+  check("an optional-2FA password login issues a bearer", typeof passwordSession.data?.token === "string",
+    JSON.stringify(passwordSession.data));
+  const optionalPhone = makeAuthenticator();
+  const optionalReg = await request("POST", "/auth/mobile-passkeys/registration/options", {
+    body: {}, bearer: passwordSession.data.token,
+  });
+  const optionalUserId = Number(Buffer.from(optionalReg.data.options.user.id, "base64url").toString("utf8"));
+  check("an optional-2FA user adds a passkey on the phone", (await request("POST", "/auth/mobile-passkeys/registration/verify", {
+    body: {
+      challengeToken: optionalReg.data.challengeToken,
+      credential: createCredential(optionalPhone, optionalReg.data.options, { origin: IOS_ORIGIN }),
+    },
+    bearer: passwordSession.data.token,
+  })).status === 200);
+  const optionalOptions = await request("POST", "/auth/mobile-passkeys/authentication/options", { body: {} });
+  const optionalSignIn = await request("POST", "/auth/mobile-passkeys/authenticate", {
+    body: {
+      challengeToken: optionalOptions.data.challengeToken,
+      credential: getAssertion(optionalPhone, optionalOptions.data.options, { origin: IOS_ORIGIN, userId: optionalUserId }),
+    },
+  });
+  check("an optional-2FA passkey sign-in issues a bearer", typeof optionalSignIn.data?.token === "string"
+    && optionalSignIn.data.pendingToken === undefined, JSON.stringify(optionalSignIn.data));
+  const optionalMe = await request("GET", "/auth/me", { bearer: optionalSignIn.data.token });
+  check("that bearer belongs to the passkey's account", optionalMe.data?.user?.email === optionalUser.email);
+
+  // ── A business that requires 2FA sends an account without TOTP to web
+  //    setup, as with a password ──
+  const setupUser = await registerVerifiedUser("setup", { requireTwoFactor: true });
   const webOptions = await request("POST", "/auth/passkeys/registration/options", { body: {}, cookie: setupUser.cookie });
   const laptop = makeAuthenticator();
   const webRegistered = await request("POST", "/auth/passkeys/registration/verify", {
@@ -353,7 +396,7 @@ async function main() {
   });
   check("a passkey account without TOTP is sent to web setup",
     setupSignIn.status === 200 && setupSignIn.data?.requires2faSetup === true
-    && setupSignIn.data.setupUrl === `${WEB_ORIGIN}/settings`
+    && setupSignIn.data.setupUrl === `${WEB_ORIGIN}/settings#security`
     && setupSignIn.data.pendingToken === undefined && setupSignIn.data.token === undefined,
     JSON.stringify(setupSignIn.data));
 

@@ -6,7 +6,7 @@ import {
   useListComplianceItems,
   useSendReminderForItem
 } from "@workspace/api-client-react";
-import { toast } from "sonner";
+import { toast } from "@/hooks/use-toast";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { ContractorFormDialog } from "@/components/contractor-form-dialog";
 import { ItemFormDialog } from "@/components/item-form-dialog";
@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { StatusBadge, PriorityBadge, LiabilityBadge, DbsReviewBadge } from "@/components/badges";
 import { ExpiryBadge } from "@/components/badges";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
+import { CalendarCancellationHistory } from "@/components/calendar-cancellation-history";
 import { useAuth } from "@/context/auth-context";
 import { format } from "date-fns";
 import {
@@ -33,6 +34,7 @@ import {
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import { sortByLabel } from "@/lib/sort-options";
 
 // ── Certificate presets ────────────────────────────────────────────────────
 const CERT_PRESETS = [
@@ -75,11 +77,15 @@ const CERT_EXPIRY_YEARS: Record<string, number> = {
   "Chainsaw (NPTC CS38)": 5,
   "Food Hygiene (Level 2)": 3,
   "Food Hygiene (Level 3)": 3,
+  // DBS certificates have no statutory expiry: this is a suggested recheck
+  // date for the business's own policy, and the date stays editable.
   "DBS Check (Basic)": 3,
   "DBS Check (Standard)": 3,
   "DBS Check (Enhanced)": 3,
   "PVG Scheme (Scotland)": 5,
 };
+
+const isDbsCertificate = (name: string) => name.startsWith("DBS Check");
 
 function suggestCertExpiry(name: string, completedDate: string): string {
   const years = CERT_EXPIRY_YEARS[name];
@@ -120,6 +126,7 @@ export default function ContractorDetailPage() {
   const qc = useQueryClient();
   const { activeClientId, user } = useAuth();
   const canResend = user?.role === "consultant" || user?.role === "client_admin";
+  const canManageContractorEmails = canResend || user?.isMaintenanceManager === true || user?.role === "client_manager";
   const clientApiFetch = useActiveClientApi();
 
   const [, navigate] = useLocation();
@@ -155,12 +162,12 @@ export default function ContractorDetailPage() {
       qc.invalidateQueries({ queryKey: ["contractors"] });
       navigate("/contractors");
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) => toast({ title: error.message, variant: "destructive" }),
   });
   const sendReminder = useSendReminderForItem({
     mutation: {
-      onSuccess: (data: any) => toast.success(data?.message ?? "Reminder sent"),
-      onError: (err: any) => toast.error(err?.message ?? "Failed to send reminder"),
+      onSuccess: (data: any) => toast({ title: data?.message ?? "Reminder sent" }),
+      onError: (err: any) => toast({ title: err?.message ?? "Failed to send reminder", variant: "destructive" }),
     },
   });
   const resendReminder = useMutation({
@@ -171,10 +178,10 @@ export default function ContractorDetailPage() {
       return data;
     },
     onSuccess: data => {
-      toast.success(data.message);
+      toast({ title: data.message });
       qc.invalidateQueries({ queryKey: ["contractor-email-queue"] });
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) => toast({ title: error.message, variant: "destructive" }),
   });
 
   const [isEditContractorOpen, setIsEditContractorOpen] = useState(false);
@@ -233,9 +240,9 @@ export default function ContractorDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contractor-certs", id] });
       setCertDialogOpen(false);
-      toast.success(editingCert ? "Certificate updated" : "Certificate added");
+      toast({ title: editingCert ? "Certificate updated" : "Certificate added" });
     },
-    onError: (err: any) => toast.error(err.message ?? "Save failed"),
+    onError: (err: any) => toast({ title: err.message ?? "Save failed", variant: "destructive" }),
   });
 
   const deleteCert = useMutation({
@@ -246,9 +253,9 @@ export default function ContractorDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contractor-certs", id] });
       setDeleteCertId(null);
-      toast.success("Certificate removed");
+      toast({ title: "Certificate removed" });
     },
-    onError: (err: any) => toast.error(err.message ?? "Delete failed"),
+    onError: (err: any) => toast({ title: err.message ?? "Delete failed", variant: "destructive" }),
   });
 
   if (loadingContractor) return (
@@ -276,14 +283,15 @@ export default function ContractorDetailPage() {
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-primary/60 text-primary-foreground flex items-center justify-center text-2xl font-bold shadow-lg shadow-primary/20">
                 {contractor.name.charAt(0).toUpperCase()}
               </div>
-              <div className="flex gap-2">
+              {/* Editing and deleting contractors is admin-only on the server. */}
+              {canResend && <div className="flex gap-2">
                 <Button variant="ghost" size="icon" onClick={() => setIsEditContractorOpen(true)}>
                   <Pencil className="w-4 h-4" />
                 </Button>
                 <Button variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10" onClick={() => setDeleteContractorConfirm(true)}>
                   <Trash2 className="w-4 h-4" />
                 </Button>
-              </div>
+              </div>}
             </div>
 
             <h2 className="text-2xl font-display font-bold">{contractor.name}</h2>
@@ -359,7 +367,7 @@ export default function ContractorDetailPage() {
                   <p className="text-sm font-medium">{c.dbsType || "—"}</p>
                   {c.dbsExpiryDate && (
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      Expires {format(new Date(c.dbsExpiryDate), "d MMM yyyy")}
+                      Recheck due {format(new Date(c.dbsExpiryDate), "d MMM yyyy")} (your policy)
                     </p>
                   )}
                 </div>
@@ -395,7 +403,7 @@ export default function ContractorDetailPage() {
                     <tr className="border-b border-border/40 bg-muted/10">
                       <th className="text-left px-4 py-2 font-medium text-muted-foreground">Certificate</th>
                       <th className="text-left px-4 py-2 font-medium text-muted-foreground hidden sm:table-cell">Issuer</th>
-                      <th className="text-left px-4 py-2 font-medium text-muted-foreground">Expires</th>
+                      <th className="text-left px-4 py-2 font-medium text-muted-foreground">Expires / recheck</th>
                       <th className="px-4 py-2" />
                     </tr>
                   </thead>
@@ -427,6 +435,8 @@ export default function ContractorDetailPage() {
             </div>
           </Card>
 
+          {canManageContractorEmails && <CalendarCancellationHistory contractorId={id} />}
+
           {/* Compliance checks */}
           <Card className="shadow-lg border-border/50 overflow-hidden">
             <div className="p-6 bg-muted/20 border-b border-border/50 flex justify-between items-center">
@@ -436,9 +446,9 @@ export default function ContractorDetailPage() {
                 </h3>
                 <p className="text-sm text-muted-foreground mt-1">External requirements assigned to this contractor</p>
               </div>
-              <Button size="sm" onClick={() => { setEditingItem(null); setItemFormOpen(true); }} className="shadow-sm">
+              {canResend && <Button size="sm" onClick={() => { setEditingItem(null); setItemFormOpen(true); }} className="shadow-sm">
                 <Plus className="w-4 h-4 mr-1.5" /> Add Requirement
-              </Button>
+              </Button>}
             </div>
             <div>
               {items.length === 0 ? (
@@ -456,7 +466,7 @@ export default function ContractorDetailPage() {
                       onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(`/items/${item.id}`); } }}
                     >
                       <div>
-                        <h4 className="font-semibold hover:text-primary transition-colors">{item.title}</h4>
+                        <h4 className="font-bold hover:text-primary transition-colors">{item.title}</h4>
                         <div className="flex items-center gap-3 mt-2 text-sm">
                           <StatusBadge status={item.status} />
                           <PriorityBadge priority={item.priority} />
@@ -482,13 +492,13 @@ export default function ContractorDetailPage() {
                             <Send className="w-4 h-4" />
                           </Button>
                         )}
-                        <Button variant="ghost" size="icon" onClick={() => { setEditingItem(item); setItemFormOpen(true); }}>
+                        {canResend && <Button variant="ghost" size="icon" onClick={() => { setEditingItem(item); setItemFormOpen(true); }}>
                           <Pencil className="w-4 h-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="text-destructive"
+                        </Button>}
+                        {canResend && <Button variant="ghost" size="icon" className="text-destructive"
                           onClick={() => deleteItem.mutate({ id: item.id })}>
                           <Trash2 className="w-4 h-4" />
-                        </Button>
+                        </Button>}
                       </div>
                     </div>
                   ))}
@@ -515,7 +525,7 @@ export default function ContractorDetailPage() {
                 })}>
                 <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
                 <SelectContent>
-                  {CERT_PRESETS.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                  {sortByLabel(CERT_PRESETS, p => p).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                 </SelectContent>
               </Select>
               {certForm.certificateName === "Other" && (
@@ -544,12 +554,20 @@ export default function ContractorDetailPage() {
                   className="mt-1 rounded-sm" />
               </div>
               <div>
-                <Label>Expires</Label>
+                <Label>{isDbsCertificate(certForm.certificateName) ? "Recheck due (your policy)" : "Expires"}</Label>
                 <Input type="date" value={certForm.expiryDate}
                   onChange={e => setCertForm(f => ({ ...f, expiryDate: e.target.value }))}
                   className="mt-1 rounded-sm" />
               </div>
             </div>
+            {isDbsCertificate(certForm.certificateName) && (
+              <p className="text-xs rounded-sm border border-amber-200 bg-amber-50 text-amber-900 p-2.5">
+                DBS certificates have no expiry date; set when your policy requires a recheck (for example an
+                Update Service status check). DBS certificate details are criminal offence data and DBS guidance
+                advises against keeping copies: record the issue date, check type and certificate number here
+                instead of uploading a copy.
+              </p>
+            )}
             <div>
               <Label>Notes</Label>
               <Textarea placeholder="Certificate number, renewal notes…" value={certForm.notes}

@@ -138,7 +138,7 @@ try {
     await page.reload();
     await row().waitFor({ state: "visible" });
     await row().getByRole("combobox").getByText(
-      expectedId === null ? "All departments" : deptName, { exact: true },
+      expectedId === null ? "No department" : deptName, { exact: true },
     ).waitFor({ state: "visible" });
     const dialog = await edit();
     await dialog.getByRole("combobox").last().getByText(

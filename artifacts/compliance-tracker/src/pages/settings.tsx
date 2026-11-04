@@ -1,13 +1,21 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLocationProperty } from "wouter/use-browser-location";
 import { startRegistration } from "@simplewebauthn/browser";
 import { cn } from "@/lib/utils";
 import { AppLayout } from "@/components/layout";
-import { useGetSettings, useGetStorageUsage } from "@workspace/api-client-react";
+import {
+  useGetSettings, useGetStorageUsage, type AppSettings,
+  nextSafeTrackReminder, parseSafeTrackReminderSettings, SAFE_TRACK_REMINDER_CHECK_MINUTES,
+} from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth, useCanAdmin } from "@/context/auth-context";
-import { apiFetch as authenticatedApiFetch } from "@/lib/api";
+import { useAuth, useCanAdmin, useIsConsultant } from "@/context/auth-context";
+import { roleLabel } from "@/lib/roles";
+import { departmentLabel } from "@/lib/departments";
+import { apiFetch as authenticatedApiFetch, withActiveClient, withCsrfToken } from "@/lib/api";
+import { SetupServiceCheckoutOption, offerSetupService, type SetupServiceBilling } from "@/components/setup-service-checkout";
+import { BusinessTypeCard } from "@/components/business-type-card";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card";
@@ -15,7 +23,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle, Route, ClipboardCheck, Package, HardDrive } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle, Route, ClipboardCheck, Package, HardDrive, CalendarClock, Sparkles } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { clearModuleActivation, trackModuleActivation, trackServiceActionOutcome } from "@/lib/analytics";
@@ -25,6 +34,13 @@ import {
   type ServiceActionResponseBody,
 } from "@/lib/service-action-outcome";
 import { DataDeletionRequestCard } from "@/components/data-deletion-request-card";
+import { TrackOwnersCard } from "@/components/track-owners-card";
+import type { TrackSummaryPreview, TrackSummaryPreviewTrack } from "@workspace/api-client-react";
+import { ReminderTimingsField, parseReminderTimings, type ReminderTimings } from "@/components/reminder-timings-field";
+import { CHECKOUT_ADDONS, checkoutPerSiteTotal } from "@/lib/addon-catalog";
+import { Progress } from "@/components/ui/progress";
+import type { AiAddonStatus } from "@workspace/api-client-react";
+import { formatMonthsOfAllowance } from "@/components/ai-allowance-note";
 interface DomainRecord {
   record?: string;
   name: string;
@@ -46,15 +62,24 @@ interface DomainState {
 const apiBase = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
 
 async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${apiBase}${path}`, {
+  // Business settings follow the selected business. Billing calls keep their
+  // existing scoping, and account (/auth) calls are not business-scoped.
+  const scoped = path.startsWith("/billing") || path.startsWith("/auth/") ? path : withActiveClient(path, init?.body);
+  const res = await fetch(`${apiBase}${scoped}`, await withCsrfToken({
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
-  });
+  }));
   const ct = res.headers.get("content-type") ?? "";
   const data = ct.includes("application/json") ? await res.json() : null;
   if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
   return data as T;
+}
+
+/** Add the selected business to a billing API path (unless one is already set). */
+function withBillingClient(path: string, clientId: number | null | undefined): string {
+  if (clientId === null || clientId === undefined || /[?&]clientId=/.test(path)) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}clientId=${encodeURIComponent(clientId)}`;
 }
 
 function StatusBadge({ status }: { status: string | null }) {
@@ -79,6 +104,21 @@ function StatusBadge({ status }: { status: string | null }) {
   );
 }
 
+function formatCheckedAge(seconds: number): string {
+  if (seconds < 60) return "just now";
+  const [value, unit] = seconds < 3600
+    ? [Math.floor(seconds / 60), "minute"]
+    : seconds < 86400
+      ? [Math.floor(seconds / 3600), "hour"]
+      : [Math.floor(seconds / 86400), "day"];
+  return `${value} ${unit}${value === 1 ? "" : "s"} ago`;
+}
+
+/** Storage add-on offer from /billing/config: per-GiB monthly price in minor units. */
+type StorageAddonOffer = { unitAmount: number; currency: string; minimumGib: number; packGib?: number };
+/** Extra storage is sold in steps of this many GB (£1 per 10 GB). */
+const STORAGE_PACK_GIB = 10;
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
@@ -91,20 +131,216 @@ function formatBytes(bytes: number): string {
   return `${value >= 10 ? value.toFixed(1) : value.toFixed(2)} ${units[unit]}`;
 }
 
+type StorageCapacity =
+  | { subscribed: false }
+  | {
+    subscribed: true;
+    usedBytes: number;
+    planIncludedGib: number | null;
+    renewingGib: number;
+    paidGibThisPeriod: number;
+    minimumGib: number | null;
+    periodEndsAt: string | null;
+    unitAmount: number | null;
+    currency: string | null;
+    scheduled: Array<{ fromGib: number; toGib: number; effectiveAt: string; requestedAt: string }>;
+    canReduce: boolean;
+    reduceUnavailableReason: string | null;
+  };
+
+function formatUkDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/London" });
+}
+
+function formatMinorUnits(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("en-GB", { style: "currency", currency: currency.toUpperCase() }).format(amount / 100);
+  } catch {
+    return `${(amount / 100).toFixed(2)} ${currency.toUpperCase()}`;
+  }
+}
+
+const STORAGE_REDUCE_UNAVAILABLE: Record<string, string> = {
+  needed_by_files: "Your retained files need all of your extra storage, so it can't be reduced at the moment.",
+  usage_unchecked: "We're still checking how much storage your files use. Reducing will be available once that check finishes.",
+  pricing_unavailable: "Storage pricing is unavailable for this subscription, so it can't be reduced right now.",
+  needs_support: "Your subscription has more than one storage line. Please contact support to reduce it.",
+};
+
+/**
+ * Paid extra storage: what renews, what is still paid for this period, and a
+ * reduction that applies from the next renewal. Never deletes files.
+ */
+function PaidStorageSection({ activeClientId, onChanged }: { activeClientId: number | null; onChanged: () => void }) {
+  const { toast } = useToast();
+  const capacityQuery = useQuery({
+    queryKey: ["/api/billing/storage", activeClientId],
+    enabled: activeClientId !== null,
+    retry: false,
+    queryFn: () => apiFetch<StorageCapacity>(withBillingClient("/billing/storage", activeClientId)),
+  });
+  const capacity = capacityQuery.data;
+  const [targetGib, setTargetGib] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const requestIdRef = useRef<string | null>(null);
+
+  const minimumGib = capacity?.subscribed ? capacity.minimumGib : null;
+  useEffect(() => {
+    if (minimumGib !== null) setTargetGib(String(minimumGib));
+  }, [minimumGib]);
+
+  if (!capacity?.subscribed) return null;
+  if (capacity.renewingGib === 0 && capacity.paidGibThisPeriod === 0) return null;
+
+  const price = (gib: number) =>
+    capacity.unitAmount !== null && capacity.currency ? formatMinorUnits(capacity.unitAmount * gib, capacity.currency) : null;
+  const target = Number(targetGib);
+  const targetValid = Number.isInteger(target)
+    && target % STORAGE_PACK_GIB === 0
+    && capacity.minimumGib !== null
+    && target >= capacity.minimumGib
+    && target < capacity.renewingGib;
+  const periodEnd = capacity.periodEndsAt ? formatUkDate(capacity.periodEndsAt) : "the end of this billing period";
+
+  const reduce = async () => {
+    // One id per dialog, so retrying a lost response can't apply it twice.
+    requestIdRef.current ??= crypto.randomUUID();
+    setBusy(true);
+    try {
+      const response = await authenticatedApiFetch(withBillingClient("/billing/storage/reduce", activeClientId), {
+        method: "POST",
+        body: JSON.stringify({ targetGib: target, requestId: requestIdRef.current }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error ?? `Request failed (${response.status})`);
+      requestIdRef.current = null;
+      setConfirmOpen(false);
+      toast({
+        title: "Storage reduction confirmed",
+        description: `Stripe has been updated. From ${formatUkDate(data.effectiveAt)} your subscription renews with ${data.toGib} GB of extra storage. You keep ${data.paidGibThisPeriod} GB until then.`,
+      });
+      await capacityQuery.refetch();
+      onChanged();
+    } catch (err: any) {
+      toast({ title: "Couldn't reduce storage", description: err.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 rounded-lg border p-4" data-testid="paid-storage">
+      <div>
+        <p className="text-sm text-muted-foreground">Extra storage you pay for</p>
+        <p className="mt-1 text-lg font-semibold">
+          {capacity.renewingGib} GB each month{price(capacity.renewingGib) ? ` (${price(capacity.renewingGib)} / month)` : ""}
+        </p>
+        {capacity.planIncludedGib !== null && (
+          <p className="text-xs text-muted-foreground">On top of the {capacity.planIncludedGib} GB included with your plan.</p>
+        )}
+      </div>
+
+      {capacity.scheduled.map((row) => (
+        <div key={`${row.requestedAt}-${row.toGib}`} className="flex gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Reduction confirmed on {formatUkDate(row.requestedAt)}: from {formatUkDate(row.effectiveAt)} your subscription renews with {row.toGib} GB instead of {row.fromGib} GB.
+          </span>
+        </div>
+      ))}
+      {capacity.paidGibThisPeriod > capacity.renewingGib && (
+        <p className="text-sm">You keep {capacity.paidGibThisPeriod} GB of extra storage until {periodEnd}, because this month is already paid for.</p>
+      )}
+
+      {capacity.minimumGib !== null && capacity.planIncludedGib !== null && (
+        <p className="text-sm text-muted-foreground" data-testid="storage-minimum">
+          {capacity.minimumGib > 0
+            ? `Your retained files (${formatBytes(capacity.usedBytes)}) need at least ${capacity.minimumGib} GB of extra storage, so you can't go below that.`
+            : `Your retained files (${formatBytes(capacity.usedBytes)}) fit in the ${capacity.planIncludedGib} GB included with your plan, so you can remove all extra storage.`}
+        </p>
+      )}
+
+      {capacity.canReduce ? (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <div className="flex-1 space-y-1.5">
+            <Label htmlFor="storage-renew-gib">Renew with (GB of extra storage, in steps of {STORAGE_PACK_GIB})</Label>
+            <Input
+              id="storage-renew-gib"
+              type="number"
+              min={capacity.minimumGib ?? 0}
+              max={capacity.renewingGib - STORAGE_PACK_GIB}
+              step={STORAGE_PACK_GIB}
+              value={targetGib}
+              onChange={(event) => setTargetGib(event.target.value)}
+            />
+          </div>
+          <Button type="button" variant="outline" disabled={!targetValid || busy} onClick={() => { requestIdRef.current = null; setConfirmOpen(true); }}>
+            Reduce from next renewal
+          </Button>
+        </div>
+      ) : capacity.renewingGib > 0 && capacity.reduceUnavailableReason && STORAGE_REDUCE_UNAVAILABLE[capacity.reduceUnavailableReason] ? (
+        <p className="text-sm text-muted-foreground">{STORAGE_REDUCE_UNAVAILABLE[capacity.reduceUnavailableReason]}</p>
+      ) : null}
+      <p className="text-xs text-muted-foreground">
+        Reductions start at your next renewal. Files are never deleted and access is never cut off; there's no refund for the current month.
+      </p>
+
+      <Dialog open={confirmOpen} onOpenChange={(open) => { if (!busy) setConfirmOpen(open); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reduce extra storage to {targetValid ? target : "…"} GB?</DialogTitle>
+            <DialogDescription asChild>
+              <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm">
+                <li>
+                  From {periodEnd}, your subscription renews with {target} GB instead of {capacity.renewingGib} GB
+                  {price(capacity.renewingGib) && price(target) ? ` (${price(capacity.renewingGib)} → ${price(target)} a month)` : ""}.
+                </li>
+                <li>You keep {capacity.paidGibThisPeriod} GB until then. Nothing is refunded for the current month.</li>
+                <li>No files are deleted and nobody loses access. If your files grow, you can buy storage again.</li>
+              </ul>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setConfirmOpen(false)}>Keep my storage</Button>
+            <Button type="button" disabled={!targetValid || busy} onClick={reduce}>
+              {busy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+              {busy ? "Updating Stripe…" : "Confirm reduction"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function StorageUsageCard() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { activeClientId } = useAuth();
   const [thresholdGb, setThresholdGb] = useState("5");
   const [saving, setSaving] = useState(false);
   const [storagePurchaseBusy, setStoragePurchaseBusy] = useState(false);
+  const [autoTopUpSaving, setAutoTopUpSaving] = useState(false);
   const usageQuery = useGetStorageUsage({
     query: {
       queryKey: ["/api/storage/usage", activeClientId],
       enabled: activeClientId !== null,
       retry: false,
+      // While the server rechecks with the storage provider, pick up the result.
+      refetchInterval: (query) => (query.state.data?.usageRefreshing ? 5000 : false),
     },
   });
   const usage = usageQuery.data;
+
+  // The storage warning email links to /settings#storage.
+  useEffect(() => {
+    if (window.location.hash !== "#storage" || usageQuery.isLoading) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById("storage")?.scrollIntoView({ block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [usageQuery.isLoading]);
 
   useEffect(() => {
     if (usage) {
@@ -138,12 +374,60 @@ function StorageUsageCard() {
     }
   };
 
+  const saveAutoTopUp = async (on: boolean) => {
+    setAutoTopUpSaving(true);
+    try {
+      const response = await authenticatedApiFetch(`/settings?clientId=${activeClientId}`, {
+        method: "PUT",
+        body: JSON.stringify({ storageAutoTopUp: on ? "true" : "false" }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error ?? `Request failed (${response.status})`);
+      }
+      await usageQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: ["/api/storage/status", activeClientId] });
+      toast({
+        title: on ? "Automatic top-up switched on" : "Automatic top-up switched off",
+        description: on
+          ? "When storage is full we'll add 10 GB (£1 a month) and email you."
+          : "When storage is full, new uploads will stop until storage is added.",
+      });
+    } catch (err: any) {
+      toast({ title: "Couldn't change automatic top-up", description: err.message, variant: "destructive" });
+    } finally {
+      setAutoTopUpSaving(false);
+    }
+  };
+
+  // Only offer to buy storage when the storage add-on is configured and its
+  // Stripe price is the £1 per 10 GB storage price (checked server-side).
+  const [storageAddon, setStorageAddon] = useState<StorageAddonOffer | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ storageAddonAvailable?: boolean; billingAvailable?: boolean; storageAddon?: StorageAddonOffer | null }>(withBillingClient("/billing/config", activeClientId))
+      .then((config) => {
+        if (cancelled) return;
+        const offered = config.storageAddonAvailable === true && config.billingAvailable !== false;
+        setStorageAddon(offered && config.storageAddon ? config.storageAddon : null);
+      })
+      .catch(() => { if (!cancelled) setStorageAddon(null); });
+    return () => { cancelled = true; };
+  }, [activeClientId]);
+
+  const excessGib = Math.ceil((usage?.estimatedCost?.excessStorageBytes ?? 0) / (1024 ** 3));
+  // Enough whole 10 GB steps to cover what the files need beyond the plan.
+  const storagePackGib = storageAddon?.packGib ?? STORAGE_PACK_GIB;
+  const storagePurchaseGib = Math.max(storagePackGib, storageAddon?.minimumGib ?? 0, Math.ceil(excessGib / storagePackGib) * storagePackGib);
+  const storagePurchaseLabel = storageAddon
+    ? `Buy ${storagePurchaseGib} GB for ${formatMinorUnits(storageAddon.unitAmount * storagePurchaseGib, storageAddon.currency)} / month`
+    : "";
+
   const buyAdditionalStorage = async () => {
-    const excessBytes = usage?.estimatedCost?.excessStorageBytes ?? 0;
-    const gib = Math.max(1, Math.ceil(excessBytes / (1024 ** 3)));
+    const gib = storagePurchaseGib;
     setStoragePurchaseBusy(true);
     try {
-      const response = await authenticatedApiFetch("/billing/storage", {
+      const response = await authenticatedApiFetch(withBillingClient("/billing/storage", activeClientId), {
         method: "POST",
         body: JSON.stringify({ gib, requestId: crypto.randomUUID() }),
       });
@@ -151,9 +435,11 @@ function StorageUsageCard() {
       if (!response.ok) throw new Error(data?.error ?? `Request failed (${response.status})`);
       toast({
         title: "Additional storage added",
-        description: `${gib} GiB has been added to your monthly Stripe subscription.`,
+        description: `${gib} GB has been added to your monthly subscription.`,
       });
       await usageQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: ["/api/billing/storage", activeClientId] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/storage/status", activeClientId] });
     } catch (err: any) {
       toast({ title: "Couldn't add storage", description: err.message, variant: "destructive" });
     } finally {
@@ -161,19 +447,24 @@ function StorageUsageCard() {
     }
   };
 
-  const percent = usage
-    ? Math.min(100, Math.round((usage.usedBytes / usage.warningThresholdBytes) * 100))
+  // Measure against the storage the business pays for when there is a limit.
+  const meterBytes = usage ? usage.capacityBytes ?? usage.warningThresholdBytes : 1;
+  const percent = usage && meterBytes > 0
+    ? Math.min(100, Math.round((usage.usedBytes / meterBytes) * 100))
     : 0;
+  const meterTone = usage?.limitState === "full"
+    ? "bg-red-600"
+    : usage?.limitState === "nearly_full" || usage?.warning ? "bg-amber-500" : "bg-sky-600";
 
   return (
-    <Card className="shadow-lg border-border/50 bg-card">
+    <Card id="storage" className="scroll-mt-6 shadow-lg border-border/50 bg-card">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <HardDrive className="w-5 h-5 text-sky-600" />
-          <CardTitle className="font-display">File Storage</CardTitle>
+          <CardTitle className="font-display font-bold">File Storage</CardTitle>
         </div>
         <CardDescription>
-          Monitor retained documents and evidence for this account. The warning is informational and never blocks or deletes files.
+          Retained documents and evidence for this account. When files reach the storage you pay for, new uploads stop unless automatic top-up is on. Nothing is ever deleted. Owners and admins get one email at 80% (or your warning level, if lower) and one when storage is full.
         </CardDescription>
       </CardHeader>
       <CardContent className="p-6 space-y-5">
@@ -183,12 +474,30 @@ function StorageUsageCard() {
           </div>
         ) : usage ? (
           <>
-            {usage.warning && (
+            {usage.limitState === "full" ? (
+              <div className="flex gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-red-900" data-testid="storage-full-notice">
+                <AlertTriangle className="h-5 w-5 shrink-0" />
+                <div>
+                  <p className="font-medium">Storage full: new uploads have stopped</p>
+                  <p className="text-sm">
+                    {usage.autoTopUp
+                      ? "Automatic top-up is on, so the next upload adds 10 GB. If that fails, add storage below."
+                      : "Nothing has been deleted. Add storage below, or switch on automatic top-up, to start uploading again."}
+                  </p>
+                </div>
+              </div>
+            ) : (usage.limitState === "nearly_full" || usage.warning) && (
               <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900">
                 <AlertTriangle className="h-5 w-5 shrink-0" />
                 <div>
-                  <p className="font-medium">Storage warning threshold reached</p>
-                  <p className="text-sm">Review retained files or raise the warning level. Uploads will continue normally.</p>
+                  <p className="font-medium">Storage nearly full</p>
+                  <p className="text-sm">
+                    {usage.capacityBytes == null
+                      ? "Buy extra storage, review retained files or raise the warning level."
+                      : usage.autoTopUp
+                        ? "When it is full we'll add 10 GB automatically (£1 a month) and email you."
+                        : "When it is full, new uploads will stop. Add storage or switch on automatic top-up below."}
+                  </p>
                 </div>
               </div>
             )}
@@ -197,6 +506,13 @@ function StorageUsageCard() {
                 <p className="text-sm text-muted-foreground">Retained storage</p>
                 <p className="mt-1 text-2xl font-semibold">{formatBytes(usage.usedBytes)}</p>
                 <p className="mt-1 text-xs text-muted-foreground">{usage.objectCount.toLocaleString()} stored {usage.objectCount === 1 ? "file" : "files"}</p>
+                <p className="mt-1 text-xs text-muted-foreground" data-testid="storage-usage-checked">
+                  {usage.usageRefreshing
+                    ? "Rechecking with our storage provider…"
+                    : typeof usage.usageAgeSeconds === "number"
+                      ? `Checked with our storage provider ${formatCheckedAge(usage.usageAgeSeconds)}. New uploads and deletions show straight away.`
+                      : null}
+                </p>
               </div>
               <div className="rounded-lg border p-4">
                 <p className="text-sm text-muted-foreground">Downloads this month</p>
@@ -213,37 +529,58 @@ function StorageUsageCard() {
                 <p className="mt-2 text-sm font-medium">
                   {usage.estimatedCost
                     ? (usage.estimatedCost.excessStorageBytes ?? 0) > 0
-                      ? `Estimated excess storage charge: $${(usage.estimatedCost.totalMinorUnits / 100).toFixed(2)} / month`
-                      : `Within the included ${formatBytes(usage.estimatedCost.includedStorageBytes)} storage allowance`
+                      ? `Your files are ${formatBytes(usage.estimatedCost.excessStorageBytes)} over the ${formatBytes(usage.estimatedCost.includedStorageBytes)} of storage you have`
+                      : `Within the ${formatBytes(usage.estimatedCost.includedStorageBytes)} of storage you have`
                     : "Storage pricing is currently unavailable for this subscription."}
                 </p>
                 {usage.estimatedCost && (usage.estimatedCost.excessStorageBytes ?? 0) > 0 && (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Based on our storage provider’s cost plus a {usage.estimatedCost.markupPercent ?? 20}% ALPS margin.
-                    Downloads are measured separately and are not charged here.
+                    Extra storage is £1 per 10 GB a month.
                   </p>
                 )}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="mt-3"
-                  onClick={buyAdditionalStorage}
-                  disabled={storagePurchaseBusy}
-                >
-                  {storagePurchaseBusy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : <CreditCard className="mr-1.5 h-4 w-4" />}
-                  {storagePurchaseBusy ? "Adding storage to Stripe…" : "Buy additional storage"}
-                </Button>
+                {storageAddon && (
+                  <>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="mt-3"
+                    onClick={buyAdditionalStorage}
+                    disabled={storagePurchaseBusy}
+                  >
+                    {storagePurchaseBusy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : <CreditCard className="mr-1.5 h-4 w-4" />}
+                    {storagePurchaseBusy ? "Adding storage to Stripe…" : storagePurchaseLabel}
+                  </Button>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {formatMinorUnits(storageAddon.unitAmount * storagePackGib, storageAddon.currency)} per {storagePackGib} GB each month, before any VAT. The first month is added to your next monthly bill.
+                  </p>
+                  </>
+                )}
               </div>
             </div>
+            <PaidStorageSection activeClientId={activeClientId} onChanged={() => { void usageQuery.refetch(); }} />
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
-                <span>{percent}% of warning level</span>
-                <span className="text-muted-foreground">{formatBytes(usage.warningThresholdBytes)}</span>
+                <span>{usage.capacityBytes == null ? `${percent}% of warning level` : `${percent}% of your storage used`}</span>
+                <span className="text-muted-foreground">{formatBytes(meterBytes)}</span>
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-muted">
-                <div className={`h-full rounded-full ${usage.warning ? "bg-amber-500" : "bg-sky-600"}`} style={{ width: `${percent}%` }} />
+                <div className={`h-full rounded-full ${meterTone}`} style={{ width: `${percent}%` }} />
               </div>
+            </div>
+            <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+              <div className="space-y-1">
+                <Label htmlFor="storage-auto-top-up" className="font-medium">Add 10 GB automatically when storage is full</Label>
+                <p className="text-sm text-muted-foreground">
+                  Off: new uploads stop when storage is full, until an owner adds more. On: we add 10 GB for £1 a month (before any VAT), put the first month on your next monthly bill and email you each time.
+                </p>
+              </div>
+              <Switch
+                id="storage-auto-top-up"
+                checked={usage.autoTopUp}
+                disabled={autoTopUpSaving || activeClientId === null}
+                onCheckedChange={(checked) => { void saveAutoTopUp(checked); }}
+              />
             </div>
           </>
         ) : (
@@ -275,13 +612,14 @@ function StorageUsageCard() {
 }
 
 // ── Local types used by DepartmentsCard ──────────────────────────────────────
-interface Department { id: number; clientId: number; name: string; description?: string | null; createdAt: string; }
+interface Department { id: number; clientId: number; name: string; description?: string | null; createdAt: string; siteId?: number | null; siteName?: string | null; }
 interface DeptUser { id: number; name: string; email: string; role: string; departmentId?: number | null; active?: boolean; }
 interface DeptSite { id: number; name: string; departmentId?: number | null; }
 
 function DepartmentsCard() {
   const { toast } = useToast();
   const canAdmin = useCanAdmin();
+  const isConsultant = useIsConsultant();
 
   const [departments, setDepartments] = useState<Department[]>([]);
   const [users, setUsers] = useState<DeptUser[]>([]);
@@ -293,9 +631,12 @@ function DepartmentsCard() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
 
-  // New department inline form
+  // New department inline form: the site it goes under ("all" spans every
+  // site), and whether the same name is added at every other site too.
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newSite, setNewSite] = useState<string>("");
+  const [copyToSites, setCopyToSites] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [deptToDelete, setDeptToDelete] = useState<{ id: number; name: string } | null>(null);
@@ -326,16 +667,27 @@ function DepartmentsCard() {
       return next;
     });
 
+  const chosenSite = newSite || (sites[0] ? String(sites[0].id) : "all");
+
   const createDept = async () => {
     const name = newName.trim();
     if (!name) return;
     setBusy(true);
     try {
-      await apiFetch("/departments", {
-        method: "POST",
-        body: JSON.stringify({ name }),
-      });
+      const siteId = chosenSite === "all" ? null : Number(chosenSite);
+      // With "every other site" ticked, a site that already has the name is skipped.
+      const targets = siteId !== null && copyToSites
+        ? [siteId, ...sites.map(s => s.id).filter(id => id !== siteId)]
+        : [siteId];
+      for (const target of targets) {
+        if (target !== siteId && departments.some(d => d.siteId === target && d.name.trim().toLowerCase() === name.toLowerCase())) continue;
+        await apiFetch("/departments", {
+          method: "POST",
+          body: JSON.stringify(target === null ? { name } : { name, siteId: target }),
+        });
+      }
       setNewName("");
+      setCopyToSites(false);
       setCreating(false);
       await refresh();
     } catch (err: any) {
@@ -376,6 +728,18 @@ function DepartmentsCard() {
     }
   };
 
+  const moveDept = async (id: number, value: string) => {
+    setBusy(true);
+    try {
+      await apiFetch(`/departments/${id}`, { method: "PUT", body: JSON.stringify({ siteId: value === "all" ? null : Number(value) }) });
+      await refresh();
+    } catch (err: any) {
+      toast({ title: "Couldn't move the department", description: err.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const assignUser = async (userId: number, departmentId: number | null) => {
     setBusy(true);
     try {
@@ -410,12 +774,12 @@ function DepartmentsCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Users className="w-5 h-5 text-violet-500" />
-          <CardTitle className="font-display">Departments</CardTitle>
+          <CardTitle className="font-display font-bold">Departments</CardTitle>
         </div>
         <CardDescription>
-          Organise your sites and staff into departments. Staff and viewer accounts assigned to a
-          department will only see data for sites in that department. Users or sites with no
-          department assignment can see everything.
+          Each department sits under one of your sites. Staff in a department see only that site
+          and their department's records there. A department under "Every site" covers all your
+          sites. People with no department see every site.
         </CardDescription>
       </CardHeader>
 
@@ -438,7 +802,15 @@ function DepartmentsCard() {
           </div>
         ) : (
           <>
-            {departments.map(dept => {
+            {[
+              ...sites.map(site => ({ key: `site-${site.id}`, label: site.name, rows: departments.filter(d => d.siteId === site.id) })),
+              { key: "all", label: "Every site", rows: departments.filter(d => d.siteId == null || !sites.some(s => s.id === d.siteId)) },
+            ].filter(group => group.rows.length > 0).map(group => (
+            <div key={group.key} className="space-y-2" data-testid={`departments-${group.key}`}>
+              {sites.length > 0 && (
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-1">{group.label}</p>
+              )}
+            {group.rows.map(dept => {
               const members = users.filter(u => u.departmentId === dept.id);
               const deptSites = sites.filter(s => s.departmentId === dept.id);
               const isOpen = expanded.has(dept.id);
@@ -484,7 +856,8 @@ function DepartmentsCard() {
                     )}
 
                     <span className="text-xs text-muted-foreground whitespace-nowrap">
-                      {members.length} {members.length === 1 ? "member" : "members"} · {deptSites.length} {deptSites.length === 1 ? "site" : "sites"}
+                      {members.length} {members.length === 1 ? "member" : "members"}
+                      {dept.siteId == null && <> · {deptSites.length} {deptSites.length === 1 ? "site" : "sites"}</>}
                     </span>
 
                     {canAdmin && !isEditing && (
@@ -548,7 +921,7 @@ function DepartmentsCard() {
                             <SelectContent>
                               {unassignedUsers.map(u => (
                                 <SelectItem key={u.id} value={String(u.id)} className="text-xs">
-                                  {u.name} <span className="text-muted-foreground ml-1">({u.role.replace("client_", "")})</span>
+                                  {u.name} <span className="text-muted-foreground ml-1">({roleLabel(u.role, isConsultant)})</span>
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -556,9 +929,32 @@ function DepartmentsCard() {
                         )}
                       </div>
 
-                      {/* Sites */}
+                      {/* The site it sits under */}
+                      {sites.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Site</p>
+                          {canAdmin ? (
+                            <Select value={dept.siteId != null ? String(dept.siteId) : "all"} onValueChange={val => moveDept(dept.id, val)} disabled={busy}>
+                              <SelectTrigger className="h-7 text-xs w-52" aria-label={`Site for ${dept.name}`}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {sites.map(s => (
+                                  <SelectItem key={s.id} value={String(s.id)} className="text-xs">{s.name}</SelectItem>
+                                ))}
+                                <SelectItem value="all" className="text-xs">Every site</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">{dept.siteName ?? "Every site"}</p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Sites given only to this department (departments that span every site) */}
+                      {dept.siteId == null && (
                       <div>
-                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Sites</p>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Sites only this department sees</p>
                         {deptSites.length === 0 ? (
                           <p className="text-xs text-muted-foreground italic">No sites assigned yet.</p>
                         ) : (
@@ -598,29 +994,53 @@ function DepartmentsCard() {
                           </Select>
                         )}
                       </div>
+                      )}
                     </div>
                   )}
                 </div>
               );
             })}
+            </div>
+            ))}
 
             {/* New department inline form */}
             {canAdmin && (
               creating ? (
-                <div className="flex items-center gap-2 pt-1">
-                  <Input
-                    placeholder="Department name"
-                    value={newName}
-                    onChange={e => setNewName(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === "Enter") createDept();
-                      if (e.key === "Escape") { setCreating(false); setNewName(""); }
-                    }}
-                    className="h-8 text-sm w-52"
-                    autoFocus
-                  />
-                  <Button size="sm" onClick={createDept} disabled={busy || !newName.trim()}>Create</Button>
-                  <Button size="sm" variant="ghost" onClick={() => { setCreating(false); setNewName(""); }}>Cancel</Button>
+                <div className="space-y-2 pt-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      placeholder="Department name"
+                      value={newName}
+                      onChange={e => setNewName(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") createDept();
+                        if (e.key === "Escape") { setCreating(false); setNewName(""); }
+                      }}
+                      className="h-8 text-sm w-52"
+                      autoFocus
+                    />
+                    {sites.length > 0 && (
+                      <Select value={chosenSite} onValueChange={setNewSite}>
+                        <SelectTrigger className="h-8 text-sm w-48" aria-label="Site for the new department">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {sites.map(s => (
+                            <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
+                          ))}
+                          <SelectItem value="all">Every site</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <Button size="sm" onClick={createDept} disabled={busy || !newName.trim()}>Create</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setCreating(false); setNewName(""); }}>Cancel</Button>
+                  </div>
+                  {sites.length > 1 && chosenSite !== "all" && (
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <input type="checkbox" checked={copyToSites} onChange={e => setCopyToSites(e.target.checked)} />
+                      Also add it to every other site (the name only; each site's department has its own staff)
+                    </label>
+                  )}
                 </div>
               ) : (
                 <Button
@@ -719,7 +1139,7 @@ const TRACK_SUMMARY_MODULES = [
   { key: "kitchen", label: "KitchenTrack" },
   { key: "fire", label: "FireTrack" },
   { key: "legionella", label: "LegionellaTrack" },
-  { key: "pool", label: "AquaTrack" },
+  { key: "pool", label: "AquaTrack (water tests)" },
   { key: "pat", label: "PATtrack" },
   { key: "pest", label: "PestTrack" },
   { key: "fix", label: "FixTrack" },
@@ -730,11 +1150,96 @@ const TRACK_SUMMARY_MODULES = [
   { key: "train", label: "TrainTrack" },
   { key: "hot_tub", label: "TubTrack" },
   { key: "tree", label: "TreeTrack" },
+  { key: "coshh", label: "COSHHTrack" },
   { key: "bike", label: "BikeTrack" },
   { key: "green", label: "GreenTrack" },
-  { key: "swim", label: "SwimTrack" },
+  { key: "swim", label: "AquaTrack (sessions & safety)" },
   { key: "incident", label: "IncidentTrack" },
 ] as const;
+
+const TRACK_RECIPIENT_VIA_LABEL = {
+  senior: "Senior management",
+  named: "Named",
+  department: "Department manager",
+} as const;
+
+/** One line for a track's collapsed row, from the server's preview. */
+function trackRecipientSummary(track: TrackSummaryPreviewTrack): string {
+  if (!track.enabled) return "Not in your plan";
+  if (track.recipients.length === 0) return "Nobody receives this";
+  if (track.seniorOnly) return track.mode === "automatic" ? "Automatic: no match, senior management only" : "Senior management only";
+  const names = track.recipients
+    .filter((recipient) => recipient.via.some((via) => via !== "senior"))
+    .map((recipient) => recipient.name ?? recipient.email);
+  return `${track.mode === "automatic" ? "Automatic: " : ""}${names.join(", ")} + senior management`;
+}
+
+/** Who receives one track, and why, as the daily job would send it. */
+function TrackRecipientPreview({ track }: { track: TrackSummaryPreviewTrack }) {
+  if (!track.enabled) {
+    return (
+      <p className="sm:col-span-2 text-xs text-muted-foreground" data-testid={`track-recipients-${track.module}`}>
+        This track isn't in your plan, so no summary is sent for it.
+      </p>
+    );
+  }
+  const departmentsWithoutManager = track.departments.filter((department) => department.managers.length === 0);
+  return (
+    <div className="sm:col-span-2 space-y-2 rounded-md border border-sky-200 bg-sky-50/60 p-3" data-testid={`track-recipients-${track.module}`}>
+      <p className="text-xs font-semibold text-sky-900">
+        Who receives this track{track.mode === "automatic" ? " (automatic match)" : ""}
+      </p>
+      {track.mode === "automatic" && (
+        <p className="text-xs text-sky-900">
+          {track.departments.length > 0
+            ? `Matched departments: ${track.departments.map((department) => department.name).join(", ")}.`
+            : "No department name matches this track."}
+        </p>
+      )}
+      {track.recipients.length === 0 ? (
+        <p className="flex items-start gap-1.5 text-xs text-destructive">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          Nobody receives this track. Set a notification email or add an Owner.
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {track.recipients.map((recipient) => (
+            <li key={recipient.email} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+              <span className="font-medium text-foreground">{recipient.name ?? recipient.email}</span>
+              {recipient.name && <span className="text-muted-foreground">{recipient.email}</span>}
+              {recipient.departmentName && <span className="text-muted-foreground">· {recipient.departmentName}</span>}
+              {recipient.via.map((via) => (
+                <span key={via} className={cn(
+                  "rounded-full px-2 py-0.5 text-[11px] font-medium",
+                  via === "senior" ? "bg-slate-200 text-slate-800"
+                    : via === "named" ? "bg-violet-100 text-violet-800"
+                      : "bg-emerald-100 text-emerald-800",
+                )}>
+                  {via === "department" && track.mode === "automatic" ? "Automatic match" : TRACK_RECIPIENT_VIA_LABEL[via]}
+                </span>
+              ))}
+            </li>
+          ))}
+        </ul>
+      )}
+      {departmentsWithoutManager.map((department) => (
+        <p key={department.id} className="flex items-start gap-1.5 text-xs text-amber-800">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {department.name} has no Manager, so nobody from it receives this track. Give a Manager this department on the Users page.
+        </p>
+      ))}
+      {track.seniorOnly && track.recipients.length > 0 && (
+        <p className="text-xs text-sky-900">No eligible manager is assigned, so this falls back to senior management only.</p>
+      )}
+      {track.unavailableNamedCount > 0 && (
+        <p className="flex items-start gap-1.5 text-xs text-amber-800">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {track.unavailableNamedCount} named recipient{track.unavailableNamedCount === 1 ? " is" : "s are"} no longer an active manager and will be skipped.
+        </p>
+      )}
+    </div>
+  );
+}
 
 function TrackSummaryRoutingCard() {
   const { toast } = useToast();
@@ -743,9 +1248,12 @@ function TrackSummaryRoutingCard() {
   const [users, setUsers] = useState<DeptUser[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [routing, setRouting] = useState<Record<string, { managerIds: number[]; departmentIds: number[] }>>({});
+  const [savedRouting, setSavedRouting] = useState("{}");
   const [seniorEmail, setSeniorEmail] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [preview, setPreview] = useState<TrackSummaryPreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -766,6 +1274,7 @@ function TrackSummaryRoutingCard() {
           [key, Array.isArray(entry) ? { managerIds: entry, departmentIds: [] } : entry]
         )) as Record<string, { managerIds: number[]; departmentIds: number[] }>;
         setRouting(normalized);
+        setSavedRouting(JSON.stringify(normalized));
       })
       .catch((err: Error) => {
         if (cancelled) return;
@@ -775,8 +1284,26 @@ function TrackSummaryRoutingCard() {
     return () => { cancelled = true; };
   }, [activeClientId]);
 
+  // The server works out the recipients with the daily job's own routing
+  // code, including the unsaved choices, so what is shown is what is sent.
+  const routingJson = JSON.stringify(routing);
+  useEffect(() => {
+    if (loading || !canAdmin) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams({ routing: routingJson });
+      if (activeClientId != null) params.set("clientId", String(activeClientId));
+      apiFetch<TrackSummaryPreview>(`/settings/track-summary-recipients?${params}`)
+        .then((result) => { if (!cancelled) { setPreview(result); setPreviewError(null); } })
+        .catch((err: Error) => { if (!cancelled) setPreviewError(err.message); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [loading, canAdmin, activeClientId, routingJson]);
+  const previewByModule = new Map((preview?.tracks ?? []).map((track) => [track.module, track]));
+  const unsaved = routingJson !== savedRouting;
+
   const managers = users.filter(
-    (user) => user.active !== false && (user.role === "client_admin" || user.role === "client_staff"),
+    (user) => user.active !== false && (user.role === "client_admin" || user.role === "client_manager" || user.role === "client_staff"),
   );
   const seniorManagers = users.filter((user) => user.active !== false && user.role === "client_admin");
 
@@ -808,6 +1335,7 @@ function TrackSummaryRoutingCard() {
         const body = await response.json().catch(() => null);
         throw new Error(body?.error ?? `Request failed (${response.status})`);
       }
+      setSavedRouting(serialized);
       toast({ title: "Track summary routing saved" });
     } catch (err: any) {
       toast({ title: "Couldn't save routing", description: err.message, variant: "destructive" });
@@ -821,7 +1349,7 @@ function TrackSummaryRoutingCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Route className="w-5 h-5 text-sky-600" />
-          <CardTitle className="font-display">Track Summary Recipients</CardTitle>
+          <CardTitle className="font-display font-bold">Track Summary Recipients</CardTitle>
         </div>
         <CardDescription>
           Senior management receives every enabled track. Choose departments or named staff for additional track-specific digests.
@@ -833,13 +1361,23 @@ function TrackSummaryRoutingCard() {
         <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
           <p className="font-semibold">Senior management — all tracks</p>
           <p className="mt-1 text-xs text-sky-800">
-            {seniorEmail.trim()
-              ? seniorEmail
-              : seniorManagers.length > 0
-                ? seniorManagers.map((manager) => manager.email).join(", ")
-                : "No admin/owner notification recipient is currently configured."}
+            {preview
+              ? preview.senior.recipients.length > 0
+                ? `${preview.senior.recipients.map((person) => person.name ? `${person.name} (${person.email})` : person.email).join(", ")}${preview.senior.source === "notification_email" ? " · notification email" : " · account Owners"}`
+                : "No admin/owner notification recipient is currently configured."
+              : seniorEmail.trim()
+                ? seniorEmail
+                : seniorManagers.length > 0
+                  ? seniorManagers.map((manager) => manager.email).join(", ")
+                  : "No admin/owner notification recipient is currently configured."}
           </p>
         </div>
+        {previewError && (
+          <p className="text-xs text-destructive">Couldn't load the recipient preview: {previewError}</p>
+        )}
+        {unsaved && preview && (
+          <p className="text-xs font-medium text-amber-800">The recipients below include changes you haven't saved yet.</p>
+        )}
 
         {loading ? (
           <div className="flex items-center justify-center py-8">
@@ -855,19 +1393,23 @@ function TrackSummaryRoutingCard() {
               const selectedIds = routing[track.key]?.managerIds ?? [];
               const selectedDepartments = routing[track.key]?.departmentIds ?? [];
               const selectedManagers = managers.filter((manager) => selectedIds.includes(manager.id));
+              const trackPreview = previewByModule.get(track.key);
               return (
                 <details key={track.key} className="group">
                   <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3 hover:bg-muted/30">
                     <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-90" />
                     <span className="flex-1 text-sm font-medium">{track.label}</span>
-                    <span className="max-w-[55%] truncate text-xs text-muted-foreground">
-                      {!Object.hasOwn(routing, track.key)
-                        ? "Automatic department match"
-                        : [...departments.filter((department) => selectedDepartments.includes(department.id)).map((department) => department.name),
-                            ...selectedManagers.map((manager) => manager.name)].join(", ") || "Senior management only"}
+                    <span className="max-w-[55%] truncate text-xs text-muted-foreground" data-testid={`track-recipient-summary-${track.key}`}>
+                      {trackPreview
+                        ? trackRecipientSummary(trackPreview)
+                        : !Object.hasOwn(routing, track.key)
+                          ? "Automatic department match"
+                          : [...departments.filter((department) => selectedDepartments.includes(department.id)).map((department) => departmentLabel(department)),
+                              ...selectedManagers.map((manager) => manager.name)].join(", ") || "Senior management only"}
                     </span>
                   </summary>
                   <div className="grid gap-2 border-t border-border/60 bg-muted/10 px-10 py-3 sm:grid-cols-2">
+                    {trackPreview && <TrackRecipientPreview track={trackPreview} />}
                     <div className="sm:col-span-2 flex items-center justify-between gap-3">
                       <span className="text-xs font-semibold text-muted-foreground">Departments (designated managers only)</span>
                       {Object.hasOwn(routing, track.key) && <Button size="sm" variant="ghost" disabled={!canAdmin || saving}
@@ -890,7 +1432,7 @@ function TrackSummaryRoutingCard() {
                           onChange={() => toggleDepartment(track.key, department.id)}
                           disabled={!canAdmin || saving || !Object.hasOwn(routing, track.key)}
                           className="h-4 w-4 accent-primary" />
-                        {department.name}
+                        {departmentLabel(department)}
                       </label>
                     ))}
                     <span className="sm:col-span-2 text-xs font-semibold text-muted-foreground">Named managers</span>
@@ -908,7 +1450,7 @@ function TrackSummaryRoutingCard() {
                           <span>
                             <span className="block font-medium">{manager.name}</span>
                             <span className="block text-xs text-muted-foreground">
-                              {department?.name ?? (manager.role === "client_admin" ? "Account admin" : "No department")}
+                              {department?.name ?? (manager.role === "client_admin" ? "Owner" : "No department")}
                             </span>
                           </span>
                         </label>
@@ -1010,7 +1552,7 @@ function SenderDomainCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Globe className="w-5 h-5 text-emerald-600" />
-          <CardTitle className="font-display">Sender Domain</CardTitle>
+          <CardTitle className="font-display font-bold">Sender Domain</CardTitle>
         </div>
         <CardDescription>
           Use your own business email address instead of the default sender. We’ll show you the small setup step needed for your domain.
@@ -1041,7 +1583,7 @@ function SenderDomainCard() {
           <div className="space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <div className="font-semibold font-display text-lg">{state.domainName}</div>
+                <div className="font-bold font-display text-lg">{state.domainName}</div>
                 <div className="mt-1"><StatusBadge status={state.status} /></div>
               </div>
               <div className="flex gap-2">
@@ -1205,7 +1747,7 @@ function EmailSetupGuide({
             <Mail className="w-5 h-5 text-indigo-600" />
           </div>
           <div>
-            <h3 className="font-display font-semibold text-base text-foreground leading-snug">
+            <h3 className="font-display font-bold text-base text-foreground leading-snug">
               Email sender setup
             </h3>
             <p className="text-sm text-muted-foreground mt-0.5">
@@ -1301,6 +1843,8 @@ function EmailSetupGuide({
 
 interface BillingConfig {
   subscription?: { status?: string } | null;
+  /** False while Stripe is unconfigured or unverified: checkout is unavailable. */
+  billingAvailable?: boolean;
   siteCount: number;
   perSite: { priceId: string; unitAmount: number; currency: string } | null;
   billableQuantity: number;
@@ -1308,17 +1852,278 @@ interface BillingConfig {
   cancelledAt?: string | null;
   dataDeletionScheduledAt?: string | null;
   dataDeletedAt?: string | null;
+  /** Every module free with no trial end (set up by ALPS); nothing to pay. */
+  complimentary?: boolean;
+  /** "Would you like ALPS to set you up?" at the first checkout. */
+  setupService?: SetupServiceBilling;
   services?: {
     entitled: "all" | string[];
     addons: string[];
     bundle: boolean;
     subscribed: boolean;
+    /** Modules chosen at signup ("bundle" for the Complete bundle). */
+    selected?: string[];
     perSiteRate: number;
     capPence: number;
     /** Add-ons whose recurring GBP price can't be purchased right now. */
     addonAvailability?: { checked: boolean; unavailable: string[] };
-    catalog: { key: string; label: string; amountPence: number }[];
+    catalog: { key: string; label: string; amountPence: number; comingSoon?: boolean }[];
   };
+}
+
+// Existing clients who already pay redeem the ALPS discount code they were
+// given here; it takes 50% off from the next invoice.
+function SubscriptionDiscountForm({ billingPath, onApplied }: { billingPath: (path: string) => string; onApplied: () => void }) {
+  const { toast } = useToast();
+  const [code, setCode] = useState("");
+  const [saving, setSaving] = useState(false);
+  const apply = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!code.trim() || saving) return;
+    setSaving(true);
+    try {
+      await apiFetch(billingPath("/billing/discount-code/redeem"), {
+        method: "POST",
+        body: JSON.stringify({ discountCode: code.trim() }),
+      });
+      setCode("");
+      toast({ title: "Discount applied", description: "50% off ComplyTrack and your tracks from your next invoice." });
+      onApplied();
+    } catch (err: any) {
+      toast({ title: "Couldn't apply the discount", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <form onSubmit={apply} className="rounded-lg border border-border p-4 space-y-2">
+      <label htmlFor="subscription-discount-code" className="block text-sm font-medium">ALPS client discount code</label>
+      <p className="text-xs text-muted-foreground">If ALPS has given you a discount code, enter it for 50% off ComplyTrack and your tracks from your next invoice. The AI add-on and extra storage stay full price.</p>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <Input
+          id="subscription-discount-code"
+          value={code}
+          onChange={(event) => setCode(event.target.value)}
+          placeholder="ALPS-XXXX-XXXX-XXXX-XXXX"
+          autoComplete="off"
+          spellCheck={false}
+          className="sm:max-w-xs font-mono"
+        />
+        <Button type="submit" variant="outline" disabled={saving || !code.trim()}>
+          {saving ? "Applying…" : "Apply code"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * The AI features add-on: £15 a month per business, which includes a monthly
+ * allowance of AI use (reading reports and appliance lists), plus top-ups an
+ * owner buys by hand or automatically. Hidden until the server has an
+ * Anthropic API key. Shown as a share of the allowance, never in pounds, so
+ * the allowance can change without confusing anyone.
+ */
+function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClientId: number | null; hasSubscription: boolean; canAdmin: boolean }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [confirming, setConfirming] = useState<"add" | "remove" | "top_up" | null>(null);
+  const [busy, setBusy] = useState(false);
+  // One id per top-up purchase, kept across retries so it is never charged twice.
+  const topUpRequestId = useRef<string | null>(null);
+  const statusQuery = useQuery({
+    queryKey: ["/api/billing/ai", activeClientId],
+    queryFn: () => apiFetch<AiAddonStatus>(withBillingClient("/billing/ai", activeClientId)),
+  });
+  const status = statusQuery.data;
+
+  // Messages about AI link to /settings#ai.
+  useEffect(() => {
+    if (window.location.hash !== "#ai" || !status) return undefined;
+    const timer = window.setTimeout(() => document.getElementById("ai")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+    return () => window.clearTimeout(timer);
+  }, [status]);
+
+  if (!status?.configured) return null;
+  const price = status.price ? `${formatMinorUnits(status.price.unitAmount, status.price.currency)} a month + VAT` : "£15 a month + VAT";
+  const isOn = status.plan === "addon";
+  // Free with no end date (set up by ALPS): a monthly allowance at no charge.
+  const included = status.plan === "included";
+  const topUpPrice = status.topUp ? `${formatMinorUnits(status.topUp.amount, status.topUp.currency)} + VAT` : null;
+  const renewal = status.resetsAt ? formatUkDate(status.resetsAt) : null;
+
+  const titles = {
+    add: ["AI features switched on", "Couldn't switch on AI features"],
+    remove: ["AI features switched off", "Couldn't switch off AI features"],
+    top_up: ["Top-up added", "Couldn't buy a top-up"],
+    auto_top_up: ["Automatic top-ups updated", "Couldn't change automatic top-ups"],
+  } as const;
+
+  async function change(action: keyof typeof titles, extra: Record<string, unknown> = {}) {
+    setBusy(true);
+    try {
+      await apiFetch(withBillingClient("/billing/ai", activeClientId), { method: "POST", body: JSON.stringify({ action, ...extra }) });
+      toast({ title: titles[action][0] });
+      setConfirming(null);
+      if (action === "top_up") topUpRequestId.current = null;
+    } catch (err: any) {
+      toast({ title: titles[action][1], description: err.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+      await queryClient.invalidateQueries({ queryKey: ["/api/billing/ai"] });
+    }
+  }
+
+  function buyTopUp() {
+    topUpRequestId.current ??= crypto.randomUUID();
+    void change("top_up", { requestId: topUpRequestId.current });
+  }
+
+  return (
+    <Card id="ai" className="scroll-mt-6 shadow-lg border-border/50 bg-card mb-6" data-testid="card-ai-addon">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-5 h-5 text-primary" />
+          <CardTitle className="font-display font-bold text-lg">AI features</CardTitle>
+        </div>
+        <CardDescription>
+          {included ? "Included free for your business." : `${price}, for the whole business.`} ComplyTrack's AI reads uploaded reports and suggests the actions they ask for, and turns a photo or PDF of an appliance list into PAT register rows. A fair monthly allowance of AI use is included, and anything unused carries over for up to 12 months.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 p-6 text-sm">
+        {isOn || included || status.plan === "trial" ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold">
+                <CheckCircle2 className="w-3.5 h-3.5" /> {isOn ? "Active" : included ? "Included" : "Included in your trial"}
+              </span>
+              <span className="text-xs text-muted-foreground">{status.percentUsed}% of {isOn || included ? "what's available this month" : "your trial allowance"} used</span>
+            </div>
+            <Progress value={status.percentUsed} aria-label="AI allowance used" />
+            {status.usedUp ? (
+              <p className="flex items-start gap-1.5 text-amber-800" role="status">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>
+                  The AI allowance is used up, including anything carried over. AI buttons stay off{renewal ? ` until ${renewal}` : " until the add-on renews"}
+                  {isOn && status.topUp ? (canAdmin ? ", or until you buy a top-up below" : ", or until an owner buys a top-up") : included ? (canAdmin ? ", or until you agree to a top-up below" : ", or until an owner agrees to a top-up") : ""}; everything else works as normal.
+                </span>
+              </p>
+            ) : status.percentUsed >= 75 ? (
+              <p className="flex items-start gap-1.5 text-amber-800" role="status" data-testid="text-ai-nearly-used">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>
+                  The AI allowance is nearly used up{renewal ? `. Next month's is added on ${renewal}` : ""}.
+                  {isOn && status.topUp ? " You can buy a top-up below if you need more." : included && canAdmin ? " You can agree to a top-up below if you need more." : ""}
+                </span>
+              </p>
+            ) : renewal ? (
+              <p className="text-xs text-muted-foreground">Next month's allowance is added on {renewal}.</p>
+            ) : null}
+            {(isOn || included) && status.carriedOverPercent > 0 && (
+              <p className="text-xs text-muted-foreground" data-testid="text-ai-carried-over">
+                Includes {formatMonthsOfAllowance(status.carriedOverPercent)} carried over from earlier months, used first.
+                {status.nextLapseAt && status.nextLapsePercent > 0
+                  ? ` ${status.nextLapsePercent >= status.carriedOverPercent ? "It" : `The oldest (${formatMonthsOfAllowance(status.nextLapsePercent)})`} lapses on ${formatUkDate(status.nextLapseAt)} if unused.`
+                  : ""}
+              </p>
+            )}
+            {(isOn || included) && status.topUpsThisPeriod > 0 && (
+              <p className="text-xs text-muted-foreground" data-testid="text-ai-top-ups">
+                {status.topUpsThisPeriod} top-up{status.topUpsThisPeriod === 1 ? "" : "s"} {included ? "added" : "bought"} this month, included above.
+              </p>
+            )}
+          </div>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted text-muted-foreground border border-border text-xs font-semibold">Not switched on</span>
+        )}
+
+        {canAdmin && !hasSubscription && !isOn && !included && (
+          <p className="text-xs text-muted-foreground">You can add AI features once you subscribe.</p>
+        )}
+        {canAdmin && hasSubscription && !isOn && !included && (
+          confirming === "add" ? (
+            <div className="flex flex-wrap items-center gap-3 rounded-md border border-primary/30 bg-primary/5 p-3">
+              <span className="flex-1">The first month ({price}) is charged now, then monthly with your subscription.</span>
+              <Button size="sm" disabled={busy} onClick={() => change("add")} data-testid="button-confirm-ai-addon">{busy ? "Switching on…" : "Confirm and pay"}</Button>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setConfirming(null)}>Cancel</Button>
+            </div>
+          ) : (
+            <Button size="sm" disabled={!status.purchasable} onClick={() => setConfirming("add")} data-testid="button-add-ai-addon">
+              <Sparkles className="w-4 h-4 mr-1.5" /> Switch on AI features
+            </Button>
+          )
+        )}
+        {canAdmin && hasSubscription && !isOn && !included && !status.purchasable && (
+          <p className="text-xs text-muted-foreground">AI features can't be added online right now. Nothing has been charged; please try again later.</p>
+        )}
+        {canAdmin && included && status.topUp && topUpPrice && (
+          <div className="rounded-lg border p-4">
+            {confirming === "top_up" ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="flex-1">
+                  {topUpPrice} is added to your next ALPS Consultancy invoice. It adds more AI use, and anything unused carries over for up to 12 months.
+                </span>
+                <Button size="sm" disabled={busy} onClick={buyTopUp} data-testid="button-confirm-ai-invoiced-top-up">{busy ? "Adding…" : "Agree"}</Button>
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setConfirming(null); topUpRequestId.current = null; }}>Not now</Button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className="text-muted-foreground">Need more this month? A top-up is {topUpPrice}, added to your ALPS Consultancy invoice.</span>
+                <Button size="sm" variant="outline" onClick={() => setConfirming("top_up")} data-testid="button-ai-invoiced-top-up">Request a top-up</Button>
+              </div>
+            )}
+          </div>
+        )}
+        {canAdmin && isOn && status.topUp && topUpPrice && (
+          <div className="space-y-3 rounded-lg border p-4">
+            {confirming === "top_up" ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="flex-1">{topUpPrice} is charged now. It adds more AI use, and anything unused carries over for up to 12 months.</span>
+                <Button size="sm" disabled={busy} onClick={buyTopUp} data-testid="button-confirm-ai-top-up">{busy ? "Charging…" : "Confirm and pay"}</Button>
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setConfirming(null); topUpRequestId.current = null; }}>Cancel</Button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className="text-muted-foreground">Need more this month? A top-up costs {topUpPrice}.</span>
+                <Button size="sm" variant="outline" onClick={() => setConfirming("top_up")} data-testid="button-ai-top-up">Buy a top-up</Button>
+              </div>
+            )}
+            <div className="flex items-start justify-between gap-4 border-t border-border/50 pt-3">
+              <div className="space-y-1">
+                <Label htmlFor="ai-auto-top-up" className="font-medium">Top up automatically when the allowance runs out</Label>
+                <p className="text-xs text-muted-foreground">
+                  Off: AI buttons stop until next month's allowance is added or an owner buys a top-up. On: we charge {topUpPrice} and email the owners each time, at most {status.autoTopUpLimit} times a month.
+                </p>
+              </div>
+              <Switch
+                id="ai-auto-top-up"
+                checked={status.autoTopUp}
+                disabled={busy}
+                onCheckedChange={(checked) => { void change("auto_top_up", { enabled: checked }); }}
+                data-testid="switch-ai-auto-top-up"
+              />
+            </div>
+          </div>
+        )}
+        {canAdmin && isOn && (
+          confirming === "remove" ? (
+            <div className="flex flex-wrap items-center gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+              <span className="flex-1">AI buttons stop at once. There's no refund for the rest of this month or for unused top-ups. Unused allowance is kept until it lapses, in case you switch AI features back on.</span>
+              <Button size="sm" variant="destructive" disabled={busy} onClick={() => change("remove")}>{busy ? "Switching off…" : "Switch off"}</Button>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setConfirming(null)}>Cancel</Button>
+            </div>
+          ) : (
+            <Button size="sm" variant="outline" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setConfirming("remove")}>
+              Switch off AI features
+            </Button>
+          )
+        )}
+        <p className="text-xs text-muted-foreground border-t border-border/50 pt-3">
+          Files are sent to Anthropic, our AI provider, to read; they aren't used to train their AI. A person checks everything the AI suggests before it is saved.
+        </p>
+      </CardContent>
+    </Card>
+  );
 }
 
 function BillingCard() {
@@ -1336,8 +2141,10 @@ function BillingCard() {
   // these rows never show Active until a later action is confirmed.
   const [unconfirmedServices, setUnconfirmedServices] = useState<Set<string>>(() => new Set());
 
+  const billingPath = (path: string) => withBillingClient(path, activeClientId);
+
   const fetchConfig = () => {
-    apiFetch<BillingConfig>("/billing/config")
+    apiFetch<BillingConfig>(billingPath("/billing/config"))
       .then(setConfig)
       .catch(() => setConfig(null))
       .finally(() => setLoading(false));
@@ -1345,12 +2152,30 @@ function BillingCard() {
 
   useEffect(() => {
     fetchConfig();
-  }, []);
+  }, [activeClientId]);
+
+  // Module picker for checkout, pre-selected with the modules chosen at signup.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickedAddons, setPickedAddons] = useState<Set<string>>(new Set());
+  const [pickedBundle, setPickedBundle] = useState(false);
+  const [pickedSetupService, setPickedSetupService] = useState(false);
+  const purchasableAddons = CHECKOUT_ADDONS.filter((addon) => !addon.comingSoon);
+  const openCheckoutPicker = () => {
+    const selected = config?.services?.selected ?? [];
+    const known = new Set(purchasableAddons.map((addon) => addon.key));
+    setPickedBundle(selected.includes("bundle"));
+    setPickedAddons(new Set(selected.filter((key) => known.has(key))));
+    // Ticked already when they asked on the setup page.
+    setPickedSetupService(offerSetupService(config?.setupService) && !!config?.setupService?.requestedAt);
+    setPickerOpen(true);
+  };
+  const pickedTotal = checkoutPerSiteTotal(pickedAddons.size, pickedBundle);
+  const pickedReachesCap = !pickedBundle && pickedTotal === checkoutPerSiteTotal(0, true);
 
   const openPortal = async () => {
     setBusy(true);
     try {
-      const data = await apiFetch<{ url: string }>("/billing/portal", { method: "POST" });
+      const data = await apiFetch<{ url: string }>(billingPath("/billing/portal"), { method: "POST" });
       if (data.url) window.location.href = data.url;
     } catch (err: any) {
       toast({ title: "Couldn't open billing portal", description: err.message, variant: "destructive" });
@@ -1362,9 +2187,15 @@ function BillingCard() {
   const startCheckout = async () => {
     setCheckoutBusy(true);
     try {
-      const data = await apiFetch<{ url: string }>("/billing/checkout", {
+      // Send the modules picked in the dialog; the server prices them (and
+      // switches to the Complete bundle at the per-site cap).
+      const data = await apiFetch<{ url: string }>(billingPath("/billing/checkout"), {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          bundle: pickedBundle,
+          services: pickedBundle ? [] : Array.from(pickedAddons),
+          ...(pickedSetupService && offerSetupService(config?.setupService) ? { setupService: true } : {}),
+        }),
       });
       if (!data.url) throw new Error("Could not start checkout");
       window.location.href = data.url;
@@ -1405,7 +2236,7 @@ function BillingCard() {
         // The body carries only the service and action: the server derives the
         // Stripe idempotency key from subscription + service + billing period,
         // so a retry after a failure reuses the same key and cannot double-charge.
-        const response = await authenticatedApiFetch("/billing/services", {
+        const response = await authenticatedApiFetch(billingPath("/billing/services"), {
           method: "POST",
           body: JSON.stringify({ service: serviceKey, action }),
         });
@@ -1458,7 +2289,7 @@ function BillingCard() {
       // Always re-read server truth: the row's state comes from the live
       // subscription, never from the outcome of this request alone.
       fetchConfig();
-      await apiFetch("/billing/refresh-access", { method: "POST" }).catch(() => {});
+      await apiFetch(billingPath("/billing/refresh-access"), { method: "POST" }).catch(() => {});
       await Promise.resolve(refreshAuth()).catch(() => {});
       serviceActionsInFlight.current.delete(serviceKey);
       setActionBusy(null);
@@ -1473,7 +2304,11 @@ function BillingCard() {
   const sites = config?.siteCount ?? 0;
   const billable = config?.billableQuantity ?? Math.max(sites, 1);
   const total = config?.monthlyTotal != null ? config.monthlyTotal / 100 : billable * perSiteRate;
-  const status = config?.subscription?.status ?? "trial";
+  const status = hasSubscription
+    ? (config?.subscription?.status ?? "active").replace(/_/g, " ")
+    : config?.cancelledAt ? "cancelled" : (config?.subscription?.status === "trial" || !config?.subscription?.status ? "trial" : "no active subscription");
+  const billingAvailable = config?.billingAvailable !== false;
+  const complimentary = config?.complimentary === true && !hasSubscription;
 
   return (
     <>
@@ -1481,15 +2316,25 @@ function BillingCard() {
         <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
           <div className="flex items-center gap-2">
             <CreditCard className="w-5 h-5 text-primary" />
-            <CardTitle className="font-display">Billing &amp; Subscription</CardTitle>
+            <CardTitle className="font-display font-bold">Billing &amp; Subscription</CardTitle>
           </div>
           <CardDescription>
-            You're billed based on active services and sites. Your total scales automatically with the number of sites on your account.
+            {complimentary
+              ? "Your account is set up by ALPS Consultancy, so there is nothing to pay."
+              : "You're billed based on active services and sites. Your total scales automatically with the number of sites on your account."}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-6 space-y-5">
           {loading ? (
             <div className="py-6 flex justify-center"><div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" /></div>
+          ) : complimentary ? (
+            <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-emerald-900" data-testid="billing-complimentary">
+              <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-semibold">Every module is included free</div>
+                <p className="text-sm mt-0.5">There is no trial end date and no payment to set up. Add as many sites as you need.</p>
+              </div>
+            </div>
           ) : (
             <>
               <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-4 py-4">
@@ -1521,11 +2366,22 @@ function BillingCard() {
                     <ExternalLink className="w-4 h-4 mr-1.5" /> {busy ? "Opening…" : "Manage subscription"}
                   </Button>
                 ) : canAdmin ? (
-                  <Button onClick={startCheckout} disabled={checkoutBusy}>
+                  <Button onClick={openCheckoutPicker} disabled={checkoutBusy || !billingAvailable}>
                     <CreditCard className="w-4 h-4 mr-1.5" /> {checkoutBusy ? "Opening checkout…" : "Set up billing"}
                   </Button>
                 ) : null}
               </div>
+
+              {hasSubscription && canAdmin && billingAvailable && (
+                <SubscriptionDiscountForm billingPath={billingPath} onApplied={fetchConfig} />
+              )}
+
+              {!billingAvailable && !hasSubscription && (
+                <div role="status" className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  <p>Billing is temporarily unavailable, so subscriptions can't be set up right now. Your access is kept in the meantime — please try again later.</p>
+                </div>
+              )}
 
               {config?.dataDeletionScheduledAt && !config?.dataDeletedAt && (
                 <div className="flex items-start gap-3 rounded-lg border border-orange-200 bg-orange-50 p-4 dark:border-orange-900/50 dark:bg-orange-950/30">
@@ -1556,7 +2412,7 @@ function BillingCard() {
       {!loading && servicesConfig && (
         <Card className="shadow-lg border-border/50 bg-card mb-6">
           <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-            <CardTitle className="font-display text-lg">Services</CardTitle>
+            <CardTitle className="font-display font-bold text-lg">Services</CardTitle>
             <CardDescription>Add or remove services from your account.</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
@@ -1583,7 +2439,8 @@ function BillingCard() {
                   const availability = servicesConfig.addonAvailability;
                   const availabilityUnknown = availability?.checked === false;
                   const priceUnavailable = availabilityUnknown || (availability?.unavailable.includes(service.key) ?? false);
-                  const purchaseBlocked = !onSubscription && priceUnavailable;
+                  const comingSoon = service.comingSoon === true;
+                  const purchaseBlocked = !onSubscription && (priceUnavailable || comingSoon);
                   const notice = serviceNotices[service.key];
                   const busyHere = actionBusy === service.key;
                   return (
@@ -1604,11 +2461,11 @@ function BillingCard() {
                             </span>
                           ) : onTrial ? (
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 text-xs font-semibold">
-                              Included in your trial
+                              {complimentary ? "Included" : "Included in your trial"}
                             </span>
                           ) : purchaseBlocked ? (
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-xs font-semibold">
-                              Temporarily unavailable
+                              {comingSoon ? "Coming soon" : "Temporarily unavailable"}
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted text-muted-foreground border border-border text-xs font-semibold">
@@ -1618,7 +2475,9 @@ function BillingCard() {
                         </div>
                         {purchaseBlocked && !onTrial && (
                           <p className="mt-2 text-xs text-muted-foreground max-w-md" data-testid="addon-unavailable-reason">
-                            {availabilityUnknown
+                            {comingSoon
+                              ? `${service.label} is coming soon and can't be added yet.`
+                              : availabilityUnknown
                               ? "We couldn't check add-on availability just now, so adding is paused. Nothing has been charged — please refresh or try again shortly."
                               : `${service.label} can't be added online right now because its price is temporarily unavailable. Nothing has been charged — please try again later or contact support.`}
                           </p>
@@ -1637,7 +2496,7 @@ function BillingCard() {
                           </p>
                         )}
                       </div>
-                      {canAdmin && !hasSubscription ? (
+                      {complimentary ? null : canAdmin && !hasSubscription ? (
                         <div className="text-xs text-muted-foreground max-w-[200px] text-right">
                           Choose your services when you subscribe
                         </div>
@@ -1674,6 +2533,69 @@ function BillingCard() {
           </CardContent>
         </Card>
       )}
+
+      {!loading && <AiAddonCard activeClientId={activeClientId} hasSubscription={hasSubscription} canAdmin={canAdmin} />}
+
+      <Dialog open={pickerOpen} onOpenChange={(open) => { if (!checkoutBusy) setPickerOpen(open); }}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Choose your modules</DialogTitle>
+            <DialogDescription>
+              ComplyTrack core is always included. Prices are per site, per month, plus VAT.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label className="flex items-center gap-3 rounded-md border p-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={pickedBundle}
+                onChange={() => setPickedBundle((value) => !value)}
+              />
+              <span className="flex-1 text-sm font-semibold">ComplyTrack Complete — every module</span>
+              <span className="text-sm font-medium">£{checkoutPerSiteTotal(0, true)}</span>
+            </label>
+            {purchasableAddons.map((addon) => (
+              <label key={addon.key} className={cn("flex items-center gap-3 rounded-md border p-3", pickedBundle ? "opacity-60" : "cursor-pointer")}>
+                <input
+                  type="checkbox"
+                  disabled={pickedBundle}
+                  checked={pickedBundle || pickedAddons.has(addon.key)}
+                  onChange={() => setPickedAddons((current) => {
+                    const next = new Set(current);
+                    if (next.has(addon.key)) next.delete(addon.key); else next.add(addon.key);
+                    return next;
+                  })}
+                />
+                <span className="flex-1 text-sm">
+                  <span className="font-medium">{addon.label}</span>
+                  <span className="ml-1.5 text-xs text-muted-foreground">{addon.desc}</span>
+                </span>
+                <span className="text-sm text-muted-foreground">+ £10</span>
+              </label>
+            ))}
+            {CHECKOUT_ADDONS.filter((addon) => addon.comingSoon).map((addon) => (
+              <div key={addon.key} className="flex items-center gap-3 rounded-md border p-3 opacity-50">
+                <span className="flex-1 text-sm font-medium">{addon.label}</span>
+                <span className="text-xs uppercase text-muted-foreground">Coming soon</span>
+              </div>
+            ))}
+          </div>
+          {pickedReachesCap && (
+            <p className="text-xs text-emerald-800">
+              Your selection reaches the £{pickedTotal} per-site cap, so you'll get ComplyTrack Complete — every module — for the same price.
+            </p>
+          )}
+          {offerSetupService(config?.setupService) && (
+            <SetupServiceCheckoutOption fee={config!.setupService!.fee} checked={pickedSetupService} onChange={setPickedSetupService} />
+          )}
+          <DialogFooter className="items-center gap-3 sm:justify-between">
+            <span className="text-sm font-semibold">£{pickedTotal} per site / month</span>
+            <Button onClick={startCheckout} disabled={checkoutBusy}>
+              <CreditCard className="w-4 h-4 mr-1.5" /> {checkoutBusy ? "Opening checkout…" : "Continue to checkout"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -1692,7 +2614,10 @@ interface InvoiceRow {
 }
 
 function DataExportCard() {
-  const [busy, setBusy] = useState(false);
+  // The part being downloaded, and how many parts the last download said the
+  // export has (large exports are split; the records are in part 1).
+  const [busy, setBusy] = useState<number | null>(null);
+  const [parts, setParts] = useState(1);
   const { toast } = useToast();
   const canAdmin = useCanAdmin();
   useEffect(() => {
@@ -1706,10 +2631,11 @@ function DataExportCard() {
   }, [canAdmin]);
   if (!canAdmin) return null;
 
-  async function handleExport() {
-    setBusy(true);
+  async function handleExport(part = 1) {
+    setBusy(part);
     try {
-      const res = await apiFetch("/export");
+      // The ZIP needs the raw response; the JSON helper above would return null.
+      const res = await authenticatedApiFetch(part === 1 ? "/export" : `/export?part=${part}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error((err as any).error ?? `Export failed (${res.status})`);
@@ -1719,15 +2645,27 @@ function DataExportCard() {
       const a = document.createElement("a");
       a.href = url;
       const date = new Date().toISOString().slice(0, 10);
-      a.download = `complytrack-export-${date}.zip`;
+      const incomplete = res.headers.get("X-Export-Status") === "incomplete";
+      const total = Math.max(1, Number(res.headers.get("X-Export-Parts")) || 1);
+      setParts(total);
+      const partSuffix = total > 1 ? `-part-${part}-of-${total}` : "";
+      a.download = `complytrack-export-${date}${partSuffix}${incomplete ? "-INCOMPLETE" : ""}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      if (incomplete) {
+        const omitted = Number(res.headers.get("X-Export-Omitted-Datasets")) || 0;
+        toast({
+          title: "Export incomplete",
+          description: `${omitted || "Some"} dataset${omitted === 1 ? "" : "s"} could not be exported. The ZIP's export-errors.csv lists what is missing and why; try again later or contact support.`,
+          variant: "destructive",
+        });
+      }
     } catch (err: any) {
       toast({ title: "Export failed", description: err.message, variant: "destructive" });
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
@@ -1736,7 +2674,7 @@ function DataExportCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Download className="w-5 h-5 text-primary" />
-          <CardTitle className="font-display">Data Export</CardTitle>
+          <CardTitle className="font-display font-bold">Data Export</CardTitle>
         </div>
         <CardDescription>
           Download all your compliance records as a ZIP file containing CSVs for every module — food safety, fire safety, documents, training, contractors and more. Useful before cancelling or for offline audit archives.
@@ -1747,26 +2685,42 @@ function DataExportCard() {
           <div className="flex-1 text-sm text-muted-foreground space-y-1">
             <p>The export includes every record scoped to your account: sites, departments, staff, all compliance logs and contractor records.</p>
             <p className="text-xs">Available private file attachments (PDFs, photos) are included in the ZIP. Check its manifest for any files that could not be bundled.</p>
+            {parts > 1 && (
+              <p className="text-xs font-medium text-foreground">Your files are split into {parts} downloads. Download each part and unzip them into the same folder; the records are in part 1.</p>
+            )}
           </div>
-          <Button onClick={handleExport} disabled={busy} className="shrink-0 gap-2">
-            {busy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-            {busy ? "Preparing…" : "Export all data"}
+          <Button onClick={() => handleExport(1)} disabled={busy !== null} className="shrink-0 gap-2">
+            {busy === 1 ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            {busy === 1 ? "Preparing…" : parts > 1 ? `Download part 1 of ${parts}` : "Export all data"}
           </Button>
         </div>
+        {parts > 1 && (
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
+            {Array.from({ length: parts - 1 }, (_, i) => i + 2).map((part) => (
+              <Button key={part} variant="outline" onClick={() => handleExport(part)} disabled={busy !== null} className="gap-2">
+                {busy === part ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                {busy === part ? "Preparing…" : `Download part ${part} of ${parts}`}
+              </Button>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
 }
 
 function InvoicesCard() {
+  const { activeClientId } = useAuth();
   const [invoices, setInvoices] = useState<InvoiceRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch<{ invoices: InvoiceRow[] }>("/billing/invoices")
+    setInvoices(null);
+    setError(null);
+    apiFetch<{ invoices: InvoiceRow[] }>(withBillingClient("/billing/invoices", activeClientId))
       .then((d) => setInvoices(d.invoices))
       .catch((err: any) => setError(err.message || "Couldn't load invoices"));
-  }, []);
+  }, [activeClientId]);
 
   const fmtAmount = (inv: InvoiceRow) => {
     const amount = (inv.status === "paid" ? inv.amountPaid : inv.amountDue) / 100;
@@ -1778,7 +2732,7 @@ function InvoicesCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <FileText className="w-5 h-5 text-primary" />
-          <CardTitle className="font-display">Invoices</CardTitle>
+          <CardTitle className="font-display font-bold">Invoices</CardTitle>
         </div>
         <CardDescription>
           Invoices are issued by Stripe each billing cycle and emailed to you automatically. Download past invoices here.
@@ -1793,7 +2747,7 @@ function InvoicesCard() {
           <div className="py-6 flex justify-center"><div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" /></div>
         ) : invoices.length === 0 ? (
           <div className="text-sm text-muted-foreground">
-            No invoices yet. Your first invoice will appear here after your first billing cycle.
+            No invoices yet. Your first one appears here after your first payment.
           </div>
         ) : (
           <div className="divide-y divide-border">
@@ -1832,10 +2786,123 @@ function InvoicesCard() {
 }
 
 
+// ── Account timezone choices ─────────────────────────────────────────────────
+// Common IANA zones for UK businesses, UK first. A stored zone that is not
+// listed is still offered so saving the form never changes it unasked.
+const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
+  { value: "Europe/London", label: "UK — London (GMT/BST)" },
+  { value: "Europe/Jersey", label: "Jersey" },
+  { value: "Europe/Guernsey", label: "Guernsey" },
+  { value: "Europe/Isle_of_Man", label: "Isle of Man" },
+  { value: "Europe/Gibraltar", label: "Gibraltar" },
+  { value: "Europe/Dublin", label: "Ireland — Dublin" },
+  { value: "Europe/Lisbon", label: "Portugal — Lisbon" },
+  { value: "Atlantic/Canary", label: "Canary Islands" },
+  { value: "Europe/Paris", label: "France — Paris" },
+  { value: "Europe/Madrid", label: "Spain — Madrid" },
+  { value: "Europe/Amsterdam", label: "Netherlands — Amsterdam" },
+  { value: "Europe/Brussels", label: "Belgium — Brussels" },
+  { value: "Europe/Berlin", label: "Germany — Berlin" },
+  { value: "Europe/Zurich", label: "Switzerland — Zurich" },
+  { value: "Europe/Rome", label: "Italy — Rome" },
+  { value: "Europe/Athens", label: "Greece — Athens" },
+  { value: "America/New_York", label: "US — Eastern (New York)" },
+  { value: "America/Chicago", label: "US — Central (Chicago)" },
+  { value: "America/Denver", label: "US — Mountain (Denver)" },
+  { value: "America/Los_Angeles", label: "US — Pacific (Los Angeles)" },
+  { value: "America/Toronto", label: "Canada — Toronto" },
+  { value: "Asia/Dubai", label: "UAE — Dubai" },
+  { value: "Asia/Singapore", label: "Singapore" },
+  { value: "Asia/Hong_Kong", label: "Hong Kong" },
+  { value: "Australia/Sydney", label: "Australia — Sydney" },
+  { value: "Pacific/Auckland", label: "New Zealand — Auckland" },
+  { value: "UTC", label: "UTC" },
+];
+
+function timezoneLabel(timeZone: string): string {
+  return TIMEZONE_OPTIONS.find((option) => option.value === timeZone)?.label ?? timeZone;
+}
+
+// ── SafeTrack reminder preview ───────────────────────────────────────────────
+// Runs the scheduler's own rules (shared with the API) on the form's current,
+// possibly unsaved, values. Informational only: the server decides each send.
+function SafeTrackReminderPreview({ frequency, time, timeZone, lastSentAt, unsaved }: {
+  frequency: string;
+  time: string;
+  timeZone: string;
+  lastSentAt: string | null;
+  unsaved: boolean;
+}) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const schedule = parseSafeTrackReminderSettings({
+    safeTrackReminderFrequency: frequency,
+    safeTrackReminderTime: time,
+    accountTimezone: timeZone,
+  });
+  const lastSent = lastSentAt && !Number.isNaN(Date.parse(lastSentAt)) ? new Date(lastSentAt) : null;
+  const next = useMemo(
+    () => nextSafeTrackReminder(now, schedule, lastSent),
+    [now, schedule.frequency, schedule.time, schedule.timeZone, lastSentAt],
+  );
+
+  const dayKey = (at: Date) => new Intl.DateTimeFormat("en-CA", {
+    timeZone: schedule.timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(at);
+  const describe = (at: Date) => {
+    const today = dayKey(now);
+    const tomorrow = new Date(Date.parse(`${today}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+    const day = dayKey(at) === today ? "Today"
+      : dayKey(at) === tomorrow ? "Tomorrow"
+      : new Intl.DateTimeFormat("en-GB", { timeZone: schedule.timeZone, weekday: "long", day: "numeric", month: "long" }).format(at);
+    const clock = new Intl.DateTimeFormat("en-GB", { timeZone: schedule.timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(at);
+    return `${day} at ${clock}`;
+  };
+
+  return (
+    <div
+      className="rounded-md border border-primary/20 bg-background p-3 text-sm space-y-1.5"
+      role="status"
+      aria-live="polite"
+      data-testid="safetrack-reminder-preview"
+    >
+      <div className="flex items-start gap-2">
+        <CalendarClock className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+        <p>
+          <span className="font-medium">Next expected reminder: </span>
+          {next ? describe(next.at) : "Not scheduled"}
+          <span className="text-muted-foreground"> ({timezoneLabel(schedule.timeZone)})</span>
+        </p>
+      </div>
+      <div className="text-xs text-muted-foreground space-y-1 pl-6">
+        {next?.late && (
+          <p>
+            Today's delivery time has passed and no reminder has gone out yet, so it is due at the next check.
+          </p>
+        )}
+        {time !== schedule.time && <p>No valid time entered, so the default of {schedule.time} applies.</p>}
+        <p>
+          Times use the account timezone, set under General Preferences above.
+          {schedule.frequency === "weekly" ? " Weekly reminders go out on Mondays." : ""}
+        </p>
+        <p>
+          This is a guide, not a booking. A reminder is only sent if SafeTrack sign-offs are still outstanding then.
+          The server checks every {SAFE_TRACK_REMINDER_CHECK_MINUTES} minutes, so an email can arrive a few minutes after the time shown.
+        </p>
+        {lastSent && <p>Last reminder sent: {describe(lastSent)}.</p>}
+        {unsaved && <p className="text-amber-700 dark:text-amber-400">Previewing unsaved changes. Save settings to apply them.</p>}
+      </div>
+    </div>
+  );
+}
+
 // ── Photo requirement labels ─────────────────────────────────────────────────
 const PHOTO_ENTITY_LABELS: Record<string, string> = {
   fire_safety_check: "FireTrack — fire safety checks",
-  pool_check:        "PoolTrack — pool water tests",
+  pool_check:        "AquaTrack — pool water tests",
   hot_tub_check:     "TubTrack — hot tub checks",
   legionella_check:  "LegionellaTrack — water safety checks",
   tree_inspection:   "TreeTrack — tree inspections",
@@ -1849,10 +2916,10 @@ const PHOTO_ENTITY_LABELS: Record<string, string> = {
   green_pre_use_check:       "GreenTrack — pre-use checks",
   green_service:             "GreenTrack — service records",
   green_defect:              "GreenTrack — defect reports",
-  swim_session:              "SwimTrack — pool sessions",
-  swim_surveillance_check:   "SwimTrack — surveillance checks",
-  swim_first_aid_check:      "SwimTrack — first-aid checks",
-  swim_incident:             "SwimTrack — incident records",
+  swim_session:              "AquaTrack — pool sessions",
+  swim_surveillance_check:   "AquaTrack — surveillance checks",
+  swim_first_aid_check:      "AquaTrack — first-aid checks",
+  swim_incident:             "AquaTrack — incident records",
 };
 
 function PhotoRequirementsCard() {
@@ -1904,7 +2971,7 @@ function PhotoRequirementsCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Camera className="w-5 h-5 text-primary" />
-          <CardTitle className="font-display">Photo Requirements</CardTitle>
+          <CardTitle className="font-display font-bold">Photo Requirements</CardTitle>
         </div>
         <CardDescription>
           Choose which record types must include at least one photo. Staff will see a <strong>Required</strong> badge on those records.
@@ -2076,7 +3143,7 @@ function RequiredActionTemplatesCard() {
   return (
     <Card className="shadow-lg border-border/50 bg-card">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-        <div className="flex items-center gap-2"><ClipboardCheck className="w-5 h-5 text-primary" /><CardTitle className="font-display">Required Action Templates</CardTitle></div>
+        <div className="flex items-center gap-2"><ClipboardCheck className="w-5 h-5 text-primary" /><CardTitle className="font-display font-bold">Required Action Templates</CardTitle></div>
         <CardDescription>Standardise actions for each module. Selecting a template creates an editable snapshot, so later template changes do not alter existing actions.</CardDescription>
       </CardHeader>
       <CardContent className="p-6 space-y-5">
@@ -2088,12 +3155,80 @@ function RequiredActionTemplatesCard() {
           <div className="space-y-1.5"><Label>Default owner</Label><Input value={draft.ownerName} onChange={e => setDraft({ ...draft, ownerName: e.target.value })} placeholder="Role or person" /></div>
           <div className="space-y-1.5"><Label>Lead time (days)</Label><Input type="number" min="0" value={draft.leadTimeDays} onChange={e => setDraft({ ...draft, leadTimeDays: e.target.value })} /></div>
           <div className="space-y-1.5"><Label>Site scope <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.siteId || "all"} onValueChange={siteId => setDraft({ ...draft, siteId: siteId === "all" ? "" : siteId })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All sites</SelectItem>{sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}</SelectContent></Select></div>
-          <div className="space-y-1.5"><Label>Department scope <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.departmentId || "all"} onValueChange={departmentId => setDraft({ ...draft, departmentId: departmentId === "all" ? "" : departmentId })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All departments</SelectItem>{departments.map(department => <SelectItem key={department.id} value={String(department.id)}>{department.name}</SelectItem>)}</SelectContent></Select></div>
+          <div className="space-y-1.5"><Label>Department scope <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.departmentId || "all"} onValueChange={departmentId => setDraft({ ...draft, departmentId: departmentId === "all" ? "" : departmentId })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All departments</SelectItem>{departments.map(department => <SelectItem key={department.id} value={String(department.id)}>{departmentLabel(department)}</SelectItem>)}</SelectContent></Select></div>
           <div className="flex gap-2 sm:col-span-2"><Button type="button" disabled={busy || !draft.title.trim() || !draft.instruction.trim()} onClick={save}>{editingId ? "Save template" : "Create template"}</Button>{editingId && <Button type="button" variant="outline" onClick={() => { setEditingId(null); setDraft(emptyActionTemplate); }}>Cancel</Button>}</div>
         </div>
         {loading ? <p className="text-sm text-muted-foreground">Loading templates…</p> : templates.length === 0 ? <p className="text-sm text-muted-foreground">No required-action templates yet.</p> : <div className="divide-y rounded-lg border">{[...templates].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)).map((template, index, list) => <div key={template.id} className="flex items-start gap-3 p-4"><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-medium">{template.title}</p><span className={`text-xs ${template.active ?? true ? "text-emerald-700" : "text-muted-foreground"}`}>{template.active ?? true ? "Enabled" : "Disabled"}</span></div><p className="mt-1 text-xs text-muted-foreground">{template.module ? TRACK_SUMMARY_MODULES.find(item => item.key === template.module)?.label ?? template.module : "All modules"} · {template.severity.replace("_", " ")} · {template.ownerDefault || "No owner"} · {template.leadTimeDays ?? 0} day lead time</p>{template.instruction && <p className="mt-1 text-sm text-muted-foreground">Instruction: {template.instruction}</p>}</div><div className="flex flex-wrap gap-1"><Button size="sm" variant="ghost" disabled={busy || index === 0} onClick={() => move(template, -1)}>↑</Button><Button size="sm" variant="ghost" disabled={busy || index === list.length - 1} onClick={() => move(template, 1)}>↓</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => beginEdit(template)}>Edit</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => patchTemplate(template, { active: !(template.active ?? true) })}>{template.active ?? true ? "Disable" : "Enable"}</Button></div></div>)}</div>}
       </CardContent>
     </Card>
+  );
+}
+
+// ── Settings menu ─────────────────────────────────────────────────────────────
+// Settings is split into sections so each one is easy to find. The section is
+// kept in the address (/settings#reminders), so links and emails can open the
+// right one. Older links name a card on the former single page; they still
+// open the section that card now lives in.
+
+type OwnerUpdateFrequency = "daily" | "weekly" | "monthly";
+const parseOwnerUpdateFrequency = (value: unknown): OwnerUpdateFrequency =>
+  value === "daily" || value === "monthly" ? value : "weekly";
+
+type SettingsSectionId = "billing" | "business" | "departments" | "reminders" | "email" | "checks" | "storage" | "security";
+
+const SETTINGS_SECTIONS: { id: SettingsSectionId; label: string; description: string; Icon: typeof Settings2 }[] = [
+  { id: "billing", label: "Billing and services", description: "Your plan, the services on your account, AI features and invoices.", Icon: CreditCard },
+  { id: "business", label: "Business details", description: "Company name, timezone, reminder lead time and type of business.", Icon: Building2 },
+  { id: "departments", label: "Departments and owners", description: "Departments, who sees the Today by department card, and who owns each track.", Icon: Users },
+  { id: "reminders", label: "Reminders and alerts", description: "When reminders are sent, the Owner update and the admin alert email.", Icon: Bell },
+  { id: "email", label: "Email sending", description: "The sender name, address and domain your emails come from.", Icon: Mail },
+  { id: "checks", label: "Checks and photos", description: "Required action templates and when photos must be added.", Icon: ClipboardCheck },
+  { id: "storage", label: "Storage and your data", description: "File storage, downloading all your records and data deletion.", Icon: HardDrive },
+  { id: "security", label: "Sign-in security", description: "Two-step sign-in and passkeys.", Icon: ShieldCheck },
+];
+
+const SETTINGS_SECTION_ALIASES: Record<string, SettingsSectionId> = {
+  ai: "billing",
+  services: "billing",
+  "data-export": "storage",
+  "admin-alert-email": "reminders",
+  "email-sender-section": "email",
+  "email-settings-section": "email",
+};
+
+function settingsSectionFromHash(hash: string): SettingsSectionId {
+  const key = decodeURIComponent(hash.replace(/^#/, ""));
+  return SETTINGS_SECTIONS.find(section => section.id === key)?.id ?? SETTINGS_SECTION_ALIASES[key] ?? "billing";
+}
+
+function SettingsMenu({ active, onSelect }: { active: SettingsSectionId; onSelect: (id: SettingsSectionId) => void }) {
+  return (
+    <nav aria-label="Settings menu" className="mb-6 xl:mb-0">
+      <ul className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-1 xl:gap-1">
+        {SETTINGS_SECTIONS.map(({ id, label, Icon }) => {
+          const current = id === active;
+          return (
+            <li key={id}>
+              <a
+                href={`#${id}`}
+                onClick={(e) => { e.preventDefault(); onSelect(id); }}
+                aria-current={current ? "page" : undefined}
+                data-testid={`settings-menu-${id}`}
+                className={cn(
+                  "flex h-full items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors xl:border-transparent",
+                  current
+                    ? "border-primary/40 bg-primary/10 text-primary"
+                    : "border-border bg-card text-foreground hover:bg-muted xl:bg-transparent",
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="leading-tight">{label}</span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
   );
 }
 
@@ -2132,14 +3267,35 @@ export default function SettingsPage() {
     maintenanceEmail: "",
     additionalReminderEmails: "",
     notifyClientAdmins: "false",
-    safeTrackReminderFrequency: "daily",
-    safeTrackReminderTime: "08:50",
+    ownerUpdateFrequency: "weekly" as OwnerUpdateFrequency,
     smtpFrom: "",
     smtpFromName: "",
     resendApiKey: "",
     accountTimezone: "Europe/London",
   });
 
+  // The section shown follows the address, so links and the browser's back
+  // button open the right one.
+  const hash = useLocationProperty(() => window.location.hash);
+  const section = settingsSectionFromHash(hash);
+  const openSection = (id: SettingsSectionId) => {
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#${id}`);
+  };
+
+  // "Set the admin alert email" (Getting started) opens Reminders and alerts
+  // with the field in view and ready to type in.
+  const focusAlertEmail = hash === "#admin-alert-email";
+  useEffect(() => {
+    if (!focusAlertEmail || isLoading || billingLocked) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      const field = document.getElementById("admin-alert-email");
+      field?.scrollIntoView({ block: "center" });
+      document.getElementById("notificationEmail")?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusAlertEmail, isLoading, billingLocked]);
+
+  const [reminderTimings, setReminderTimings] = useState<ReminderTimings>({});
   const [testEmail, setTestEmail] = useState("");
 
   useEffect(() => {
@@ -2152,13 +3308,13 @@ export default function SettingsPage() {
         maintenanceEmail: (settings as any).maintenanceEmail || "",
         additionalReminderEmails: (settings as any).additionalReminderEmails || "",
         notifyClientAdmins: (settings as any).notifyClientAdmins || "false",
-        safeTrackReminderFrequency: (settings as any).safeTrackReminderFrequency || "daily",
-        safeTrackReminderTime: (settings as any).safeTrackReminderTime || "08:50",
+        ownerUpdateFrequency: parseOwnerUpdateFrequency(settings.ownerUpdateFrequency),
         smtpFrom: settings.smtpFrom || "",
         smtpFromName: settings.smtpFromName || "",
         resendApiKey: (settings as any).resendApiKey || "",
         accountTimezone: settings.accountTimezone || "Europe/London",
       });
+      setReminderTimings(parseReminderTimings(settings.reminderTimings));
     }
   }, [settings]);
 
@@ -2168,7 +3324,12 @@ export default function SettingsPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    await updateSettings.mutateAsync({ data: formData });
+    await updateSettings.mutateAsync({
+      data: {
+        ...formData,
+        reminderTimings: Object.keys(reminderTimings).length ? JSON.stringify(reminderTimings) : null,
+      },
+    });
   };
 
   const handleTestEmail = async () => {
@@ -2176,283 +3337,552 @@ export default function SettingsPage() {
     await triggerTestEmail.mutateAsync({ data: { to: testEmail } });
   };
 
+  // Locked (trial ended or cancelled): the full export stays available for the
+  // 12 months the records are kept, next to the deletion request.
   if (billingLocked) return (
     <AppLayout title="Settings">
-      <div className="max-w-4xl"><DataDeletionRequestCard /></div>
+      <div className="max-w-4xl space-y-6"><DataExportCard /><DataDeletionRequestCard /></div>
     </AppLayout>
   );
   if (isLoading) return <AppLayout title="Settings"><div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mt-10" /></AppLayout>;
 
+  const sectionInfo = SETTINGS_SECTIONS.find(entry => entry.id === section)!;
+
   return (
-    <AppLayout title="System Settings">
-      <div className="max-w-4xl space-y-6">
-        <BillingCard />
-        <InvoicesCard />
-        {canAdmin && <StorageUsageCard />}
-        <DataExportCard />
-        <DataDeletionRequestCard />
-        <DepartmentsCard />
-        {canAdmin && <RequiredActionTemplatesCard />}
-        <TrackSummaryRoutingCard />
-        <PhotoRequirementsCard />
-        <form onSubmit={handleSave}>
-          <Card className="shadow-lg border-border/50 bg-card mb-6">
-            <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-              <div className="flex items-center gap-2">
-                <Settings2 className="w-5 h-5 text-primary" />
-                <CardTitle className="font-display">General Preferences</CardTitle>
-              </div>
-              <CardDescription>Global configuration for the compliance tracker.</CardDescription>
-            </CardHeader>
-            <CardContent className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-1.5 col-span-2 sm:col-span-1">
-                  <Label>Company Name</Label>
-                  <Input name="companyName" value={formData.companyName} onChange={handleChange} placeholder="Acme Corp" />
-                </div>
-                <div className="space-y-1.5 col-span-2 sm:col-span-1">
-                  <Label>Default Reminder Lead Time (Days)</Label>
-                  <p className="text-xs text-muted-foreground">Reminders sent this many days before a check is due. Default: 30 days.</p>
-                  <Input type="number" name="defaultLeadTimeDays" value={formData.defaultLeadTimeDays} onChange={handleChange} />
-                </div>
-                <div className="space-y-1.5 col-span-2">
-                  <Label>Account Timezone</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Used for daily entry dates and the staff correction cutoff. Enter an IANA timezone such as Europe/London or America/New_York. Existing accounts default to Europe/London.
-                  </p>
-                  <Input
-                    name="accountTimezone"
-                    value={formData.accountTimezone}
-                    onChange={handleChange}
-                    placeholder="Europe/London"
-                    autoComplete="off"
-                  />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+    <AppLayout title="Settings">
+      <div className="max-w-6xl xl:grid xl:grid-cols-[15rem_minmax(0,1fr)] xl:gap-8 xl:items-start">
+        <SettingsMenu active={section} onSelect={openSection} />
+        <div className="max-w-4xl min-w-0 space-y-6" data-testid={`settings-section-${section}`}>
+          <div>
+            <h2 className="flex items-center gap-2 font-display text-xl font-bold text-foreground">
+              <sectionInfo.Icon className="h-5 w-5 text-primary" />
+              {sectionInfo.label}
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">{sectionInfo.description}</p>
+          </div>
 
-          <Card className="shadow-lg border-border/50 bg-card mb-6">
-            <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-              <div className="flex items-center gap-2">
-                <Bell className="w-5 h-5 text-amber-500" />
-                <CardTitle className="font-display">Reminder Notifications</CardTitle>
-              </div>
-              <CardDescription>
-                Reminders are sent automatically to contractors every day at 8am when a compliance check enters its lead-time window.
-                You can also copy in a maintenance contact on every reminder email.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-6 space-y-5">
-              <div className="rounded-md border border-border bg-muted/30 p-4 space-y-3">
-                <div>
-                  <Label>SafeTrack acknowledgement reminders</Label>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Choose how often account admins and staff are reminded about outstanding SafeTrack sign-offs.
-                    The delivery time uses your account timezone.
-                  </p>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="safeTrackReminderFrequency">Frequency</Label>
-                    <Select
-                      value={formData.safeTrackReminderFrequency}
-                      onValueChange={(value) =>
-                        setFormData((prev) => ({ ...prev, safeTrackReminderFrequency: value }))
-                      }
-                    >
-                      <SelectTrigger id="safeTrackReminderFrequency">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="daily">Every day</SelectItem>
-                        <SelectItem value="weekly">Once a week</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="safeTrackReminderTime">Preferred delivery time</Label>
-                    <Input
-                      id="safeTrackReminderTime"
-                      type="time"
-                      name="safeTrackReminderTime"
-                      value={formData.safeTrackReminderTime}
-                      onChange={handleChange}
-                    />
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Admin / Owner Notification Email</Label>
-                <p className="text-xs text-muted-foreground">
-                  All compliance alert emails (overdue checks, unacknowledged documents, expiring contractor insurance, training certificates)
-                  will be sent to this address. If left blank, alerts go to each admin user on your account instead.
-                </p>
-                <Input
-                  type="email"
-                  name="notificationEmail"
-                  value={formData.notificationEmail}
-                  onChange={handleChange}
-                  placeholder="owner@yourcompany.com"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>Contractor expiry warning lead time (days)</Label>
-                <p className="text-xs text-muted-foreground">
-                  Send insurance, DBS / PVG, and certificate warnings this many days before expiry. Existing accounts use 30 days.
-                </p>
-                <Input
-                  type="number"
-                  name="contractorComplianceLeadTimeDays"
-                  min="0"
-                  max="365"
-                  step="1"
-                  value={formData.contractorComplianceLeadTimeDays}
-                  onChange={handleChange}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>Maintenance / Office CC Emails</Label>
-                <p className="text-xs text-muted-foreground">
-                  These addresses will be copied on every contractor reminder email. Separate multiple addresses with a comma.
-                </p>
-                <Input
-                  name="maintenanceEmail"
-                  value={formData.maintenanceEmail}
-                  onChange={handleChange}
-                  placeholder="maintenance@yourcompany.com, office@yourcompany.com"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>Additional Recipients</Label>
-                <p className="text-xs text-muted-foreground">
-                  Optional extra addresses to copy on reminders — useful for site managers, directors, or external auditors. Separate with commas, semicolons, or new lines.
-                </p>
-                <Textarea
-                  name="additionalReminderEmails"
-                  value={formData.additionalReminderEmails}
-                  onChange={handleChange}
-                  rows={2}
-                  placeholder="director@yourcompany.com, sitemanager@yourcompany.com"
-                />
-              </div>
-
-              <label className="flex items-start gap-2.5 rounded-md border border-border bg-muted/30 p-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
-                  checked={formData.notifyClientAdmins === "true"}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, notifyClientAdmins: e.target.checked ? "true" : "false" }))
-                  }
-                />
-                <span className="text-sm">
-                  <span className="font-medium">Always copy account admins on every reminder</span>
-                  <span className="block text-xs text-muted-foreground mt-0.5">
-                    When ticked, every reminder email is automatically copied to the email address of every active admin user on this account — including yours when you trigger a manual send.
-                  </span>
-                </span>
-              </label>
-            </CardContent>
-          </Card>
-
-          {showEmailGuide && (
-            <EmailSetupGuide
-              settings={(settings as any) ?? {}}
-              onDismiss={handleDismissGuide}
-            />
+          {section === "billing" && (
+            <>
+              <BillingCard />
+              <InvoicesCard />
+            </>
           )}
 
-          <div id="email-sender-section">
-            <SenderDomainCard />
-          </div>
+          {section === "business" && (
+            <>
+              <form onSubmit={handleSave}>
+              <Card className="shadow-lg border-border/50 bg-card mb-6">
+                <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+                  <div className="flex items-center gap-2">
+                    <Settings2 className="w-5 h-5 text-primary" />
+                    <CardTitle className="font-display font-bold">General Preferences</CardTitle>
+                  </div>
+                  <CardDescription>Global configuration for the compliance tracker.</CardDescription>
+                </CardHeader>
+                <CardContent className="p-6 space-y-4">
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="space-y-1.5 col-span-2 sm:col-span-1">
+                      <Label>Company Name</Label>
+                      <Input name="companyName" value={formData.companyName} onChange={handleChange} placeholder="Acme Corp" />
+                    </div>
+                    <div className="space-y-1.5 col-span-2 sm:col-span-1">
+                      <Label>Default Reminder Lead Time (Days)</Label>
+                      <p className="text-xs text-muted-foreground">Reminders sent this many days before a check is due. Default: 30 days.</p>
+                      <Input type="number" name="defaultLeadTimeDays" value={formData.defaultLeadTimeDays} onChange={handleChange} />
+                    </div>
+                    <div className="space-y-1.5 col-span-2">
+                      <Label>Account Timezone</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Used for daily entry dates, the staff correction cutoff and SafeTrack reminder times. Existing accounts default to UK time (Europe/London).
+                      </p>
+                      <Select
+                        value={formData.accountTimezone || "Europe/London"}
+                        onValueChange={(value) => setFormData((prev) => ({ ...prev, accountTimezone: value }))}
+                      >
+                        <SelectTrigger aria-label="Account timezone" data-testid="select-account-timezone">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {formData.accountTimezone && !TIMEZONE_OPTIONS.some(o => o.value === formData.accountTimezone) && (
+                            <SelectItem value={formData.accountTimezone}>{formData.accountTimezone}</SelectItem>
+                          )}
+                          {TIMEZONE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </CardContent>
+                <CardFooter className="bg-muted/10 border-t border-border/50 p-6 flex justify-end">
+                  <Button type="submit" disabled={updateSettings.isPending} className="shadow-lg shadow-primary/20">
+                    {updateSettings.isPending ? "Saving..." : "Save Settings"}
+                  </Button>
+                </CardFooter>
+              </Card>
+              </form>
+              {canAdmin && <BusinessTypeCard />}
+            </>
+          )}
 
-          <div id="email-settings-section">
-          <Card className="shadow-lg border-border/50 bg-card">
-            <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-              <div className="flex items-center gap-2">
-                <Mail className="w-5 h-5 text-indigo-500" />
-                <CardTitle className="font-display">Email Settings</CardTitle>
-              </div>
-              <CardDescription>
-                Choose the sender name and email address your recipients will see. We handle delivery for you.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-6 space-y-4">
-              <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm text-blue-800">
-                <Mail className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                Add your sender details below, then send a test email to confirm everything is working.
-              </div>
-              <div className="grid grid-cols-2 gap-6 pt-2">
-                <div className="space-y-1.5 col-span-2 sm:col-span-1">
-                  <Label>Sender email address</Label>
-                  <p className="text-xs text-muted-foreground">This is the address contractors and staff will see.</p>
-                  <Input name="smtpFrom" value={formData.smtpFrom} onChange={handleChange} placeholder="compliance@yourcompany.com" />
-                </div>
-                <div className="space-y-1.5 col-span-2 sm:col-span-1">
-                  <Label>Sender name</Label>
-                  <Input name="smtpFromName" value={formData.smtpFromName} onChange={handleChange} placeholder="Acme Compliance Team" />
-                </div>
-              </div>
+          {section === "departments" && (
+            <>
+              <DepartmentsCard />
+              {canAdmin && <TodayByDepartmentRolesCard />}
+              <TrackOwnersCard />
+            </>
+          )}
 
-              <details className="pt-2 border-t border-border/50 mt-2">
-                <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
-                  Advanced email settings
-                </summary>
-                <div className="space-y-1.5 pt-3">
-                  <Label>Use your own email provider account</Label>
+          {section === "reminders" && (
+            <form onSubmit={handleSave}>
+            <Card className="shadow-lg border-border/50 bg-card mb-6">
+              <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+                <div className="flex items-center gap-2">
+                  <Bell className="w-5 h-5 text-amber-500" />
+                  <CardTitle className="font-display font-bold">Reminder Notifications</CardTitle>
+                </div>
+                <CardDescription>
+                  Each person gets one email at 8am, only on days when something of theirs needs a reminder: by default the day
+                  before it is due, then the day after if it goes overdue and once a week after that (change this per type below). Anything with no one assigned goes to the track's owner,
+                  or to the Owners when no owner is set (see Departments and owners). Urgent actions (including checks recorded as unsafe), critical
+                  compliance checks and new FixTrack issues are emailed as soon as they are raised. On Mondays, everyone on the staff
+                  roster with an email is also sent their own outstanding training (expired or expiring, and anything to sign).
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-6 space-y-5">
+                <div className="space-y-1.5">
+                  <Label htmlFor="ownerUpdateFrequency">Owner update</Label>
                   <p className="text-xs text-muted-foreground">
-                    Most clients can leave this blank. Only use this if your administrator has asked you to connect a separate email account.
+                    One email to the Owners listing what was done, what is overdue and who has it, what is due, anything with no one
+                    assigned, expiries in the next 60 days, each person's outstanding training (TrainTrack) and documents still to sign. Managers get one for their own departments, weekly
+                    when you choose monthly. Sent at 8am in your account timezone. Choosing monthly doesn't hold anything back: urgent items still come the same day,
+                    and each person still gets their own reminders.
+                  </p>
+                  <Select
+                    value={formData.ownerUpdateFrequency}
+                    onValueChange={(value) =>
+                      setFormData((prev) => ({ ...prev, ownerUpdateFrequency: parseOwnerUpdateFrequency(value) }))
+                    }
+                  >
+                    <SelectTrigger id="ownerUpdateFrequency" className="sm:w-64">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="daily">Every day</SelectItem>
+                      <SelectItem value="weekly">Weekly, on Mondays</SelectItem>
+                      <SelectItem value="monthly">Monthly, on the first Monday</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <ReminderTimingsField
+                  value={reminderTimings}
+                  onChange={setReminderTimings}
+                  contractorLeadDays={Number(formData.contractorComplianceLeadTimeDays) || 30}
+                />
+                <div
+                  id="admin-alert-email"
+                  className={cn(
+                    "space-y-1.5 scroll-mt-6 rounded-md transition-shadow",
+                    focusAlertEmail && "ring-2 ring-primary/60 ring-offset-4 ring-offset-card",
+                  )}
+                >
+                  <Label htmlFor="notificationEmail">Admin alert email</Label>
+                  <p className="text-xs text-muted-foreground">
+                    The Owner update goes to this address instead of to each Owner. If left blank, each Owner gets it.
                   </p>
                   <Input
-                    name="resendApiKey"
-                    type="password"
-                    autoComplete="off"
-                    value={formData.resendApiKey}
+                    id="notificationEmail"
+                    type="email"
+                    name="notificationEmail"
+                    value={formData.notificationEmail}
                     onChange={handleChange}
-                    placeholder="Optional provider key"
+                    placeholder="owner@yourcompany.com"
                   />
                 </div>
-              </details>
-            </CardContent>
-            <CardFooter className="bg-muted/10 border-t border-border/50 p-6 flex justify-between items-center">
-              <div className="flex items-center gap-3">
-                <Input
-                  placeholder="Send a test to…"
-                  value={testEmail}
-                  onChange={(e) => setTestEmail(e.target.value)}
-                  className="w-64"
-                />
-                <Button type="button" variant="secondary" onClick={handleTestEmail} disabled={triggerTestEmail.isPending || !testEmail}>
-                  <Send className="w-4 h-4 mr-2" /> {triggerTestEmail.isPending ? "Sending..." : "Send test email"}
-                </Button>
-              </div>
-              <Button type="submit" disabled={updateSettings.isPending} className="shadow-lg shadow-primary/20">
-                {updateSettings.isPending ? "Saving..." : "Save Settings"}
-              </Button>
-            </CardFooter>
-          </Card>
-          </div>
-        </form>
 
-        {/* Two-Factor Authentication */}
-        <TwoFactorCard key={user?.id ?? "signed-out"} />
-        <PasskeyCard />
+                <div className="space-y-1.5">
+                  <Label>Contractor expiry warning lead time (days)</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Insurance, DBS / PVG and certificate reminders go to your Maintenance managers (or the Owners) this many days
+                    before expiry, and again the day before. Existing accounts use 30 days.
+                  </p>
+                  <Input
+                    type="number"
+                    name="contractorComplianceLeadTimeDays"
+                    min="0"
+                    max="365"
+                    step="1"
+                    value={formData.contractorComplianceLeadTimeDays}
+                    onChange={handleChange}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label>Maintenance / Office CC Emails</Label>
+                  <p className="text-xs text-muted-foreground">
+                    These addresses will be copied on every contractor reminder email. Separate multiple addresses with a comma.
+                  </p>
+                  <Input
+                    name="maintenanceEmail"
+                    value={formData.maintenanceEmail}
+                    onChange={handleChange}
+                    placeholder="maintenance@yourcompany.com, office@yourcompany.com"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label>Additional Recipients</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Optional extra addresses to copy on reminders — useful for site managers, directors, or external auditors. Separate with commas, semicolons, or new lines.
+                  </p>
+                  <Textarea
+                    name="additionalReminderEmails"
+                    value={formData.additionalReminderEmails}
+                    onChange={handleChange}
+                    rows={2}
+                    placeholder="director@yourcompany.com, sitemanager@yourcompany.com"
+                  />
+                </div>
+
+                <label className="flex items-start gap-2.5 rounded-md border border-border bg-muted/30 p-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+                    checked={formData.notifyClientAdmins === "true"}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, notifyClientAdmins: e.target.checked ? "true" : "false" }))
+                    }
+                  />
+                  <span className="text-sm">
+                    <span className="font-medium">Always copy account admins on every reminder</span>
+                    <span className="block text-xs text-muted-foreground mt-0.5">
+                      When ticked, every reminder email is automatically copied to the email address of every active admin user on this account — including yours when you trigger a manual send.
+                    </span>
+                  </span>
+                </label>
+              </CardContent>
+              <CardFooter className="bg-muted/10 border-t border-border/50 p-6 flex justify-end">
+                <Button type="submit" disabled={updateSettings.isPending} className="shadow-lg shadow-primary/20">
+                  {updateSettings.isPending ? "Saving..." : "Save Settings"}
+                </Button>
+              </CardFooter>
+            </Card>
+            </form>
+          )}
+
+          {section === "email" && (
+            <form onSubmit={handleSave}>
+            {showEmailGuide && (
+              <EmailSetupGuide
+                settings={(settings as any) ?? {}}
+                onDismiss={handleDismissGuide}
+              />
+            )}
+
+            <div id="email-sender-section">
+              <SenderDomainCard />
+            </div>
+
+            <div id="email-settings-section">
+            <Card className="shadow-lg border-border/50 bg-card">
+              <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+                <div className="flex items-center gap-2">
+                  <Mail className="w-5 h-5 text-indigo-500" />
+                  <CardTitle className="font-display font-bold">Email Settings</CardTitle>
+                </div>
+                <CardDescription>
+                  Choose the sender name and email address your recipients will see. We handle delivery for you.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-6 space-y-4">
+                <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm text-blue-800">
+                  <Mail className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                  Add your sender details below, then send a test email to confirm everything is working.
+                </div>
+                <div className="grid grid-cols-2 gap-6 pt-2">
+                  <div className="space-y-1.5 col-span-2 sm:col-span-1">
+                    <Label>Sender email address</Label>
+                    <p className="text-xs text-muted-foreground">This is the address contractors and staff will see.</p>
+                    <Input name="smtpFrom" value={formData.smtpFrom} onChange={handleChange} placeholder="compliance@yourcompany.com" />
+                  </div>
+                  <div className="space-y-1.5 col-span-2 sm:col-span-1">
+                    <Label>Sender name</Label>
+                    <Input name="smtpFromName" value={formData.smtpFromName} onChange={handleChange} placeholder="Acme Compliance Team" />
+                  </div>
+                </div>
+
+                <details className="pt-2 border-t border-border/50 mt-2">
+                  <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
+                    Advanced email settings
+                  </summary>
+                  <div className="space-y-1.5 pt-3">
+                    <Label>Use your own email provider account</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Most clients can leave this blank. Only use this if your administrator has asked you to connect a separate email account.
+                    </p>
+                    <Input
+                      name="resendApiKey"
+                      type="password"
+                      autoComplete="off"
+                      value={formData.resendApiKey}
+                      onChange={handleChange}
+                      placeholder={(settings as any)?.resendApiKeySet ? "Saved key (leave blank to keep it)" : "Optional provider key"}
+                    />
+                    {(settings as any)?.resendApiKeySet && (
+                      <div className="flex items-center justify-between gap-3 pt-1">
+                        <p className="text-xs text-muted-foreground">A provider key is saved. Leaving the box blank keeps it.</p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          data-testid="button-remove-provider-key"
+                          disabled={updateSettings.isPending}
+                          onClick={() => updateSettings.mutate({ data: { resendApiKey: null } as AppSettings })}
+                        >
+                          Remove key
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </details>
+              </CardContent>
+              <CardFooter className="bg-muted/10 border-t border-border/50 p-6 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <Input
+                    placeholder="Send a test to…"
+                    value={testEmail}
+                    onChange={(e) => setTestEmail(e.target.value)}
+                    className="w-64"
+                  />
+                  <Button type="button" variant="secondary" onClick={handleTestEmail} disabled={triggerTestEmail.isPending || !testEmail}>
+                    <Send className="w-4 h-4 mr-2" /> {triggerTestEmail.isPending ? "Sending..." : "Send test email"}
+                  </Button>
+                </div>
+                <Button type="submit" disabled={updateSettings.isPending} className="shadow-lg shadow-primary/20">
+                  {updateSettings.isPending ? "Saving..." : "Save Settings"}
+                </Button>
+              </CardFooter>
+            </Card>
+            </div>
+            </form>
+          )}
+
+          {section === "checks" && (
+            <>
+              {canAdmin && <RequiredActionTemplatesCard />}
+              <PhotoRequirementsCard />
+            </>
+          )}
+
+          {section === "storage" && (
+            <>
+              {canAdmin && <StorageUsageCard />}
+              <DataExportCard />
+              <DataDeletionRequestCard />
+            </>
+          )}
+
+          {section === "security" && (
+            <>
+              {canAdmin && <TwoFactorPolicyCard />}
+              <TwoFactorCard key={user?.id ?? "signed-out"} />
+              <PasskeyCard />
+            </>
+          )}
+        </div>
       </div>
     </AppLayout>
   );
 }
 
+// ── Organisation two-factor requirement (managers only) ─────────────────────
+// ── Today by department: who sees the dashboard card ─────────────────────────
+
+type TodayByDepartmentRoles = { managers: boolean; maintenance: boolean; staff: boolean };
+
+// Matches DEFAULT_TODAY_BY_DEPARTMENT_ROLES in api-server lib/todayByDepartment.ts.
+const DEFAULT_TODAY_BY_DEPARTMENT_ROLES: TodayByDepartmentRoles = { managers: true, maintenance: true, staff: false };
+
+function parseTodayByDepartmentRoles(value: unknown): TodayByDepartmentRoles {
+  try {
+    const parsed = typeof value === "string" && value ? JSON.parse(value) : {};
+    const pick = (key: keyof TodayByDepartmentRoles) =>
+      typeof parsed?.[key] === "boolean" ? parsed[key] as boolean : DEFAULT_TODAY_BY_DEPARTMENT_ROLES[key];
+    return { managers: pick("managers"), maintenance: pick("maintenance"), staff: pick("staff") };
+  } catch {
+    return DEFAULT_TODAY_BY_DEPARTMENT_ROLES;
+  }
+}
+
+const TODAY_BY_DEPARTMENT_ROLE_OPTIONS: Array<{ key: keyof TodayByDepartmentRoles; label: string; help: string }> = [
+  { key: "managers", label: "Heads of Department", help: "Managers see bars for the departments they look after." },
+  { key: "maintenance", label: "Maintenance managers", help: "See bars for their own department(s)." },
+  { key: "staff", label: "Staff", help: "See their own department's bar only." },
+];
+
+function TodayByDepartmentRolesCard() {
+  const { activeClientId } = useAuth();
+  const { toast } = useToast();
+  const clientApi = useActiveClientApi();
+  const [roles, setRoles] = useState<TodayByDepartmentRoles | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRoles(null);
+    clientApi("/settings")
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
+        if (!cancelled) setRoles(parseTodayByDepartmentRoles(data?.todayByDepartmentRoles));
+      })
+      .catch((err: Error) => {
+        if (!cancelled) toast({ title: "Couldn't load who sees Today by department", description: err.message, variant: "destructive" });
+      });
+    return () => { cancelled = true; };
+  }, [activeClientId]);
+
+  async function change(key: keyof TodayByDepartmentRoles, value: boolean) {
+    if (!roles) return;
+    const next = { ...roles, [key]: value };
+    setSaving(true);
+    try {
+      const res = await clientApi("/settings", {
+        method: "PUT",
+        body: JSON.stringify({ todayByDepartmentRoles: JSON.stringify(next) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
+      setRoles(parseTodayByDepartmentRoles(data?.todayByDepartmentRoles));
+      toast({ title: "Saved", description: "The dashboard card follows this the next time each person opens it." });
+    } catch (err: any) {
+      toast({ title: "Couldn't save who sees Today by department", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card className="shadow-lg border-border/50 bg-card mb-6" data-testid="card-today-by-department-roles">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <CardTitle className="font-display font-bold text-lg flex items-center gap-2">
+          <Users className="w-4 h-4" /> Today by department on the dashboard
+        </CardTitle>
+        <CardDescription>
+          A bar for each department showing today's checks as done, not done yet or failed. Owners always see every department. Choose who else sees it.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-6 space-y-4">
+        {TODAY_BY_DEPARTMENT_ROLE_OPTIONS.map((option) => (
+          <div key={option.key} className="flex items-center justify-between gap-4">
+            <div className="space-y-1">
+              <Label htmlFor={`today-by-department-${option.key}`}>{option.label}</Label>
+              <p className="text-xs text-muted-foreground">{option.help}</p>
+            </div>
+            <Switch
+              id={`today-by-department-${option.key}`}
+              checked={roles?.[option.key] ?? DEFAULT_TODAY_BY_DEPARTMENT_ROLES[option.key]}
+              disabled={roles === null || saving}
+              onCheckedChange={(checked) => void change(option.key, checked)}
+              data-testid={`switch-today-by-department-${option.key}`}
+            />
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function TwoFactorPolicyCard() {
+  const { activeClientId, refresh } = useAuth();
+  const { toast } = useToast();
+  const clientApi = useActiveClientApi();
+  const [required, setRequired] = useState<boolean | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRequired(null);
+    clientApi("/settings")
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
+        if (!cancelled) setRequired(data?.requireTwoFactor === "true");
+      })
+      .catch((err: Error) => {
+        if (!cancelled) toast({ title: "Couldn't load the two-factor setting", description: err.message, variant: "destructive" });
+      });
+    return () => { cancelled = true; };
+  }, [activeClientId]);
+
+  async function change(next: boolean) {
+    setSaving(true);
+    try {
+      const res = await clientApi("/settings", {
+        method: "PUT",
+        body: JSON.stringify({ requireTwoFactor: next ? "true" : "false" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
+      setRequired(data?.requireTwoFactor === "true");
+      toast({
+        title: next ? "Two-factor authentication is now required" : "Two-factor authentication is now optional",
+        description: next
+          ? "Anyone without an authenticator app will be asked to set one up before they can continue."
+          : "People can sign in with just their password, and can still turn two-factor on for their own account.",
+      });
+      // The signed-in manager may now need to enrol, or may no longer need to.
+      await refresh();
+    } catch (err: any) {
+      toast({ title: "Couldn't change the two-factor setting", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card className="shadow-lg border-border/50 bg-card mb-6" data-testid="card-two-factor-policy">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <CardTitle className="font-display font-bold text-lg flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4" /> Two-factor requirement
+        </CardTitle>
+        <CardDescription>
+          Choose whether everyone who signs in to this business must use an authenticator app.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-6 space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-1">
+            <Label htmlFor="require-two-factor">Require two-factor authentication</Label>
+            <p className="text-xs text-muted-foreground">
+              {required === false
+                ? "Off: staff can sign in with just their password. Anyone can still turn it on for their own account."
+                : "On: every account must set up an authenticator app before using ComplyTrack."}
+            </p>
+          </div>
+          <Switch
+            id="require-two-factor"
+            checked={required ?? true}
+            disabled={required === null || saving}
+            onCheckedChange={(checked) => void change(checked)}
+            data-testid="switch-require-two-factor"
+          />
+        </div>
+        {required === false && (
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-sm px-3 py-2">
+            Turning this off makes accounts easier to break into if a password is guessed or leaked. We recommend leaving it on.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Two-Factor Authentication card ───────────────────────────────────────────
 export function TwoFactorCard() {
-  const { user, refresh } = useAuth();
+  const { user, refresh, twoFactorRequired } = useAuth();
   const { toast } = useToast();
   const passwordInputRef = useRef<HTMLInputElement>(null);
 
-  type SetupStep = "idle" | "loading-qr" | "scanning" | "verifying" | "regenerating";
+  type SetupStep = "idle" | "loading-qr" | "scanning" | "verifying" | "regenerating" | "disabling";
   const [step, setStep] = useState<SetupStep>("idle");
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
@@ -2488,7 +3918,7 @@ export function TwoFactorCard() {
   });
 
   useEffect(() => {
-    if (step === "regenerating") passwordInputRef.current?.focus();
+    if (step === "regenerating" || step === "disabling") passwordInputRef.current?.focus();
   }, [step]);
 
   async function startSetup() {
@@ -2554,6 +3984,30 @@ export function TwoFactorCard() {
     }
   }
 
+  async function handleDisable(e: React.FormEvent) {
+    e.preventDefault();
+    if (regenerationPending) return;
+    setError("");
+    setRegenerationPending(true);
+    try {
+      const response = await authenticatedApiFetch("/auth/2fa/disable", {
+        method: "POST",
+        body: JSON.stringify({ password: regeneratePassword }),
+      });
+      const result = await response.json().catch(() => null) as { error?: string } | null;
+      if (!response.ok) throw new Error(result?.error ?? `Request failed (${response.status})`);
+      setRegeneratePassword("");
+      setRecoveryCodes([]);
+      setStep("idle");
+      toast({ title: "Two-factor authentication turned off" });
+      await refresh();
+    } catch (e: any) {
+      setError(e.message ?? "Failed to turn off two-factor authentication");
+    } finally {
+      setRegenerationPending(false);
+    }
+  }
+
   function downloadRecoveryCodes() {
     const content = `ComplyTrack recovery codes\n\n${recoveryCodes.join("\n")}\n\nEach code can be used once. Store these somewhere safe.`;
     const url = URL.createObjectURL(new Blob([content], { type: "text/plain" }));
@@ -2567,7 +4021,7 @@ export function TwoFactorCard() {
   return (
     <Card className="shadow-lg border-border/50 bg-card mb-6">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-        <CardTitle className="font-display text-lg flex items-center gap-2">
+        <CardTitle className="font-display font-bold text-lg flex items-center gap-2">
           <KeyRound className="w-4 h-4" /> Two-Factor Authentication
         </CardTitle>
         <CardDescription>
@@ -2641,8 +4095,30 @@ export function TwoFactorCard() {
                 <Button variant="outline" className="rounded-sm gap-2" onClick={() => { setError(""); setStep("regenerating"); }} data-testid="button-view-regenerate-recovery-codes">
                   <KeyRound className="w-4 h-4" /> View / regenerate recovery codes
                 </Button>
-                <p className="text-xs text-muted-foreground">Two-factor authentication is required for all ComplyTrack user accounts. Contact an administrator if you lose access to your authenticator.</p>
+                {!twoFactorRequired && (
+                  <Button variant="outline" className="rounded-sm gap-2" onClick={() => { setError(""); setStep("disabling"); }} data-testid="button-disable-two-factor">
+                    <ShieldOff className="w-4 h-4" /> Turn off two-factor authentication
+                  </Button>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  {twoFactorRequired
+                    ? "Your organisation requires two-factor authentication. Contact an administrator if you lose access to your authenticator."
+                    : "Your organisation has made two-factor authentication optional, but we recommend keeping it on."}
+                </p>
               </div>
+            )}
+            {step === "disabling" && (
+              <form onSubmit={handleDisable} className="space-y-3 max-w-sm">
+                <p className="text-sm text-muted-foreground">Enter your password to turn off two-factor authentication. Your recovery codes will stop working.</p>
+                <Input ref={passwordInputRef} type="password" placeholder="Your password" value={regeneratePassword} onChange={e => setRegeneratePassword(e.target.value)} autoFocus disabled={regenerationPending} className="rounded-sm" data-testid="input-disable-two-factor-password" />
+                {error && <p className="text-sm text-destructive">{error}</p>}
+                <div className="flex gap-2">
+                  <Button type="submit" variant="destructive" className="rounded-sm" disabled={!regeneratePassword || regenerationPending} data-testid="button-submit-disable-two-factor">
+                    {regenerationPending ? "Turning off…" : "Turn off"}
+                  </Button>
+                  <Button type="button" variant="outline" className="rounded-sm" disabled={regenerationPending} onClick={() => { setStep("idle"); setError(""); setRegeneratePassword(""); }}>Cancel</Button>
+                </div>
+              </form>
             )}
             {step === "regenerating" && (
               <form onSubmit={handleRegenerate} className="space-y-3 max-w-sm">
@@ -2662,7 +4138,11 @@ export function TwoFactorCard() {
           <div className="space-y-4">
             <div className="flex items-center gap-3 px-4 py-3 rounded-sm bg-amber-50 border border-amber-200 text-amber-800 text-sm">
               <ShieldOff className="w-4 h-4 flex-shrink-0" />
-              <span>Two-factor authentication setup is required before using the application.</span>
+              <span>
+                {twoFactorRequired
+                  ? "Two-factor authentication setup is required before using the application."
+                  : "Two-factor authentication is off for your account. It's optional for your organisation, but we recommend turning it on."}
+              </span>
             </div>
 
             {step === "idle" && (
@@ -2772,13 +4252,13 @@ function PasskeyCard() {
   return (
     <Card className="shadow-lg border-border/50 bg-card mb-6">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-        <CardTitle className="font-display text-lg flex items-center gap-2">
+        <CardTitle className="font-display font-bold text-lg flex items-center gap-2">
           <KeyRound className="w-4 h-4" /> Passkeys
         </CardTitle>
         <CardDescription>
           Sign in on the web with Face ID, Touch ID, your device PIN, or a security key instead of your password.
           Passkeys do not replace two-factor authentication: you will still enter your authenticator code.
-          In the ComplyTrack mobile app, a passkey saved on your phone can replace your password, and you still enter your authenticator code.
+          In the ComplyTrack mobile app, a passkey saved on your phone can replace your password; with two-factor authentication on, you still enter your authenticator code.
           Add it from this page in your phone&apos;s browser, or from Profile in the app.
         </CardDescription>
       </CardHeader>
@@ -2828,21 +4308,22 @@ const MODULES = [
 
 function ModulesCard() {
   const { toast } = useToast();
+  const { activeClientId } = useAuth();
   const [modules, setModules] = useState<ModuleState | null>(null);
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch<ModuleState>("/billing/modules")
+    apiFetch<ModuleState>(withBillingClient("/billing/modules", activeClientId))
       .then(setModules)
       .catch(() => setModules(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [activeClientId]);
 
   const toggle = async (id: "safetrack" | "dailytrack", currentlyEnabled: boolean) => {
     setToggling(id);
     try {
-      const updated = await apiFetch<ModuleState>(`/billing/modules/${id}`, {
+      const updated = await apiFetch<ModuleState>(withBillingClient(`/billing/modules/${id}`, activeClientId), {
         method: "POST",
         body: JSON.stringify({ enabled: !currentlyEnabled }),
       });
@@ -2860,7 +4341,7 @@ function ModulesCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Package className="w-5 h-5 text-primary" />
-          <CardTitle className="font-display">Modules</CardTitle>
+          <CardTitle className="font-display font-bold">Modules</CardTitle>
         </div>
         <CardDescription>
           Activate or deactivate product modules for your account.

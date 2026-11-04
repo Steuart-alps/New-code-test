@@ -1,51 +1,28 @@
-import * as Sentry from "@sentry/react";
 import { createRoot } from "react-dom/client";
 import React from "react";
 import App from "./App";
 import "./index.css";
+import { errorReportsEnabled, initErrorReports, reportError } from "./lib/error-reports";
+import {
+  installNewReleaseReload,
+  isChunkLoadError,
+  isReloadingForNewRelease,
+  reloadForNewRelease,
+} from "./lib/new-release-reload";
+import { installStrayFileDropGuard } from "./hooks/use-file-drop";
 
 // Initialise Sentry before the React tree mounts so all component errors and
-// navigation events are captured from the first render.
-// VITE_SENTRY_DSN is forwarded from the server-side SENTRY_DSN secret via
-// vite.config.ts define — no separate secret needed.
-if (import.meta.env.VITE_SENTRY_DSN) {
-  Sentry.init({
-    dsn: import.meta.env.VITE_SENTRY_DSN as string,
-    environment: import.meta.env.MODE,
-    sendDefaultPii: false,
-    integrations: [Sentry.browserTracingIntegration()],
-    beforeSend(event) {
-      // Links and API calls may include short-lived bearer tokens in their
-      // path or query string. Do not send them to an external error service.
-      const redactUrl = (value: string) => {
-        try {
-          const url = new URL(value, window.location.origin);
-          return `${url.origin}${url.pathname}`.replace(
-            /(\/(?:sign-off|contractor-portal|fix-track\/action|fix-track\/quotes\/public)\/)[^/]+/g,
-            "$1[redacted]",
-          );
-        } catch {
-          return "[redacted]";
-        }
-      };
-      if (event.request) {
-        delete event.request.data;
-        delete event.request.cookies;
-        delete event.request.headers;
-        delete event.request.query_string;
-        if (event.request.url) event.request.url = redactUrl(event.request.url);
-      }
-      event.breadcrumbs?.forEach(breadcrumb => {
-        if (typeof breadcrumb.data?.url === "string") {
-          breadcrumb.data.url = redactUrl(breadcrumb.data.url);
-        }
-      });
-      return event;
-    },
-    // Capture 10 % of page-load / navigation transactions for performance.
-    tracesSampleRate: 0.1,
-  });
-}
+// navigation events are captured from the first render. SENTRY_DSN is read at
+// build time (vite.config.ts); without it nothing is sent.
+initErrorReports();
+
+// A tab left open across a release reloads itself when it asks for a page file
+// the release removed, instead of showing the error page.
+installNewReleaseReload();
+
+// A photo dropped beside an upload box goes into the box (or a message says
+// where to drop it) instead of the browser leaving the app to open the file.
+installStrayFileDropGuard();
 
 // ── Global React error boundary ────────────────────────────────────────────
 // Catches unhandled rendering errors anywhere in the tree and shows a friendly
@@ -54,6 +31,9 @@ if (import.meta.env.VITE_SENTRY_DSN) {
 interface ErrorBoundaryState {
   hasError: boolean;
   message: string;
+  // A page file from before the latest release could not load and the page is
+  // reloading to fetch the new one.
+  reloading: boolean;
 }
 
 class ErrorBoundary extends React.Component<
@@ -62,24 +42,45 @@ class ErrorBoundary extends React.Component<
 > {
   constructor(props: { children: React.ReactNode }) {
     super(props);
-    this.state = { hasError: false, message: "" };
+    this.state = { hasError: false, message: "", reloading: false };
   }
 
   static getDerivedStateFromError(error: unknown): ErrorBoundaryState {
     const message =
       error instanceof Error ? error.message : "An unexpected error occurred.";
-    return { hasError: true, message };
+    const reloading = isReloadingForNewRelease() || isChunkLoadError(error);
+    return { hasError: true, message, reloading };
   }
 
   componentDidCatch(error: unknown, info: React.ErrorInfo) {
-    // Forward to Sentry if it's been initialised
-    if (import.meta.env.VITE_SENTRY_DSN) {
-      Sentry.captureException(error, { extra: { componentStack: info.componentStack } });
+    if (this.state.reloading) {
+      if (reloadForNewRelease()) return;
+      this.setState({ reloading: false });
     }
+    reportError(error, { componentStack: info.componentStack });
     console.error("[ErrorBoundary]", error, info);
   }
 
   render() {
+    if (this.state.hasError && this.state.reloading) {
+      return (
+        <div
+          style={{
+            minHeight: "100vh",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "#f8fafc",
+            fontFamily: "system-ui, sans-serif",
+            fontSize: 14,
+            color: "#64748b",
+            padding: "24px",
+          }}
+        >
+          Loading the latest version of ComplyTrack…
+        </div>
+      );
+    }
     if (this.state.hasError) {
       return (
         <div
@@ -112,8 +113,9 @@ class ErrorBoundary extends React.Component<
               Something went wrong
             </h1>
             <p style={{ fontSize: 14, color: "#64748b", marginBottom: 24 }}>
-              An unexpected error occurred. Our team has been notified. Please
-              try reloading the page — if the problem persists, contact support.
+              An unexpected error occurred.{" "}
+              {errorReportsEnabled() ? "Our team has been notified. " : ""}
+              Please try reloading the page — if the problem persists, contact support.
             </p>
             {this.state.message && (
               <p

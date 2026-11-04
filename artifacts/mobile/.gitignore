@@ -39,3 +39,6 @@ yarn-error.*
 .vercel
 
 .env
+
+# Store credentials (eas submit)
+google-play-service-account.json

@@ -19,7 +19,7 @@ try {
     outExtension: { ".js": ".mjs" },
     logLevel: "silent",
   });
-  const { buildTrainingMatrix, certificateStatus, trainingMatrixToCsv, matrixCellKey } =
+  const { buildTrainingMatrix, certificateStatus, trainingMatrixToCsv, matrixCellKey, fireDrillMatrixRecords, FIRE_DRILL_TRAINING_TYPE } =
     await import(new URL(`file://${outFile}`).href);
   const { csvCell, neutraliseSpreadsheetFormula } =
     await import(new URL(`file://${path.join(outDir, "csv.mjs")}`).href);
@@ -307,6 +307,30 @@ try {
   assert.deepEqual(labels(otherTenant), ["Tenant Two"]);
   assert.deepEqual(otherTenant.types, ["Food Hygiene"]);
   assert.equal(otherTenant.cells.size, 1);
+
+  // FireTrack drills: each person's latest drill "expires" 12 months later,
+  // and the Fire drill column shows even before anyone has been ticked.
+  const drillRecords = fireDrillMatrixRecords([
+    { staffRosterId: 1, name: "Current", siteId: 1, lastDrillDate: "2024-06-30" },
+    { staffRosterId: 2, name: "Soon", siteId: 1, lastDrillDate: "2024-02-10" },
+    { staffRosterId: 3, name: "Expired", siteId: 1, lastDrillDate: "2023-12-01" },
+    { staffRosterId: 4, name: "Missing", siteId: 1, lastDrillDate: null },
+  ], 12);
+  assert.equal(drillRecords.length, 3, "nobody is recorded for someone never at a drill");
+  assert.deepEqual(drillRecords.map(r => [r.training_type, r.expiry_date]),
+    [[FIRE_DRILL_TRAINING_TYPE, "2025-06-30"], [FIRE_DRILL_TRAINING_TYPE, "2025-02-10"], [FIRE_DRILL_TRAINING_TYPE, "2024-12-01"]]);
+  assert.equal(fireDrillMatrixRecords([{ staffRosterId: 1, name: "Leap", siteId: 1, lastDrillDate: "2024-02-29" }], 12)[0].expiry_date,
+    "2025-02-28", "a drill on 29 February falls due on the last day of February");
+  const drillMatrix = buildTrainingMatrix(drillRecords, staff, "1", today, [FIRE_DRILL_TRAINING_TYPE]);
+  assert.deepEqual(drillMatrix.types, [FIRE_DRILL_TRAINING_TYPE]);
+  assert.equal(cellOf(drillMatrix, "Current", FIRE_DRILL_TRAINING_TYPE).status, "Current");
+  assert.equal(cellOf(drillMatrix, "Soon", FIRE_DRILL_TRAINING_TYPE).status, "Expiring Soon");
+  assert.equal(cellOf(drillMatrix, "Expired", FIRE_DRILL_TRAINING_TYPE).status, "Expired");
+  assert.equal(cellOf(drillMatrix, "Missing", FIRE_DRILL_TRAINING_TYPE).status, "Missing");
+  const noDrillsYet = buildTrainingMatrix([], staff, "1", today, [FIRE_DRILL_TRAINING_TYPE]);
+  assert.equal(cellOf(noDrillsYet, "Current", FIRE_DRILL_TRAINING_TYPE).status, "Missing");
+  console.log("ok - fire drill attendance shows in the matrix as a Fire drill column");
+
   console.log("Training matrix regression checks passed.");
 } finally {
   await rm(outDir, { recursive: true, force: true });

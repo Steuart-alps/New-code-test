@@ -314,9 +314,24 @@ console.log("Hostile text probe");
   for (const [label, html, baseline] of pairs) {
     check(`${label}: hostile text adds no elements or attributes`, () => {
       assert.deepEqual(structure(html), structure(baseline));
-      assert.ok(!/<img|<a href='javascript/i.test(html));
+      // The shared layout's own ALPS logo is an <img>; the hostile one is not.
+      assert.ok(!/<img src=x|<a href='javascript/i.test(html));
     });
   }
+}
+
+// ── Calendar invite organiser: the validated sender, not raw smtpFrom ──────
+console.log("Calendar invite sender");
+{
+  const platform = process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+  check("a stored sender off the business's domain falls back to the platform sender", () => {
+    assert.equal(email.getSenderEmail({ smtpFrom: "alerts@another-business.example" }), platform);
+    assert.equal(email.getSenderEmail({ smtpFrom: "alerts@other.example", resendDomainName: "own.example" }), platform);
+    assert.equal(email.getSenderEmail({}), platform);
+  });
+  check("a sender on the business's own domain is used, trimmed", () => {
+    assert.equal(email.getSenderEmail({ smtpFrom: " alerts@own.example ", resendDomainName: "own.example" }), "alerts@own.example");
+  });
 }
 
 console.log(`\nemail business-text escaping: ${passed} checks passed`);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,7 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
   const [items, setItems] = useState<string[]>([]);
   const [disabledItems, setDisabledItems] = useState<string[]>([]);
   const [newItem, setNewItem] = useState("");
+  const newItemRef = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
   const { data } = useFormOptions();
   const call = useFormOptionsApi();
@@ -51,11 +52,23 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
   if (!isAdmin) return null;
 
   const label = (v: string) => (labelFor ? labelFor(v) : v);
+  // Built-in options are stored as codes ("gas_kitchen") but shown and
+  // renamed by their label, as on the forms that use them; options the
+  // business typed are shown as typed. Text that matches a built-in label
+  // maps back to its code, so an unchanged (or retyped) name keeps the value
+  // existing records use.
+  const builtIn = data?.defaults?.[optionKey] ?? [];
+  const isBuiltIn = (v: string) => builtIn.includes(v);
+  const shown = (v: string) => (isBuiltIn(v) ? label(v) : v);
+  const valueFor = (text: string) =>
+    builtIn.find(value => label(value).toLowerCase() === text.trim().toLowerCase()) ?? text;
+  const sameOption = (a: string, b: string) =>
+    a.toLowerCase() === b.toLowerCase() || label(a).toLowerCase() === label(b).toLowerCase();
 
   const addItem = () => {
-    const trimmed = newItem.trim();
+    const trimmed = valueFor(newItem.trim()).trim();
     if (!trimmed) return;
-    if (items.some(i => i.toLowerCase() === trimmed.toLowerCase())) {
+    if (items.some(i => sameOption(i, trimmed))) {
       toast({ title: "Already in the list", variant: "destructive" });
       return;
     }
@@ -67,12 +80,18 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
       toast({ title: "Too many items", description: "Max 50 options", variant: "destructive" });
       return;
     }
-    setItems([...items, trimmed]);
+    // Typing a disabled value back in restores it (keeping the stored spelling
+    // existing records use) instead of listing it as both active and disabled.
+    const disabledMatch = disabledItems.find(item => sameOption(item, trimmed));
+    setItems([...items, disabledMatch ?? trimmed]);
+    if (disabledMatch) setDisabledItems(disabledItems.filter(item => item !== disabledMatch));
     setNewItem("");
+    // Ready for the next option without clicking back into the box.
+    newItemRef.current?.focus();
   };
 
-  const updateItem = (idx: number, value: string) =>
-    setItems(items.map((item, i) => i === idx ? value : item));
+  const updateItem = (idx: number, text: string) =>
+    setItems(items.map((item, i) => i === idx ? valueFor(text) : item));
   const disableItem = (idx: number) => {
     const item = items[idx];
     if (!item) return;
@@ -156,7 +175,7 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
             {items.map((item, idx) => (
               <div key={idx} className="flex items-center gap-2 rounded-sm border px-2.5 py-1.5">
                 <Input
-                  value={item}
+                  value={shown(item)}
                   onChange={event => updateItem(idx, event.target.value)}
                   className="h-8 flex-1"
                   maxLength={60}
@@ -199,6 +218,7 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
 
           <div className="flex items-center gap-2">
             <Input
+              ref={newItemRef}
               className="rounded-sm h-9"
               placeholder="Add an option…"
               value={newItem}

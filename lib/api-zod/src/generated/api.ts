@@ -9,6 +9,68 @@ import * as zod from 'zod';
 
 
 /**
+ * The setup wizard's team step. Records can't start in a business that is still being set up until it has a Manager or Staff login, or an Owner confirms here that only Owners record for now. Owners and consultants only; consultants pass the business as clientId.
+ * @summary Confirm that only the business's Owners record checks for now
+ */
+export const ConfirmSetupTeamAloneQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const ConfirmSetupTeamAloneResponse = zod.object({
+  "aloneAt": zod.date()
+})
+
+
+/**
+ * The getting-started page's offer. Emails ALPS (ADMIN_EMAIL) with the business, the person asking and their notes; ALPS agrees the price and invoices it, so nothing is charged here. One request per business: asking again returns the first request and sends no second email. Owners and consultants only; consultants pass the business as clientId.
+ * @summary Ask ALPS to enter the business's initial data (setup service)
+ */
+export const RequestSetupAssistQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const requestSetupAssistBodyPhoneMax = 40;
+
+export const requestSetupAssistBodyNotesMax = 2000;
+
+
+
+export const RequestSetupAssistBody = zod.object({
+  "phone": zod.string().max(requestSetupAssistBodyPhoneMax).optional().describe('Best number for ALPS to call'),
+  "notes": zod.string().max(requestSetupAssistBodyNotesMax).optional().describe('Anything ALPS should know, such as how many sites or where their lists are kept')
+})
+
+export const RequestSetupAssistResponse = zod.object({
+  "requestedAt": zod.date(),
+  "requestedBy": zod.string(),
+  "emailed": zod.boolean().describe('False when the request had already been sent earlier')
+})
+
+
+/**
+ * Deletes the business's records and stored files at once, keeping the audit trail and a record of the deletion. Refused for the operator's own business and for any business with a subscription, a payment, an AI top-up or a legal hold. The business's name must be typed to confirm.
+ * @summary Permanently delete a test business that never paid (platform operators)
+ */
+export const DeleteTestBusinessParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const deleteTestBusinessBodyConfirmNameMax = 200;
+
+
+
+export const DeleteTestBusinessBody = zod.object({
+  "confirmName": zod.string().min(1).max(deleteTestBusinessBodyConfirmNameMax).describe('The business\'s name, typed to confirm')
+})
+
+export const DeleteTestBusinessResponse = zod.object({
+  "ok": zod.boolean(),
+  "rowsDeleted": zod.number(),
+  "filesDeleted": zod.number()
+})
+
+
+/**
  * @summary List feedback for the selected client (administrators only)
  */
 export const ListFeedbackReportsQueryParams = zod.object({
@@ -36,9 +98,78 @@ export const ListFeedbackReportsResponseItem = zod.object({
   "updatedBy": zod.number().nullable(),
   "updatedByName": zod.string().nullable(),
   "revision": zod.number().min(listFeedbackReportsResponseRevisionMin),
-  "submitterName": zod.string().nullable()
+  "submitterName": zod.string().nullable(),
+  "clientName": zod.string().nullable(),
+  "hasScreenshot": zod.boolean(),
+  "appVersion": zod.string().nullable().describe('Web build (commit) the report was sent from')
 })
 export const ListFeedbackReportsResponse = zod.array(ListFeedbackReportsResponseItem)
+
+
+/**
+ * @summary Feedback from every business the consultant may open, newest first (consultants only, at most 500)
+ */
+export const ListAllBusinessesFeedbackReportsQueryParams = zod.object({
+  "category": zod.enum(['feedback', 'bug', 'feature']).optional(),
+  "status": zod.enum(['new', 'reviewing', 'resolved']).optional()
+})
+
+export const listAllBusinessesFeedbackReportsResponseRevisionMin = 0;
+
+
+
+export const ListAllBusinessesFeedbackReportsResponseItem = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "category": zod.enum(['feedback', 'bug', 'feature']),
+  "summary": zod.string(),
+  "details": zod.string(),
+  "pagePath": zod.string().nullable(),
+  "emailStatus": zod.string(),
+  "createdAt": zod.date(),
+  "status": zod.enum(['new', 'reviewing', 'resolved']),
+  "internalNote": zod.string(),
+  "updatedAt": zod.date().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "updatedByName": zod.string().nullable(),
+  "revision": zod.number().min(listAllBusinessesFeedbackReportsResponseRevisionMin),
+  "submitterName": zod.string().nullable(),
+  "clientName": zod.string().nullable(),
+  "hasScreenshot": zod.boolean(),
+  "appVersion": zod.string().nullable().describe('Web build (commit) the report was sent from')
+})
+export const ListAllBusinessesFeedbackReportsResponse = zod.array(ListAllBusinessesFeedbackReportsResponseItem)
+
+
+/**
+ * The returned objectPath is sent as screenshot.objectPath with the feedback; the image is verified and secured when the feedback is saved.
+ * @summary Presigned upload for a screenshot to attach to feedback (any signed-in user)
+ */
+export const RequestFeedbackScreenshotUploadBody = zod.object({
+  "contentType": zod.enum(['image/png', 'image/jpeg', 'image/webp'])
+})
+
+export const RequestFeedbackScreenshotUploadResponse = zod.object({
+  "uploadUrl": zod.string(),
+  "objectPath": zod.string()
+})
+
+
+/**
+ * @summary Short-lived link to a report's screenshot in the selected client (administrators only)
+ */
+export const GetFeedbackScreenshotParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetFeedbackScreenshotQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const GetFeedbackScreenshotResponse = zod.object({
+  "downloadUrl": zod.string(),
+  "fileName": zod.string()
+})
 
 
 /**
@@ -83,7 +214,10 @@ export const UpdateFeedbackReportResponse = zod.object({
   "updatedBy": zod.number().nullable(),
   "updatedByName": zod.string().nullable(),
   "revision": zod.number().min(updateFeedbackReportResponseRevisionMin),
-  "submitterName": zod.string().nullable()
+  "submitterName": zod.string().nullable(),
+  "clientName": zod.string().nullable(),
+  "hasScreenshot": zod.boolean(),
+  "appVersion": zod.string().nullable().describe('Web build (commit) the report was sent from')
 })
 
 
@@ -111,6 +245,317 @@ export const ListFeedbackReportHistoryResponseItem = zod.object({
   "createdAt": zod.date()
 })
 export const ListFeedbackReportHistoryResponse = zod.array(ListFeedbackReportHistoryResponseItem)
+
+
+/**
+ * @summary The signed-in Viewer's own training records (their linked staff roster entry)
+ */
+export const ListMyTrainingRecordsResponse = zod.object({
+  "linked": zod.boolean(),
+  "records": zod.array(zod.object({
+  "id": zod.number(),
+  "record_type": zod.enum(['certificate', 'signoff', 'internal']),
+  "staff_name": zod.string(),
+  "training_type": zod.string().nullish(),
+  "document_title": zod.string().nullish(),
+  "document_type": zod.string().nullish(),
+  "provider": zod.string().nullish(),
+  "trainer": zod.string().nullish(),
+  "completed_date": zod.string(),
+  "expiry_date": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "signed": zod.boolean(),
+  "updated_at": zod.string().optional(),
+  "site_name": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary Add the signed-in Viewer's signature to one of their own unsigned training records
+ */
+export const SignMyTrainingRecordParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SignMyTrainingRecordBody = zod.object({
+  "signature": zod.string().describe('Signature image as a data URL')
+})
+
+export const SignMyTrainingRecordResponse = zod.object({
+  "id": zod.number(),
+  "record_type": zod.enum(['certificate', 'signoff', 'internal']),
+  "staff_name": zod.string(),
+  "training_type": zod.string().nullish(),
+  "document_title": zod.string().nullish(),
+  "document_type": zod.string().nullish(),
+  "provider": zod.string().nullish(),
+  "trainer": zod.string().nullish(),
+  "completed_date": zod.string(),
+  "expiry_date": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "signed": zod.boolean(),
+  "updated_at": zod.string().optional(),
+  "site_name": zod.string().nullish()
+})
+
+
+/**
+ * @summary Current COSHH assessments the signed-in Viewer must read and sign, and those already signed
+ */
+export const ListMyCoshhSignOffsResponse = zod.object({
+  "linked": zod.boolean(),
+  "pending": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string().nullish(),
+  "task": zod.string(),
+  "productName": zod.string().nullish(),
+  "substanceId": zod.number().nullish(),
+  "hasSafetyDataSheet": zod.boolean(),
+  "hasDocument": zod.boolean(),
+  "revision": zod.number(),
+  "signOffDepartments": zod.array(zod.string()),
+  "assessmentDate": zod.date().nullish(),
+  "assessor": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish()
+}).describe('The parts of a current COSHH assessment a person reads before signing.')),
+  "signed": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string().nullish(),
+  "task": zod.string(),
+  "productName": zod.string().nullish(),
+  "substanceId": zod.number().nullish(),
+  "hasSafetyDataSheet": zod.boolean(),
+  "hasDocument": zod.boolean(),
+  "revision": zod.number(),
+  "signOffDepartments": zod.array(zod.string()),
+  "assessmentDate": zod.date().nullish(),
+  "assessor": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish()
+}).describe('The parts of a current COSHH assessment a person reads before signing.').and(zod.object({
+  "signedAt": zod.date()
+})))
+})
+
+
+/**
+ * @summary Sign that the signed-in Viewer has read a current COSHH assessment (writes a TrainTrack sign-off)
+ */
+export const SignMyCoshhAssessmentParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SignMyCoshhAssessmentBody = zod.object({
+  "signature": zod.string().describe('Signature image as a data URL')
+})
+
+export const SignMyCoshhAssessmentResponse = zod.object({
+  "linked": zod.boolean(),
+  "pending": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string().nullish(),
+  "task": zod.string(),
+  "productName": zod.string().nullish(),
+  "substanceId": zod.number().nullish(),
+  "hasSafetyDataSheet": zod.boolean(),
+  "hasDocument": zod.boolean(),
+  "revision": zod.number(),
+  "signOffDepartments": zod.array(zod.string()),
+  "assessmentDate": zod.date().nullish(),
+  "assessor": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish()
+}).describe('The parts of a current COSHH assessment a person reads before signing.')),
+  "signed": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string().nullish(),
+  "task": zod.string(),
+  "productName": zod.string().nullish(),
+  "substanceId": zod.number().nullish(),
+  "hasSafetyDataSheet": zod.boolean(),
+  "hasDocument": zod.boolean(),
+  "revision": zod.number(),
+  "signOffDepartments": zod.array(zod.string()),
+  "assessmentDate": zod.date().nullish(),
+  "assessor": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish()
+}).describe('The parts of a current COSHH assessment a person reads before signing.').and(zod.object({
+  "signedAt": zod.date()
+})))
+})
+
+
+/**
+ * @summary DocTrack documents the signed-in Viewer must read and sign, and those they have a current sign-off for
+ */
+export const ListMyDocumentSignOffsResponse = zod.object({
+  "rosterLinked": zod.boolean(),
+  "pending": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "description": zod.string().nullish(),
+  "file_name": zod.string().nullish(),
+  "mime_type": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "site_name": zod.string().nullish(),
+  "acknowledged_at": zod.date().nullish(),
+  "signature": zod.string().nullish()
+})),
+  "completed": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "description": zod.string().nullish(),
+  "file_name": zod.string().nullish(),
+  "mime_type": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "site_name": zod.string().nullish(),
+  "acknowledged_at": zod.date().nullish(),
+  "signature": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary A short-lived link to open one of the Viewer's documents to read and sign
+ */
+export const GetMyDocumentDownloadUrlParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetMyDocumentDownloadUrlResponse = zod.object({
+  "downloadUrl": zod.string(),
+  "fileName": zod.string().nullish()
+})
+
+
+/**
+ * @summary Sign that the signed-in Viewer has read a DocTrack document (writes a TrainTrack sign-off)
+ */
+export const SignMyDocumentParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SignMyDocumentBody = zod.object({
+  "signature": zod.string().describe('Signature image as a data URL')
+})
+
+export const SignMyDocumentResponse = zod.object({
+  "rosterLinked": zod.boolean(),
+  "pending": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "description": zod.string().nullish(),
+  "file_name": zod.string().nullish(),
+  "mime_type": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "site_name": zod.string().nullish(),
+  "acknowledged_at": zod.date().nullish(),
+  "signature": zod.string().nullish()
+})),
+  "completed": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "description": zod.string().nullish(),
+  "file_name": zod.string().nullish(),
+  "mime_type": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "site_name": zod.string().nullish(),
+  "acknowledged_at": zod.date().nullish(),
+  "signature": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary Choose which of their departments a Manager with several is working in (kept for the session)
+ */
+export const SetActiveDepartmentBody = zod.object({
+  "departmentId": zod.number()
+})
+
+export const SetActiveDepartmentResponse = zod.object({
+  "departmentId": zod.number(),
+  "departmentIds": zod.array(zod.number())
+})
+
+
+/**
+ * @summary The businesses an Owner can switch between (their own first) and the one they're working in
+ */
+export const ListOwnerBusinessesResponse = zod.object({
+  "activeClientId": zod.number().nullable(),
+  "businesses": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+}))
+})
+
+
+/**
+ * @summary Choose which of their businesses an Owner of several is working in (kept for the session)
+ */
+export const SetActiveBusinessBody = zod.object({
+  "businessId": zod.number()
+})
+
+export const SetActiveBusinessResponse = zod.object({
+  "activeClientId": zod.number().nullable(),
+  "businesses": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+}))
+})
 
 
 /**
@@ -143,6 +588,170 @@ export const ListAuditLogResponseItem = zod.object({
   "actorName": zod.string().nullable()
 })
 export const ListAuditLogResponse = zod.array(ListAuditLogResponseItem).max(50)
+
+
+/**
+ * The figures of ALPS's Monday billing digest for any dates (inclusive, UTC days). Without dates, the last 7 days. At most three years.
+ * @summary New subscriptions, cancellations, plan changes, trials and module activity between two dates (platform operators only)
+ */
+export const GetBusinessDashboardQueryParams = zod.object({
+  "from": zod.date().optional(),
+  "to": zod.date().optional()
+})
+
+export const GetBusinessDashboardResponse = zod.object({
+  "from": zod.date(),
+  "to": zod.date(),
+  "newSubscriptions": zod.array(zod.object({
+  "businessName": zod.string(),
+  "summary": zod.string(),
+  "monthlyPence": zod.number().describe('Monthly amount before VAT gained, lost or changed'),
+  "reason": zod.string().nullable().describe('Cancellation reason key'),
+  "at": zod.date()
+})),
+  "cancellations": zod.array(zod.object({
+  "businessName": zod.string(),
+  "summary": zod.string(),
+  "monthlyPence": zod.number().describe('Monthly amount before VAT gained, lost or changed'),
+  "reason": zod.string().nullable().describe('Cancellation reason key'),
+  "at": zod.date()
+})),
+  "planChanges": zod.array(zod.object({
+  "businessName": zod.string(),
+  "summary": zod.string(),
+  "monthlyPence": zod.number().describe('Monthly amount before VAT gained, lost or changed'),
+  "reason": zod.string().nullable().describe('Cancellation reason key'),
+  "at": zod.date()
+})),
+  "trials": zod.array(zod.object({
+  "businessName": zod.string(),
+  "at": zod.date()
+})),
+  "gainedPence": zod.number(),
+  "lostPence": zod.number(),
+  "planChangePence": zod.number(),
+  "netPence": zod.number(),
+  "netBusinesses": zod.number(),
+  "reasons": zod.array(zod.object({
+  "reason": zod.string(),
+  "label": zod.string(),
+  "count": zod.number()
+})),
+  "modules": zod.array(zod.object({
+  "module": zod.string(),
+  "changes": zod.number(),
+  "businesses": zod.number()
+})),
+  "weeks": zod.array(zod.object({
+  "weekStart": zod.date(),
+  "newCount": zod.number(),
+  "cancelledCount": zod.number(),
+  "netPence": zod.number()
+})),
+  "totals": zod.object({
+  "paying": zod.number(),
+  "onTrial": zod.number()
+}),
+  "ai": zod.object({
+  "months": zod.array(zod.object({
+  "addonPence": zod.number().describe('The AI add-on paid through Stripe'),
+  "topUpPence": zod.number().describe('Top-ups paid through Stripe'),
+  "invoicedTopUpPence": zod.number().describe('Top-ups a free business agreed to'),
+  "incomePence": zod.number(),
+  "costPence": zod.number().describe('What Claude charged'),
+  "marginPence": zod.number(),
+  "requests": zod.number(),
+  "lapsedPence": zod.number().describe('Paid-for AI use that lapsed unused after 12 months and came back to ALPS (already part of the margin)')
+}).and(zod.object({
+  "month": zod.string().describe('YYYY-MM (UTC)')
+}))),
+  "businesses": zod.array(zod.object({
+  "addonPence": zod.number().describe('The AI add-on paid through Stripe'),
+  "topUpPence": zod.number().describe('Top-ups paid through Stripe'),
+  "invoicedTopUpPence": zod.number().describe('Top-ups a free business agreed to'),
+  "incomePence": zod.number(),
+  "costPence": zod.number().describe('What Claude charged'),
+  "marginPence": zod.number(),
+  "requests": zod.number(),
+  "lapsedPence": zod.number().describe('Paid-for AI use that lapsed unused after 12 months and came back to ALPS (already part of the margin)')
+}).and(zod.object({
+  "clientId": zod.number().nullable(),
+  "businessName": zod.string(),
+  "free": zod.boolean().describe('A free business (no trial end); ALPS pays for its allowance')
+}))),
+  "totals": zod.object({
+  "addonPence": zod.number().describe('The AI add-on paid through Stripe'),
+  "topUpPence": zod.number().describe('Top-ups paid through Stripe'),
+  "invoicedTopUpPence": zod.number().describe('Top-ups a free business agreed to'),
+  "incomePence": zod.number(),
+  "costPence": zod.number().describe('What Claude charged'),
+  "marginPence": zod.number(),
+  "requests": zod.number(),
+  "lapsedPence": zod.number().describe('Paid-for AI use that lapsed unused after 12 months and came back to ALPS (already part of the margin)')
+}),
+  "usdToGbp": zod.number(),
+  "addonIncomeAvailable": zod.boolean().describe('False when paid Stripe invoices could not be read')
+}).nullish().describe('AI income against what Claude cost, in pence before VAT; null when it could not be read')
+})
+
+
+/**
+ * Client admins and consultants only. Newest first, scoped to the active business. Entries never include link tokens; linkRef is a short prefix of the stored SHA-256 fingerprint so repeat use of one link can be matched without exposing the credential.
+ * @summary List recent public-link access for the signed-in business
+ */
+export const listPublicLinkAccessQueryFromMax = 40;
+
+export const listPublicLinkAccessQueryToMax = 40;
+
+export const listPublicLinkAccessQueryCursorMax = 200;
+
+export const listPublicLinkAccessQueryLimitMax = 100;
+
+
+
+export const ListPublicLinkAccessQueryParams = zod.object({
+  "linkType": zod.enum(['sign_off', 'contractor_portal', 'fix_track_action', 'fix_track_quote']).optional(),
+  "actionType": zod.enum(['view', 'submit']).optional(),
+  "from": zod.coerce.string().max(listPublicLinkAccessQueryFromMax).optional().describe('Only access at or after this instant (ISO 8601).'),
+  "to": zod.coerce.string().max(listPublicLinkAccessQueryToMax).optional().describe('Only access before this instant (ISO 8601).'),
+  "cursor": zod.coerce.string().max(listPublicLinkAccessQueryCursorMax).optional().describe('nextCursor from the previous page.'),
+  "limit": zod.coerce.number().min(1).max(listPublicLinkAccessQueryLimitMax).optional()
+})
+
+export const listPublicLinkAccessResponseEntriesItemLinkRefMin = 8;
+export const listPublicLinkAccessResponseEntriesItemLinkRefMax = 8;
+
+export const listPublicLinkAccessResponseEntriesMax = 100;
+
+
+
+export const ListPublicLinkAccessResponse = zod.object({
+  "entries": zod.array(zod.object({
+  "id": zod.number(),
+  "linkType": zod.enum(['sign_off', 'contractor_portal', 'fix_track_action', 'fix_track_quote']),
+  "actionType": zod.enum(['view', 'submit']),
+  "activity": zod.string(),
+  "linkRef": zod.string().min(listPublicLinkAccessResponseEntriesItemLinkRefMin).max(listPublicLinkAccessResponseEntriesItemLinkRefMax),
+  "occurredAt": zod.date()
+})).max(listPublicLinkAccessResponseEntriesMax),
+  "nextCursor": zod.string().nullable()
+})
+
+
+/**
+ * Active members of the business (not viewers) who can see the site. Names only; reminders for assigned work go to that person.
+ * @summary People who can be assigned an action, FixTrack issue or compliance check
+ */
+export const ListAssigneesQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const ListAssigneesResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "role": zod.string()
+})
+export const ListAssigneesResponse = zod.array(ListAssigneesResponseItem)
 
 
 /**
@@ -229,6 +838,12 @@ export const ListSitesResponseItem = zod.object({
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
+  "openingChecksDue": zod.string().nullish().describe('When the site\'s opening checks are due (\"HH:MM\" on the business\'s clock). Null means 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('When the site\'s closing checks are due (\"HH:MM\" on the business\'s clock). Null means 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out (\"HH:MM\"). Null means 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out (\"HH:MM\"). Null means 21:00.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -243,7 +858,9 @@ export const CreateSiteBody = zod.object({
   "name": zod.string(),
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
-  "phone": zod.string().nullish()
+  "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.')
 })
 
 export const CreateSiteResponse = zod.object({
@@ -254,6 +871,12 @@ export const CreateSiteResponse = zod.object({
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
+  "openingChecksDue": zod.string().nullish().describe('When the site\'s opening checks are due (\"HH:MM\" on the business\'s clock). Null means 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('When the site\'s closing checks are due (\"HH:MM\" on the business\'s clock). Null means 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out (\"HH:MM\"). Null means 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out (\"HH:MM\"). Null means 21:00.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -274,6 +897,12 @@ export const GetSiteResponse = zod.object({
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
+  "openingChecksDue": zod.string().nullish().describe('When the site\'s opening checks are due (\"HH:MM\" on the business\'s clock). Null means 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('When the site\'s closing checks are due (\"HH:MM\" on the business\'s clock). Null means 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out (\"HH:MM\"). Null means 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out (\"HH:MM\"). Null means 21:00.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -291,7 +920,9 @@ export const UpdateSiteBody = zod.object({
   "name": zod.string().optional(),
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
-  "phone": zod.string().nullish()
+  "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.')
 })
 
 export const UpdateSiteResponse = zod.object({
@@ -302,6 +933,12 @@ export const UpdateSiteResponse = zod.object({
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
+  "openingChecksDue": zod.string().nullish().describe('When the site\'s opening checks are due (\"HH:MM\" on the business\'s clock). Null means 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('When the site\'s closing checks are due (\"HH:MM\" on the business\'s clock). Null means 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out (\"HH:MM\"). Null means 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out (\"HH:MM\"). Null means 21:00.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -315,6 +952,137 @@ export const DeleteSiteParams = zod.object({
 })
 
 export const DeleteSiteResponse = zod.void()
+
+
+/**
+ * Owners, consultants and Managers who can see the site. Times are "HH:MM" on the business's clock; null or blank uses the default (due 06:00 opening, 18:00 closing; reminders 11:00 and 21:00). A field left out keeps its time.
+ * @summary Set when the site's opening and closing checks are due, and when their reminders go out
+ */
+export const SetSiteChecklistDueTimesParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SetSiteChecklistDueTimesBody = zod.object({
+  "openingChecksDue": zod.string().nullish().describe('\"HH:MM\"; null or blank for the default 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('\"HH:MM\"; null or blank for the default 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out, \"HH:MM\"; null or blank for the default 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out, \"HH:MM\"; null or blank for the default 21:00.')
+})
+
+export const SetSiteChecklistDueTimesResponse = zod.object({
+  "departmentId": zod.number().nullish(),
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "name": zod.string(),
+  "responsiblePerson": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
+  "openingChecksDue": zod.string().nullish().describe('When the site\'s opening checks are due (\"HH:MM\" on the business\'s clock). Null means 06:00.'),
+  "closingChecksDue": zod.string().nullish().describe('When the site\'s closing checks are due (\"HH:MM\" on the business\'s clock). Null means 18:00.'),
+  "openingReminderAt": zod.string().nullish().describe('When the reminder about opening checks not yet submitted goes out (\"HH:MM\"). Null means 11:00.'),
+  "closingReminderAt": zod.string().nullish().describe('When the reminder about closing checks not yet submitted goes out (\"HH:MM\"). Null means 21:00.'),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * Each visit type the business's tracks cover, at each site the user can see: when the track says it is next due, and the compliance check (with its contractor) that drives the contractor reminder. Also the compliance check register's other checks. Each row says whether it has been marked "No contractor needed".
+ * @summary Contractor visits kept on the tracks, per site, with the contractor reminded
+ */
+export const ListContractorVisitsResponse = zod.object({
+  "types": zod.array(zod.object({
+  "key": zod.string(),
+  "module": zod.string(),
+  "trackLabel": zod.string(),
+  "title": zod.string().describe('Title of the linked compliance check'),
+  "label": zod.string(),
+  "description": zod.string(),
+  "dueFrom": zod.enum(['track', 'later', 'check']),
+  "trades": zod.array(zod.string()).optional().describe('Contractor trades suggested first when choosing who does this visit')
+})),
+  "visits": zod.array(zod.object({
+  "visitKey": zod.string(),
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "trackDueDate": zod.date().nullable(),
+  "checkId": zod.number().nullable(),
+  "checkSiteId": zod.number().nullable().describe('Null for a business-wide check at a one-site business'),
+  "dueDate": zod.date().nullable(),
+  "status": zod.string().nullable(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string().nullable(),
+  "reminderSentAt": zod.date().nullable(),
+  "notNeeded": zod.boolean().describe('Marked \"No contractor needed\" (never true while a contractor is chosen)')
+})),
+  "checks": zod.array(zod.object({
+  "checkId": zod.number(),
+  "title": zod.string(),
+  "siteId": zod.number().nullable().describe('Null for a business-wide check'),
+  "siteName": zod.string().nullable(),
+  "dueDate": zod.date().nullable(),
+  "status": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string().nullable(),
+  "reminderSentAt": zod.date().nullable(),
+  "notNeeded": zod.boolean().describe('Marked \"No contractor needed\" (never true while a contractor is chosen)')
+})).describe('The compliance check register\'s other checks (gas safety, EICR...), not finished one-offs, business-wide or at a site the user can see\n')
+})
+
+
+/**
+ * @summary Choose the contractor reminded about a visit at a site
+ */
+export const SetContractorVisitBody = zod.object({
+  "visitKey": zod.string(),
+  "siteId": zod.number(),
+  "contractorId": zod.number().nullable(),
+  "dueDate": zod.date().nullish().describe('Only for a visit its track gives no date for (water sampling, or a site with nothing recorded on the track yet)'),
+  "notNeeded": zod.boolean().optional().describe('True marks the visit as needing no contractor (contractorId must be null); false clears that. Choosing a contractor clears it too.')
+})
+
+export const SetContractorVisitResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Choose the contractor reminded about a compliance check, or mark it as needing none
+ */
+export const SetContractorRegisterCheckParams = zod.object({
+  "checkId": zod.coerce.number()
+})
+
+export const SetContractorRegisterCheckBody = zod.object({
+  "contractorId": zod.number().nullable(),
+  "notNeeded": zod.boolean().optional().describe('True marks the check as needing no contractor (contractorId must be null); false clears that. Choosing a contractor clears it too.')
+})
+
+export const SetContractorRegisterCheckResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * Compliance checks whose contractor visit happened at least followUpAfterDays ago with no certificate uploaded since, however old, at the sites the user can see. The contractor is chased every two weeks until chaseStopsAfterDays after the visit (chasing false after).
+ * @summary Contractor visits still waiting for their certificate
+ */
+export const ListCertificatesOutstandingResponse = zod.object({
+  "followUpAfterDays": zod.number(),
+  "chaseStopsAfterDays": zod.number(),
+  "certificates": zod.array(zod.object({
+  "itemId": zod.number(),
+  "title": zod.string(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "visitDate": zod.date(),
+  "daysSinceVisit": zod.number(),
+  "contractorName": zod.string(),
+  "chasing": zod.boolean().describe('False once the contractor is no longer reminded (chaseStopsAfterDays after the visit)')
+}))
+})
 
 
 /**
@@ -460,6 +1228,23 @@ export const ListCertificatesResponseItem = zod.object({
   "issueDate": zod.date().nullish(),
   "expiryDate": zod.date().nullish(),
   "notes": zod.string().nullish(),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).optional().describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "defects": zod.array(zod.object({
+  "id": zod.number(),
+  "certificateId": zod.number(),
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "label": zod.string(),
+  "description": zod.string(),
+  "location": zod.string().nullish(),
+  "fixTrackIssueId": zod.number().nullish(),
+  "fixTrackStatus": zod.string().nullish(),
+  "fixTrackPriority": zod.string().nullish(),
+  "fixTrackTargetDate": zod.string().nullish(),
+  "resolvedAt": zod.date().nullish(),
+  "blocking": zod.boolean().describe('C1\/C2\/FI\/ID\/AR defects keep the check needing action while open.'),
+  "open": zod.boolean().describe('The FixTrack job is not resolved or closed (or, without a job, the defect is not marked remedied).'),
+  "createdAt": zod.date()
+})).optional().describe('Defects listed on an item certificate (absent for contractor certificates).'),
   "createdAt": zod.date()
 })
 export const ListCertificatesResponse = zod.array(ListCertificatesResponseItem)
@@ -489,6 +1274,23 @@ export const CreateCertificateResponse = zod.object({
   "issueDate": zod.date().nullish(),
   "expiryDate": zod.date().nullish(),
   "notes": zod.string().nullish(),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).optional().describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "defects": zod.array(zod.object({
+  "id": zod.number(),
+  "certificateId": zod.number(),
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "label": zod.string(),
+  "description": zod.string(),
+  "location": zod.string().nullish(),
+  "fixTrackIssueId": zod.number().nullish(),
+  "fixTrackStatus": zod.string().nullish(),
+  "fixTrackPriority": zod.string().nullish(),
+  "fixTrackTargetDate": zod.string().nullish(),
+  "resolvedAt": zod.date().nullish(),
+  "blocking": zod.boolean().describe('C1\/C2\/FI\/ID\/AR defects keep the check needing action while open.'),
+  "open": zod.boolean().describe('The FixTrack job is not resolved or closed (or, without a job, the defect is not marked remedied).'),
+  "createdAt": zod.date()
+})).optional().describe('Defects listed on an item certificate (absent for contractor certificates).'),
   "createdAt": zod.date()
 })
 
@@ -518,6 +1320,23 @@ export const UpdateCertificateResponse = zod.object({
   "issueDate": zod.date().nullish(),
   "expiryDate": zod.date().nullish(),
   "notes": zod.string().nullish(),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).optional().describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "defects": zod.array(zod.object({
+  "id": zod.number(),
+  "certificateId": zod.number(),
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "label": zod.string(),
+  "description": zod.string(),
+  "location": zod.string().nullish(),
+  "fixTrackIssueId": zod.number().nullish(),
+  "fixTrackStatus": zod.string().nullish(),
+  "fixTrackPriority": zod.string().nullish(),
+  "fixTrackTargetDate": zod.string().nullish(),
+  "resolvedAt": zod.date().nullish(),
+  "blocking": zod.boolean().describe('C1\/C2\/FI\/ID\/AR defects keep the check needing action while open.'),
+  "open": zod.boolean().describe('The FixTrack job is not resolved or closed (or, without a job, the defect is not marked remedied).'),
+  "createdAt": zod.date()
+})).optional().describe('Defects listed on an item certificate (absent for contractor certificates).'),
   "createdAt": zod.date()
 })
 
@@ -549,6 +1368,23 @@ export const ListItemCertificatesResponseItem = zod.object({
   "issueDate": zod.date().nullish(),
   "expiryDate": zod.date().nullish(),
   "notes": zod.string().nullish(),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).optional().describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "defects": zod.array(zod.object({
+  "id": zod.number(),
+  "certificateId": zod.number(),
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "label": zod.string(),
+  "description": zod.string(),
+  "location": zod.string().nullish(),
+  "fixTrackIssueId": zod.number().nullish(),
+  "fixTrackStatus": zod.string().nullish(),
+  "fixTrackPriority": zod.string().nullish(),
+  "fixTrackTargetDate": zod.string().nullish(),
+  "resolvedAt": zod.date().nullish(),
+  "blocking": zod.boolean().describe('C1\/C2\/FI\/ID\/AR defects keep the check needing action while open.'),
+  "open": zod.boolean().describe('The FixTrack job is not resolved or closed (or, without a job, the defect is not marked remedied).'),
+  "createdAt": zod.date()
+})).optional().describe('Defects listed on an item certificate (absent for contractor certificates).'),
   "createdAt": zod.date()
 })
 export const ListItemCertificatesResponse = zod.array(ListItemCertificatesResponseItem)
@@ -561,12 +1397,29 @@ export const CreateItemCertificateParams = zod.object({
   "itemId": zod.coerce.number()
 })
 
+export const createItemCertificateBodyDefectsItemDescriptionMax = 1000;
+
+export const createItemCertificateBodyDefectsItemLocationMax = 300;
+
+export const createItemCertificateBodyDefectsMax = 100;
+
+
+
 export const CreateItemCertificateBody = zod.object({
   "name": zod.string(),
   "fileUrl": zod.string().nullish(),
   "issueDate": zod.date().nullish(),
   "expiryDate": zod.date().nullish(),
-  "notes": zod.string().nullish()
+  "notes": zod.string().nullish(),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).optional().describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "defects": zod.array(zod.object({
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "description": zod.string().min(1).max(createItemCertificateBodyDefectsItemDescriptionMax),
+  "location": zod.string().max(createItemCertificateBodyDefectsItemLocationMax).nullish(),
+  "needsWork": zod.boolean().optional().describe('With remedialJob, whether it goes into the remedial job. Left out, C1, C2, FI, ID and AR do.')
+})).max(createItemCertificateBodyDefectsMax).optional(),
+  "remedialJob": zod.boolean().optional().describe('The defects that need work share one FixTrack job (so one quote request covers them) and the others open no job. Without it each defect opens its own job.'),
+  "readByAi": zod.boolean().optional().describe('The details were read by ComplyTrack\'s AI and checked by the person saving them.')
 })
 
 export const CreateItemCertificateResponse = zod.object({
@@ -578,7 +1431,592 @@ export const CreateItemCertificateResponse = zod.object({
   "issueDate": zod.date().nullish(),
   "expiryDate": zod.date().nullish(),
   "notes": zod.string().nullish(),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).optional().describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "defects": zod.array(zod.object({
+  "id": zod.number(),
+  "certificateId": zod.number(),
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "label": zod.string(),
+  "description": zod.string(),
+  "location": zod.string().nullish(),
+  "fixTrackIssueId": zod.number().nullish(),
+  "fixTrackStatus": zod.string().nullish(),
+  "fixTrackPriority": zod.string().nullish(),
+  "fixTrackTargetDate": zod.string().nullish(),
+  "resolvedAt": zod.date().nullish(),
+  "blocking": zod.boolean().describe('C1\/C2\/FI\/ID\/AR defects keep the check needing action while open.'),
+  "open": zod.boolean().describe('The FixTrack job is not resolved or closed (or, without a job, the defect is not marked remedied).'),
   "createdAt": zod.date()
+})).optional().describe('Defects listed on an item certificate (absent for contractor certificates).'),
+  "createdAt": zod.date()
+})
+
+
+/**
+ * @summary Whether ComplyTrack can read an uploaded certificate, and the AI allowance (owners and ALPS)
+ */
+export const getCertificateReadingResponseAiPercentUsedMin = 0;
+export const getCertificateReadingResponseAiPercentUsedMax = 100;
+
+export const getCertificateReadingResponseAiCarriedOverPercentMin = 0;
+
+export const getCertificateReadingResponseAiNextLapsePercentMin = 0;
+
+
+
+export const GetCertificateReadingResponse = zod.object({
+  "available": zod.boolean().describe('False until the server has an Anthropic API key.'),
+  "ai": zod.object({
+  "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
+  "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
+  "percentUsed": zod.number().min(getCertificateReadingResponseAiPercentUsedMin).max(getCertificateReadingResponseAiPercentUsedMax).describe('Share of what is available this period, allowance carried over included, that is used'),
+  "resetsAt": zod.date().nullable().describe('When the next month\'s allowance is added'),
+  "usedUp": zod.boolean().describe('Everything available, allowance carried over included, is used up'),
+  "carriedOverPercent": zod.number().min(getCertificateReadingResponseAiCarriedOverPercentMin).describe('Unused allowance carried over from earlier months, as a share of one month\'s allowance (150 = a month and a half)'),
+  "nextLapseAt": zod.date().nullable().describe('When the oldest carried-over allowance lapses if unused'),
+  "nextLapsePercent": zod.number().min(getCertificateReadingResponseAiNextLapsePercentMin).describe('How much lapses then, as a share of one month\'s allowance')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups). Unused allowance and top-ups carry over, oldest used first, and lapse 12 months after the end of the month they were for. Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").'),
+  "fixTrack": zod.boolean().describe('Whether the business has FixTrack, where remedial work and quotes live.')
+})
+
+
+/**
+ * Claude reads the certificate (an EICR, gas safety record, fire alarm service certificate and so on) and says which compliance check it is for, its issue and next inspection dates, its outcome and its defects. Nothing is saved: the person checks the reading and saves it with POST /items/{itemId}/certificates (remedialJob true). The file is not stored here. Off until the server has an Anthropic API key; it uses the AI features add-on's allowance.
+ * @summary Read a certificate with AI (owners and ALPS)
+ */
+export const readCertificateBodyFileNameMax = 255;
+
+
+
+export const ReadCertificateBody = zod.object({
+  "fileName": zod.string().max(readCertificateBodyFileNameMax),
+  "mimeType": zod.string().describe('application\/pdf, image\/jpeg, image\/png, image\/webp, image\/gif, .docx or text\/plain'),
+  "data": zod.string().describe('The file as base64 (20 MB at most before encoding)'),
+  "itemId": zod.number().nullish().describe('The check the certificate is for, when the person opened the reader from one')
+})
+
+export const ReadCertificateResponse = zod.object({
+  "certificateType": zod.string(),
+  "name": zod.string().describe('A name to file the certificate under'),
+  "itemId": zod.number().nullable().describe('The check it is for; null when none fits'),
+  "checkReason": zod.string(),
+  "newCheck": zod.object({
+  "title": zod.string(),
+  "frequencyMonths": zod.number().nullable()
+}).nullable().describe('When no check fits, the check to create for it.'),
+  "contractorName": zod.string().nullable(),
+  "issueDate": zod.date().nullable(),
+  "nextInspectionDate": zod.date().nullable(),
+  "nextInspectionSource": zod.union([zod.literal('certificate'),zod.literal('repeat'),zod.literal(null)]).nullable().describe('\"certificate\" when it states the date; \"repeat\" when worked out from the check\'s repeat interval.'),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "summary": zod.string(),
+  "defects": zod.array(zod.object({
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "description": zod.string(),
+  "location": zod.string().nullable(),
+  "reference": zod.string().nullable().describe('The item or observation number on the certificate'),
+  "needsWork": zod.boolean().describe('Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are.')
+})),
+  "unclear": zod.array(zod.string()).describe('Things that could not be read with confidence.')
+})
+
+
+/**
+ * Claude reads up to 10 files together: the pages of one certificate photographed separately, a PDF holding several certificates, or a batch of certificates to sort to their compliance checks. Each certificate found comes back as with POST /certificates/read, with the files it is on. Nothing is saved or stored here. Uses the AI features add-on's allowance.
+ * @summary Read several certificate files with AI in one go (owners and ALPS)
+ */
+export const readCertificateFilesBodyFilesItemFileNameMax = 255;
+
+export const readCertificateFilesBodyFilesMax = 10;
+
+
+
+export const ReadCertificateFilesBody = zod.object({
+  "files": zod.array(zod.object({
+  "fileName": zod.string().max(readCertificateFilesBodyFilesItemFileNameMax),
+  "mimeType": zod.string().describe('application\/pdf, image\/jpeg, image\/png, image\/webp, image\/gif, .docx or text\/plain'),
+  "data": zod.string().describe('The file as base64')
+})).min(1).max(readCertificateFilesBodyFilesMax).describe('Up to 10 files, 20 MB at most together before encoding'),
+  "itemId": zod.number().nullish().describe('The check the reader was opened from: the files are one certificate for it')
+})
+
+export const ReadCertificateFilesResponse = zod.object({
+  "certificates": zod.array(zod.object({
+  "certificateType": zod.string(),
+  "name": zod.string().describe('A name to file the certificate under'),
+  "itemId": zod.number().nullable().describe('The check it is for; null when none fits'),
+  "checkReason": zod.string(),
+  "newCheck": zod.object({
+  "title": zod.string(),
+  "frequencyMonths": zod.number().nullable()
+}).nullable().describe('When no check fits, the check to create for it.'),
+  "contractorName": zod.string().nullable(),
+  "issueDate": zod.date().nullable(),
+  "nextInspectionDate": zod.date().nullable(),
+  "nextInspectionSource": zod.union([zod.literal('certificate'),zod.literal('repeat'),zod.literal(null)]).nullable().describe('\"certificate\" when it states the date; \"repeat\" when worked out from the check\'s repeat interval.'),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "summary": zod.string(),
+  "defects": zod.array(zod.object({
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "description": zod.string(),
+  "location": zod.string().nullable(),
+  "reference": zod.string().nullable().describe('The item or observation number on the certificate'),
+  "needsWork": zod.boolean().describe('Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are.')
+})),
+  "unclear": zod.array(zod.string()).describe('Things that could not be read with confidence.')
+}).and(zod.object({
+  "fileIndexes": zod.array(zod.number()).describe('The files (0-based, in the order sent) this certificate is on')
+}))),
+  "skipped": zod.array(zod.object({
+  "fileIndex": zod.number(),
+  "reason": zod.string()
+})).describe('Files that hold no certificate')
+})
+
+
+/**
+ * Certificates emailed to the business's certificate address, or uploaded by a contractor through the "Upload certificate" link in their emails, waiting for someone to check and save them. The address is null until emailed certificates are switched on for the platform.
+ * @summary Certificates to confirm, and the business's certificate address (owners and ALPS)
+ */
+export const GetCertificateInboxResponse = zod.object({
+  "address": zod.string().nullable().describe('Where to email certificates; null until emailed certificates are switched on.'),
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "source": zod.enum(['email', 'upload']),
+  "status": zod.enum(['reading', 'ready', 'held', 'message']).describe('reading = the AI is reading it; ready = waiting to be checked; held = from a sender the business does not know (not read until accepted); message = an email with no certificate attached.'),
+  "senderEmail": zod.string().nullable(),
+  "senderName": zod.string().nullable(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string().nullable(),
+  "itemId": zod.number().nullable().describe('The check the link was for, or the one the AI matched'),
+  "itemTitle": zod.string().nullable(),
+  "subject": zod.string().nullable(),
+  "messageText": zod.string().nullable(),
+  "fileName": zod.string().nullable(),
+  "contentType": zod.string().nullable(),
+  "fileUrl": zod.string().nullable(),
+  "byteSize": zod.number().nullable(),
+  "reading": zod.object({
+  "certificateType": zod.string(),
+  "name": zod.string().describe('A name to file the certificate under'),
+  "itemId": zod.number().nullable().describe('The check it is for; null when none fits'),
+  "checkReason": zod.string(),
+  "newCheck": zod.object({
+  "title": zod.string(),
+  "frequencyMonths": zod.number().nullable()
+}).nullable().describe('When no check fits, the check to create for it.'),
+  "contractorName": zod.string().nullable(),
+  "issueDate": zod.date().nullable(),
+  "nextInspectionDate": zod.date().nullable(),
+  "nextInspectionSource": zod.union([zod.literal('certificate'),zod.literal('repeat'),zod.literal(null)]).nullable().describe('\"certificate\" when it states the date; \"repeat\" when worked out from the check\'s repeat interval.'),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "summary": zod.string(),
+  "defects": zod.array(zod.object({
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "description": zod.string(),
+  "location": zod.string().nullable(),
+  "reference": zod.string().nullable().describe('The item or observation number on the certificate'),
+  "needsWork": zod.boolean().describe('Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are.')
+})),
+  "unclear": zod.array(zod.string()).describe('Things that could not be read with confidence.')
+}).nullable(),
+  "note": zod.string().nullable().describe('Why it was held, why the AI could not read it, or what was wrong with the attachment.'),
+  "receivedAt": zod.date()
+}))
+})
+
+
+/**
+ * @summary Give the business a new certificate address; the old one stops working
+ */
+export const ChangeCertificateInboxAddressResponse = zod.object({
+  "address": zod.string().nullable().describe('Where to email certificates; null until emailed certificates are switched on.'),
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "source": zod.enum(['email', 'upload']),
+  "status": zod.enum(['reading', 'ready', 'held', 'message']).describe('reading = the AI is reading it; ready = waiting to be checked; held = from a sender the business does not know (not read until accepted); message = an email with no certificate attached.'),
+  "senderEmail": zod.string().nullable(),
+  "senderName": zod.string().nullable(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string().nullable(),
+  "itemId": zod.number().nullable().describe('The check the link was for, or the one the AI matched'),
+  "itemTitle": zod.string().nullable(),
+  "subject": zod.string().nullable(),
+  "messageText": zod.string().nullable(),
+  "fileName": zod.string().nullable(),
+  "contentType": zod.string().nullable(),
+  "fileUrl": zod.string().nullable(),
+  "byteSize": zod.number().nullable(),
+  "reading": zod.object({
+  "certificateType": zod.string(),
+  "name": zod.string().describe('A name to file the certificate under'),
+  "itemId": zod.number().nullable().describe('The check it is for; null when none fits'),
+  "checkReason": zod.string(),
+  "newCheck": zod.object({
+  "title": zod.string(),
+  "frequencyMonths": zod.number().nullable()
+}).nullable().describe('When no check fits, the check to create for it.'),
+  "contractorName": zod.string().nullable(),
+  "issueDate": zod.date().nullable(),
+  "nextInspectionDate": zod.date().nullable(),
+  "nextInspectionSource": zod.union([zod.literal('certificate'),zod.literal('repeat'),zod.literal(null)]).nullable().describe('\"certificate\" when it states the date; \"repeat\" when worked out from the check\'s repeat interval.'),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "summary": zod.string(),
+  "defects": zod.array(zod.object({
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "description": zod.string(),
+  "location": zod.string().nullable(),
+  "reference": zod.string().nullable().describe('The item or observation number on the certificate'),
+  "needsWork": zod.boolean().describe('Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are.')
+})),
+  "unclear": zod.array(zod.string()).describe('Things that could not be read with confidence.')
+}).nullable(),
+  "note": zod.string().nullable().describe('Why it was held, why the AI could not read it, or what was wrong with the attachment.'),
+  "receivedAt": zod.date()
+}))
+})
+
+
+/**
+ * @summary Read a waiting certificate with AI (again), or accept one from an unknown sender
+ */
+export const ReadCertificateInboxItemParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ReadCertificateInboxItemResponse = zod.object({
+  "id": zod.number(),
+  "source": zod.enum(['email', 'upload']),
+  "status": zod.enum(['reading', 'ready', 'held', 'message']).describe('reading = the AI is reading it; ready = waiting to be checked; held = from a sender the business does not know (not read until accepted); message = an email with no certificate attached.'),
+  "senderEmail": zod.string().nullable(),
+  "senderName": zod.string().nullable(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string().nullable(),
+  "itemId": zod.number().nullable().describe('The check the link was for, or the one the AI matched'),
+  "itemTitle": zod.string().nullable(),
+  "subject": zod.string().nullable(),
+  "messageText": zod.string().nullable(),
+  "fileName": zod.string().nullable(),
+  "contentType": zod.string().nullable(),
+  "fileUrl": zod.string().nullable(),
+  "byteSize": zod.number().nullable(),
+  "reading": zod.object({
+  "certificateType": zod.string(),
+  "name": zod.string().describe('A name to file the certificate under'),
+  "itemId": zod.number().nullable().describe('The check it is for; null when none fits'),
+  "checkReason": zod.string(),
+  "newCheck": zod.object({
+  "title": zod.string(),
+  "frequencyMonths": zod.number().nullable()
+}).nullable().describe('When no check fits, the check to create for it.'),
+  "contractorName": zod.string().nullable(),
+  "issueDate": zod.date().nullable(),
+  "nextInspectionDate": zod.date().nullable(),
+  "nextInspectionSource": zod.union([zod.literal('certificate'),zod.literal('repeat'),zod.literal(null)]).nullable().describe('\"certificate\" when it states the date; \"repeat\" when worked out from the check\'s repeat interval.'),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "summary": zod.string(),
+  "defects": zod.array(zod.object({
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "description": zod.string(),
+  "location": zod.string().nullable(),
+  "reference": zod.string().nullable().describe('The item or observation number on the certificate'),
+  "needsWork": zod.boolean().describe('Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are.')
+})),
+  "unclear": zod.array(zod.string()).describe('Things that could not be read with confidence.')
+}).nullable(),
+  "note": zod.string().nullable().describe('Why it was held, why the AI could not read it, or what was wrong with the attachment.'),
+  "receivedAt": zod.date()
+})
+
+
+/**
+ * The same as POST /items/{itemId}/certificates, with the file already held; fileUrl in the certificate is ignored.
+ * @summary Save a waiting certificate to a compliance check
+ */
+export const FileCertificateInboxItemParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const fileCertificateInboxItemBodyCertificateDefectsItemDescriptionMax = 1000;
+
+export const fileCertificateInboxItemBodyCertificateDefectsItemLocationMax = 300;
+
+export const fileCertificateInboxItemBodyCertificateDefectsMax = 100;
+
+
+
+export const FileCertificateInboxItemBody = zod.object({
+  "itemId": zod.number().describe('The compliance check to save it to'),
+  "certificate": zod.object({
+  "name": zod.string(),
+  "fileUrl": zod.string().nullish(),
+  "issueDate": zod.date().nullish(),
+  "expiryDate": zod.date().nullish(),
+  "notes": zod.string().nullish(),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).optional().describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "defects": zod.array(zod.object({
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "description": zod.string().min(1).max(fileCertificateInboxItemBodyCertificateDefectsItemDescriptionMax),
+  "location": zod.string().max(fileCertificateInboxItemBodyCertificateDefectsItemLocationMax).nullish(),
+  "needsWork": zod.boolean().optional().describe('With remedialJob, whether it goes into the remedial job. Left out, C1, C2, FI, ID and AR do.')
+})).max(fileCertificateInboxItemBodyCertificateDefectsMax).optional(),
+  "remedialJob": zod.boolean().optional().describe('The defects that need work share one FixTrack job (so one quote request covers them) and the others open no job. Without it each defect opens its own job.'),
+  "readByAi": zod.boolean().optional().describe('The details were read by ComplyTrack\'s AI and checked by the person saving them.')
+})
+})
+
+export const FileCertificateInboxItemResponse = zod.object({
+  "id": zod.number(),
+  "contractorId": zod.number().nullish(),
+  "itemId": zod.number().nullish(),
+  "name": zod.string(),
+  "fileUrl": zod.string().nullish(),
+  "issueDate": zod.date().nullish(),
+  "expiryDate": zod.date().nullish(),
+  "notes": zod.string().nullish(),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).optional().describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "defects": zod.array(zod.object({
+  "id": zod.number(),
+  "certificateId": zod.number(),
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "label": zod.string(),
+  "description": zod.string(),
+  "location": zod.string().nullish(),
+  "fixTrackIssueId": zod.number().nullish(),
+  "fixTrackStatus": zod.string().nullish(),
+  "fixTrackPriority": zod.string().nullish(),
+  "fixTrackTargetDate": zod.string().nullish(),
+  "resolvedAt": zod.date().nullish(),
+  "blocking": zod.boolean().describe('C1\/C2\/FI\/ID\/AR defects keep the check needing action while open.'),
+  "open": zod.boolean().describe('The FixTrack job is not resolved or closed (or, without a job, the defect is not marked remedied).'),
+  "createdAt": zod.date()
+})).optional().describe('Defects listed on an item certificate (absent for contractor certificates).'),
+  "createdAt": zod.date()
+})
+
+
+/**
+ * @summary Remove a waiting certificate or message that is not needed
+ */
+export const DismissCertificateInboxItemParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DismissCertificateInboxItemResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * Returns a one-use token. The web app sends the save again with the token in the X-Record-Signature header after the API answered it with 428 SIGNATURE_REQUIRED; the signature is then linked to the saved record. Unused signatures are removed after a day.
+ * @summary Store the logged-in user's drawn signature for the check they are saving (not Viewers)
+ */
+export const CreateRecordSignatureBody = zod.object({
+  "strokes": zod.array(zod.array(zod.number())).describe('Each stroke is [x, y, x, y, ...] in whole numbers inside a 600 x 200 box')
+})
+
+export const CreateRecordSignatureResponse = zod.object({
+  "token": zod.string(),
+  "expiresInMinutes": zod.number()
+})
+
+
+/**
+ * @summary Signatures on recorded checks of one type, for history lists
+ */
+export const ListRecordSignaturesQueryParams = zod.object({
+  "recordType": zod.coerce.string(),
+  "ids": zod.coerce.string().describe('Up to 200 record ids, comma separated')
+})
+
+export const ListRecordSignaturesResponseItem = zod.object({
+  "recordType": zod.string(),
+  "recordId": zod.number(),
+  "signerName": zod.string().describe('The name of the login that signed'),
+  "signedAt": zod.date(),
+  "strokes": zod.array(zod.array(zod.number()))
+})
+export const ListRecordSignaturesResponse = zod.array(ListRecordSignaturesResponseItem)
+
+
+/**
+ * @summary Contractor sign-in set-up and who is on site, for each site the caller can see (not Viewers)
+ */
+export const ListContractorSignInSitesResponse = zod.object({
+  "canManage": zod.boolean().describe('Whether the caller can change the set-up (Owners and Managers)'),
+  "onSiteHours": zod.number().describe('A visit still open after this many hours counts as not signed out'),
+  "sites": zod.array(zod.object({
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "enabled": zod.boolean(),
+  "link": zod.string().nullable().describe('The site\'s sign-in link; null until sign-in is first turned on'),
+  "fireProcedure": zod.string().nullable(),
+  "fireTrackEvacuation": zod.string().nullable().describe('FireTrack\'s evacuation arrangements for the site, to copy from'),
+  "asbestosStatus": zod.enum(['register', 'none_expected', 'missing']),
+  "asbestosEntryCount": zod.number(),
+  "onSiteCount": zod.number()
+}))
+})
+
+
+/**
+ * The first save creates the site's sign-in link. The fire procedure is what contractors read and confirm before signing in.
+ * @summary Turn contractor sign-in on or off for a site and set its fire procedure (Owners and Managers)
+ */
+export const UpdateContractorSignInSiteParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const updateContractorSignInSiteBodyFireProcedureMax = 10000;
+
+
+
+export const UpdateContractorSignInSiteBody = zod.object({
+  "enabled": zod.boolean().optional(),
+  "fireProcedure": zod.string().max(updateContractorSignInSiteBodyFireProcedureMax).nullish()
+})
+
+export const UpdateContractorSignInSiteResponse = zod.object({
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "enabled": zod.boolean(),
+  "link": zod.string().nullable().describe('The site\'s sign-in link; null until sign-in is first turned on'),
+  "fireProcedure": zod.string().nullable(),
+  "fireTrackEvacuation": zod.string().nullable().describe('FireTrack\'s evacuation arrangements for the site, to copy from'),
+  "asbestosStatus": zod.enum(['register', 'none_expected', 'missing']),
+  "asbestosEntryCount": zod.number(),
+  "onSiteCount": zod.number()
+})
+
+
+/**
+ * @summary Give a site a new sign-in link; the old link and its posters stop working
+ */
+export const ResetContractorSignInLinkParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const ResetContractorSignInLinkResponse = zod.object({
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "enabled": zod.boolean(),
+  "link": zod.string().nullable().describe('The site\'s sign-in link; null until sign-in is first turned on'),
+  "fireProcedure": zod.string().nullable(),
+  "fireTrackEvacuation": zod.string().nullable().describe('FireTrack\'s evacuation arrangements for the site, to copy from'),
+  "asbestosStatus": zod.enum(['register', 'none_expected', 'missing']),
+  "asbestosEntryCount": zod.number(),
+  "onSiteCount": zod.number()
+})
+
+
+/**
+ * @summary An A4 PDF poster with the site's sign-in QR code, for reception
+ */
+export const GetContractorSignInPosterParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const GetContractorSignInPosterResponse = zod.unknown()
+
+
+/**
+ * @summary Email the site's sign-in link to a contractor on the Contractors list
+ */
+export const EmailContractorSignInLinkParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const EmailContractorSignInLinkBody = zod.object({
+  "contractorId": zod.number()
+})
+
+export const EmailContractorSignInLinkResponse = zod.object({
+  "sentTo": zod.string()
+})
+
+
+/**
+ * @summary Contractor visits at the caller's sites, newest first; anyone still on site is always included
+ */
+export const ListContractorSignInsQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional(),
+  "days": zod.coerce.number().optional().describe('How many days back (default 30, at most 366)')
+})
+
+export const ListContractorSignInsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable().describe('The Contractors list entry with the same email address, if any'),
+  "name": zod.string(),
+  "company": zod.string(),
+  "phone": zod.string().nullable(),
+  "email": zod.string().nullable(),
+  "visitReason": zod.string().nullable(),
+  "fireAcknowledged": zod.boolean().describe('False when the site had no fire procedure to read'),
+  "asbestosStatus": zod.enum(['register', 'none_expected', 'missing']),
+  "signedInAt": zod.date(),
+  "signedOutAt": zod.date().nullable(),
+  "signedOutByName": zod.string().nullable().describe('Who signed them out, when it was not the contractor'),
+  "status": zod.enum(['on_site', 'signed_out', 'did_not_sign_out'])
+})
+export const ListContractorSignInsResponse = zod.array(ListContractorSignInsResponseItem)
+
+
+/**
+ * @summary One visit with what the contractor read and their signature
+ */
+export const GetContractorSignInParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetContractorSignInResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable().describe('The Contractors list entry with the same email address, if any'),
+  "name": zod.string(),
+  "company": zod.string(),
+  "phone": zod.string().nullable(),
+  "email": zod.string().nullable(),
+  "visitReason": zod.string().nullable(),
+  "fireAcknowledged": zod.boolean().describe('False when the site had no fire procedure to read'),
+  "asbestosStatus": zod.enum(['register', 'none_expected', 'missing']),
+  "signedInAt": zod.date(),
+  "signedOutAt": zod.date().nullable(),
+  "signedOutByName": zod.string().nullable().describe('Who signed them out, when it was not the contractor'),
+  "status": zod.enum(['on_site', 'signed_out', 'did_not_sign_out'])
+}).and(zod.object({
+  "fireProcedureText": zod.string().nullable().describe('The fire procedure the contractor confirmed reading'),
+  "asbestosSnapshot": zod.record(zod.string(), zod.unknown()).describe('The asbestos information the contractor was shown'),
+  "signature": zod.string().describe('PNG data URL')
+}))
+
+
+/**
+ * @summary Sign a contractor out for them (e.g. at the fire roll call)
+ */
+export const SignOutContractorParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SignOutContractorResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable().describe('The Contractors list entry with the same email address, if any'),
+  "name": zod.string(),
+  "company": zod.string(),
+  "phone": zod.string().nullable(),
+  "email": zod.string().nullable(),
+  "visitReason": zod.string().nullable(),
+  "fireAcknowledged": zod.boolean().describe('False when the site had no fire procedure to read'),
+  "asbestosStatus": zod.enum(['register', 'none_expected', 'missing']),
+  "signedInAt": zod.date(),
+  "signedOutAt": zod.date().nullable(),
+  "signedOutByName": zod.string().nullable().describe('Who signed them out, when it was not the contractor'),
+  "status": zod.enum(['on_site', 'signed_out', 'did_not_sign_out'])
 })
 
 
@@ -591,12 +2029,13 @@ export const UpdateItemCertificateParams = zod.object({
 })
 
 export const UpdateItemCertificateBody = zod.object({
-  "name": zod.string(),
+  "name": zod.string().optional(),
   "fileUrl": zod.string().nullish(),
   "issueDate": zod.date().nullish(),
   "expiryDate": zod.date().nullish(),
-  "notes": zod.string().nullish()
-})
+  "notes": zod.string().nullish(),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).optional().describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.')
+}).describe('Defects are added through the certificate\'s defects endpoint.')
 
 export const UpdateItemCertificateResponse = zod.object({
   "id": zod.number(),
@@ -607,6 +2046,23 @@ export const UpdateItemCertificateResponse = zod.object({
   "issueDate": zod.date().nullish(),
   "expiryDate": zod.date().nullish(),
   "notes": zod.string().nullish(),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).optional().describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "defects": zod.array(zod.object({
+  "id": zod.number(),
+  "certificateId": zod.number(),
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "label": zod.string(),
+  "description": zod.string(),
+  "location": zod.string().nullish(),
+  "fixTrackIssueId": zod.number().nullish(),
+  "fixTrackStatus": zod.string().nullish(),
+  "fixTrackPriority": zod.string().nullish(),
+  "fixTrackTargetDate": zod.string().nullish(),
+  "resolvedAt": zod.date().nullish(),
+  "blocking": zod.boolean().describe('C1\/C2\/FI\/ID\/AR defects keep the check needing action while open.'),
+  "open": zod.boolean().describe('The FixTrack job is not resolved or closed (or, without a job, the defect is not marked remedied).'),
+  "createdAt": zod.date()
+})).optional().describe('Defects listed on an item certificate (absent for contractor certificates).'),
   "createdAt": zod.date()
 })
 
@@ -623,6 +2079,87 @@ export const DeleteItemCertificateResponse = zod.void()
 
 
 /**
+ * @summary Add a defect to a compliance item's certificate (opens a FixTrack job when FixTrack is enabled)
+ */
+export const CreateCertificateDefectParams = zod.object({
+  "itemId": zod.coerce.number(),
+  "id": zod.coerce.number()
+})
+
+export const createCertificateDefectBodyDescriptionMax = 1000;
+
+export const createCertificateDefectBodyLocationMax = 300;
+
+
+
+export const CreateCertificateDefectBody = zod.object({
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "description": zod.string().min(1).max(createCertificateDefectBodyDescriptionMax),
+  "location": zod.string().max(createCertificateDefectBodyLocationMax).nullish()
+})
+
+export const CreateCertificateDefectResponse = zod.object({
+  "id": zod.number(),
+  "certificateId": zod.number(),
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "label": zod.string(),
+  "description": zod.string(),
+  "location": zod.string().nullish(),
+  "fixTrackIssueId": zod.number().nullish(),
+  "fixTrackStatus": zod.string().nullish(),
+  "fixTrackPriority": zod.string().nullish(),
+  "fixTrackTargetDate": zod.string().nullish(),
+  "resolvedAt": zod.date().nullish(),
+  "blocking": zod.boolean().describe('C1\/C2\/FI\/ID\/AR defects keep the check needing action while open.'),
+  "open": zod.boolean().describe('The FixTrack job is not resolved or closed (or, without a job, the defect is not marked remedied).'),
+  "createdAt": zod.date()
+})
+
+
+/**
+ * @summary Mark a defect without a FixTrack job remedied (or not)
+ */
+export const UpdateCertificateDefectParams = zod.object({
+  "itemId": zod.coerce.number(),
+  "id": zod.coerce.number(),
+  "defectId": zod.coerce.number()
+})
+
+export const UpdateCertificateDefectBody = zod.object({
+  "resolved": zod.boolean()
+})
+
+export const UpdateCertificateDefectResponse = zod.object({
+  "id": zod.number(),
+  "certificateId": zod.number(),
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "label": zod.string(),
+  "description": zod.string(),
+  "location": zod.string().nullish(),
+  "fixTrackIssueId": zod.number().nullish(),
+  "fixTrackStatus": zod.string().nullish(),
+  "fixTrackPriority": zod.string().nullish(),
+  "fixTrackTargetDate": zod.string().nullish(),
+  "resolvedAt": zod.date().nullish(),
+  "blocking": zod.boolean().describe('C1\/C2\/FI\/ID\/AR defects keep the check needing action while open.'),
+  "open": zod.boolean().describe('The FixTrack job is not resolved or closed (or, without a job, the defect is not marked remedied).'),
+  "createdAt": zod.date()
+})
+
+
+/**
+ * @summary Remove a defect recorded in error (its FixTrack job stays)
+ */
+export const DeleteCertificateDefectParams = zod.object({
+  "itemId": zod.coerce.number(),
+  "id": zod.coerce.number(),
+  "defectId": zod.coerce.number()
+})
+
+export const DeleteCertificateDefectResponse = zod.void()
+
+
+/**
  * @summary List all compliance items
  */
 export const ListComplianceItemsQueryParams = zod.object({
@@ -631,6 +2168,10 @@ export const ListComplianceItemsQueryParams = zod.object({
   "priority": zod.enum(['low', 'medium', 'high', 'critical']).optional(),
   "contractorId": zod.coerce.number().optional()
 })
+
+export const listComplianceItemsResponseFrequencyMonthsMax = 120;
+
+
 
 export const ListComplianceItemsResponseItem = zod.object({
   "id": zod.number(),
@@ -647,11 +2188,17 @@ export const ListComplianceItemsResponseItem = zod.object({
   "contractorName": zod.string().nullish(),
   "contractorEmail": zod.string().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(listComplianceItemsResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
+  "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
   "notes": zod.string().nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
+  "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -663,6 +2210,9 @@ export const ListComplianceItemsResponse = zod.array(ListComplianceItemsResponse
  */
 export const createComplianceItemBodyStatusDefault = `pending`;
 export const createComplianceItemBodyPriorityDefault = `medium`;
+export const createComplianceItemBodyFrequencyMonthsMax = 120;
+
+
 
 export const CreateComplianceItemBody = zod.object({
   "title": zod.string(),
@@ -673,10 +2223,16 @@ export const CreateComplianceItemBody = zod.object({
   "categoryId": zod.number().nullish(),
   "contractorId": zod.number().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(createComplianceItemBodyFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notes": zod.string().nullish()
 })
+
+export const createComplianceItemResponseFrequencyMonthsMax = 120;
+
+
 
 export const CreateComplianceItemResponse = zod.object({
   "id": zod.number(),
@@ -693,11 +2249,17 @@ export const CreateComplianceItemResponse = zod.object({
   "contractorName": zod.string().nullish(),
   "contractorEmail": zod.string().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(createComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
+  "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
   "notes": zod.string().nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
+  "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -709,6 +2271,10 @@ export const CreateComplianceItemResponse = zod.object({
 export const GetComplianceItemParams = zod.object({
   "id": zod.coerce.number()
 })
+
+export const getComplianceItemResponseFrequencyMonthsMax = 120;
+
+
 
 export const GetComplianceItemResponse = zod.object({
   "id": zod.number(),
@@ -725,11 +2291,17 @@ export const GetComplianceItemResponse = zod.object({
   "contractorName": zod.string().nullish(),
   "contractorEmail": zod.string().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(getComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
+  "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
   "notes": zod.string().nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
+  "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -742,6 +2314,10 @@ export const UpdateComplianceItemParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const updateComplianceItemBodyFrequencyMonthsMax = 120;
+
+
+
 export const UpdateComplianceItemBody = zod.object({
   "title": zod.string().optional(),
   "description": zod.string().nullish(),
@@ -751,10 +2327,16 @@ export const UpdateComplianceItemBody = zod.object({
   "categoryId": zod.number().nullish(),
   "contractorId": zod.number().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(updateComplianceItemBodyFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notes": zod.string().nullish()
 })
+
+export const updateComplianceItemResponseFrequencyMonthsMax = 120;
+
+
 
 export const UpdateComplianceItemResponse = zod.object({
   "id": zod.number(),
@@ -771,11 +2353,17 @@ export const UpdateComplianceItemResponse = zod.object({
   "contractorName": zod.string().nullish(),
   "contractorEmail": zod.string().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(updateComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
+  "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
   "notes": zod.string().nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
+  "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -798,9 +2386,20 @@ export const UpdateComplianceItemStatusParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const updateComplianceItemStatusBodyCompletedAtRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const updateComplianceItemStatusBodyCompletedInHouseByMax = 200;
+
+
+
 export const UpdateComplianceItemStatusBody = zod.object({
-  "status": zod.enum(['pending', 'in_progress', 'completed', 'overdue'])
+  "status": zod.enum(['pending', 'in_progress', 'completed', 'overdue']),
+  "completedAt": zod.string().regex(updateComplianceItemStatusBodyCompletedAtRegExp).nullish().describe('Date the check was done (YYYY-MM-DD), only with status completed. Not in the future in the account\'s timezone; defaults to today. The next due date is counted from it.'),
+  "completedInHouseBy": zod.string().max(updateComplianceItemStatusBodyCompletedInHouseByMax).nullish().describe('Only with status completed. The competent person who did the check in house instead of a contractor; no contractor certificate is then due for this completion. Leave out (or null) for a contractor.')
 })
+
+export const updateComplianceItemStatusResponseFrequencyMonthsMax = 120;
+
+
 
 export const UpdateComplianceItemStatusResponse = zod.object({
   "id": zod.number(),
@@ -817,11 +2416,17 @@ export const UpdateComplianceItemStatusResponse = zod.object({
   "contractorName": zod.string().nullish(),
   "contractorEmail": zod.string().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(updateComplianceItemStatusResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
+  "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
   "notes": zod.string().nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
+  "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -840,7 +2445,62 @@ export const GetDashboardStatsResponse = zod.object({
   "dueSoon": zod.number(),
   "completionRate": zod.number(),
   "contractorsCount": zod.number(),
-  "certificatesExpiringSoon": zod.number()
+  "certificatesExpiringSoon": zod.number(),
+  "actionRequired": zod.number().optional().describe('Checks whose newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects (counted as out of compliance).')
+})
+
+
+/**
+ * For each site, one bar per department (and one for the whole site) with today's checks done, not done yet and failed, and what is outstanding. Owners see every department, Managers the departments they cover, others their own. Owners choose which roles see it (setting todayByDepartmentRoles).
+ * @summary Today's checks per site and department
+ */
+export const GetTodayByDepartmentQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const GetTodayByDepartmentResponse = zod.object({
+  "date": zod.date(),
+  "groups": zod.array(zod.object({
+  "siteId": zod.number().nullable().describe('null for work not tied to one site (\"All sites\")'),
+  "siteName": zod.string(),
+  "rows": zod.array(zod.object({
+  "key": zod.string(),
+  "kind": zod.enum(['whole_site', 'department']),
+  "departmentId": zod.number().nullable(),
+  "name": zod.string(),
+  "done": zod.number(),
+  "todo": zod.number(),
+  "failed": zod.number(),
+  "items": zod.array(zod.object({
+  "status": zod.enum(['todo', 'failed']),
+  "label": zod.string(),
+  "detail": zod.string(),
+  "path": zod.string()
+})),
+  "moreItems": zod.number()
+}))
+}))
+})
+
+
+/**
+ * Sites the person can see whose overnight forecast (18:00 to 09:00 local) drops below 4°C, so they grit and de-ice. The forecast is checked from 15:00 for sites whose address has a UK postcode; tonight runs from midday to midday the next day.
+ * @summary Tonight's frost warnings
+ */
+export const GetFrostWarningsQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const GetFrostWarningsResponse = zod.object({
+  "nightOf": zod.date().describe('The evening tonight\'s night starts.'),
+  "belowC": zod.number().describe('Warnings are for an overnight low below this (°C).'),
+  "credit": zod.string().describe('Credit for the forecast, shown with the warning.'),
+  "warnings": zod.array(zod.object({
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "lowestC": zod.number().describe('The overnight low (°C).'),
+  "coldestAt": zod.date().nullable()
+}))
 })
 
 
@@ -861,7 +2521,10 @@ export const GetSettingsResponse = zod.object({
   "contractorComplianceLeadTimeDays": zod.string().nullish(),
   "companyName": zod.string().nullish(),
   "accountTimezone": zod.string().nullish(),
-  "storageWarningThresholdBytes": zod.string().regex(getSettingsResponseStorageWarningThresholdBytesRegExp).nullish()
+  "storageWarningThresholdBytes": zod.string().regex(getSettingsResponseStorageWarningThresholdBytesRegExp).nullish(),
+  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.'),
+  "ownerUpdateFrequency": zod.enum(['weekly', 'daily', 'monthly']).nullish().describe('How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays); monthly is the first Monday of each month, and Managers then still get theirs weekly.'),
+  "reminderTimings": zod.string().nullish().describe('JSON object keyed by reminder type (track module, \"tasks\", \"contractors\", \"train\"), each {\"daysBefore\": number|\"next_week\"|null, \"overdueEvery\": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; \"next_week\" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue.')
 })
 
 
@@ -882,7 +2545,10 @@ export const UpdateSettingsBody = zod.object({
   "contractorComplianceLeadTimeDays": zod.string().nullish(),
   "companyName": zod.string().nullish(),
   "accountTimezone": zod.string().nullish(),
-  "storageWarningThresholdBytes": zod.string().regex(updateSettingsBodyStorageWarningThresholdBytesRegExp).nullish()
+  "storageWarningThresholdBytes": zod.string().regex(updateSettingsBodyStorageWarningThresholdBytesRegExp).nullish(),
+  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.'),
+  "ownerUpdateFrequency": zod.enum(['weekly', 'daily', 'monthly']).nullish().describe('How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays); monthly is the first Monday of each month, and Managers then still get theirs weekly.'),
+  "reminderTimings": zod.string().nullish().describe('JSON object keyed by reminder type (track module, \"tasks\", \"contractors\", \"train\"), each {\"daysBefore\": number|\"next_week\"|null, \"overdueEvery\": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; \"next_week\" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue.')
 })
 
 export const updateSettingsResponseStorageWarningThresholdBytesRegExp = new RegExp('^[0-9]+$');
@@ -899,7 +2565,64 @@ export const UpdateSettingsResponse = zod.object({
   "contractorComplianceLeadTimeDays": zod.string().nullish(),
   "companyName": zod.string().nullish(),
   "accountTimezone": zod.string().nullish(),
-  "storageWarningThresholdBytes": zod.string().regex(updateSettingsResponseStorageWarningThresholdBytesRegExp).nullish()
+  "storageWarningThresholdBytes": zod.string().regex(updateSettingsResponseStorageWarningThresholdBytesRegExp).nullish(),
+  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.'),
+  "ownerUpdateFrequency": zod.enum(['weekly', 'daily', 'monthly']).nullish().describe('How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays); monthly is the first Monday of each month, and Managers then still get theirs weekly.'),
+  "reminderTimings": zod.string().nullish().describe('JSON object keyed by reminder type (track module, \"tasks\", \"contractors\", \"train\"), each {\"daysBefore\": number|\"next_week\"|null, \"overdueEvery\": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; \"next_week\" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue.')
+})
+
+
+/**
+ * Resolved with the same routing code the daily summary job sends with. Pass the unsaved choices as `routing` to preview them; otherwise the saved choices are used. Account admins and consultants only.
+ * @summary Preview who receives each track's daily summary
+ */
+export const GetTrackSummaryRecipientsQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional(),
+  "routing": zod.coerce.string().optional().describe('Track summary routing JSON, as saved in trackSummaryRouting.')
+})
+
+export const GetTrackSummaryRecipientsResponse = zod.object({
+  "senior": zod.object({
+  "source": zod.enum(['notification_email', 'users']),
+  "recipients": zod.array(zod.object({
+  "userId": zod.number().nullable(),
+  "name": zod.string().nullable(),
+  "email": zod.string(),
+  "departmentName": zod.string().nullable()
+}))
+}),
+  "tracks": zod.array(zod.object({
+  "module": zod.string(),
+  "label": zod.string(),
+  "enabled": zod.boolean(),
+  "mode": zod.enum(['automatic', 'custom']),
+  "departments": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "managers": zod.array(zod.object({
+  "userId": zod.number().nullable(),
+  "name": zod.string().nullable(),
+  "email": zod.string(),
+  "departmentName": zod.string().nullable()
+}))
+})),
+  "namedManagers": zod.array(zod.object({
+  "userId": zod.number().nullable(),
+  "name": zod.string().nullable(),
+  "email": zod.string(),
+  "departmentName": zod.string().nullable()
+})),
+  "unavailableNamedCount": zod.number(),
+  "seniorOnly": zod.boolean(),
+  "recipients": zod.array(zod.object({
+  "userId": zod.number().nullable(),
+  "name": zod.string().nullable(),
+  "email": zod.string(),
+  "departmentName": zod.string().nullable()
+}).and(zod.object({
+  "via": zod.array(zod.enum(['senior', 'named', 'department']))
+})))
+}))
 })
 
 
@@ -954,6 +2677,10 @@ export const GetPrivacyGovernanceResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "updatedBy": zod.number().nullable(),
+  "intakeEnabled": zod.boolean(),
+  "intakePublishedAt": zod.date().nullable(),
+  "intakePublishedBy": zod.number().nullable(),
+  "intakeAssigneeId": zod.number().nullable(),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })),zod.null()]),
@@ -1013,6 +2740,10 @@ export const GetPrivacyGovernanceResponse = zod.object({
   "identityVerifiedBy": zod.number().nullable(),
   "decidedAt": zod.date().nullable(),
   "decidedBy": zod.number().nullable(),
+  "source": zod.enum(['staff', 'public_intake']),
+  "publicReference": zod.string().nullable(),
+  "assignedTo": zod.number().nullable(),
+  "adminNotifiedAt": zod.date().nullable(),
   "createdBy": zod.number().nullable(),
   "updatedBy": zod.number().nullable(),
   "createdAt": zod.date(),
@@ -1114,7 +2845,11 @@ export const GetPrivacyGovernanceResponse = zod.object({
   "updatedAt": zod.date()
 })).and(zod.object({
   "kind": zod.enum(['breach'])
-})))
+}))),
+  "privacyAdministrators": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+})).describe('People who can be assigned online privacy requests')
 })
 
 
@@ -1155,9 +2890,160 @@ export const SavePrivacyProgramResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "updatedBy": zod.number().nullable(),
+  "intakeEnabled": zod.boolean(),
+  "intakePublishedAt": zod.date().nullable(),
+  "intakePublishedBy": zod.number().nullable(),
+  "intakeAssigneeId": zod.number().nullable(),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 }))
+
+
+/**
+ * Returns the new link once. Only its digest is stored, and any previous link stops working.
+ * @summary Publish the online privacy-request form, or replace its link
+ */
+export const PublishPrivacyIntakeLinkQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const PublishPrivacyIntakeLinkResponse = zod.object({
+  "url": zod.string().describe('The form link. It is not stored and is shown only in this response.'),
+  "program": zod.object({
+  "customerRole": zod.enum(['controller', 'joint_controller', 'processor', 'mixed']),
+  "controllerName": zod.string().nullable(),
+  "controllerContact": zod.string().nullable(),
+  "dpoContact": zod.string().nullable(),
+  "noticeUrl": zod.string().nullable(),
+  "noticeVersion": zod.string().nullable(),
+  "noticeReviewedAt": zod.date().nullable(),
+  "processorAgreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "processorAgreementReviewedAt": zod.date().nullable(),
+  "responsibilitiesNotes": zod.string().nullable(),
+  "privacyOwner": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "updatedBy": zod.number().nullable(),
+  "intakeEnabled": zod.boolean(),
+  "intakePublishedAt": zod.date().nullable(),
+  "intakePublishedBy": zod.number().nullable(),
+  "intakeAssigneeId": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+}))
+})
+
+
+/**
+ * @summary Turn off the online privacy-request form
+ */
+export const DisablePrivacyIntakeLinkQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const DisablePrivacyIntakeLinkResponse = zod.object({
+  "customerRole": zod.enum(['controller', 'joint_controller', 'processor', 'mixed']),
+  "controllerName": zod.string().nullable(),
+  "controllerContact": zod.string().nullable(),
+  "dpoContact": zod.string().nullable(),
+  "noticeUrl": zod.string().nullable(),
+  "noticeVersion": zod.string().nullable(),
+  "noticeReviewedAt": zod.date().nullable(),
+  "processorAgreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "processorAgreementReviewedAt": zod.date().nullable(),
+  "responsibilitiesNotes": zod.string().nullable(),
+  "privacyOwner": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "updatedBy": zod.number().nullable(),
+  "intakeEnabled": zod.boolean(),
+  "intakePublishedAt": zod.date().nullable(),
+  "intakePublishedBy": zod.number().nullable(),
+  "intakeAssigneeId": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+}))
+
+
+/**
+ * @summary Choose the administrator assigned to online privacy requests
+ */
+export const SetPrivacyIntakeAssigneeQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const SetPrivacyIntakeAssigneeBody = zod.object({
+  "assigneeId": zod.number().nullable().describe('An administrator of this business, or null to notify every administrator')
+})
+
+export const SetPrivacyIntakeAssigneeResponse = zod.object({
+  "customerRole": zod.enum(['controller', 'joint_controller', 'processor', 'mixed']),
+  "controllerName": zod.string().nullable(),
+  "controllerContact": zod.string().nullable(),
+  "dpoContact": zod.string().nullable(),
+  "noticeUrl": zod.string().nullable(),
+  "noticeVersion": zod.string().nullable(),
+  "noticeReviewedAt": zod.date().nullable(),
+  "processorAgreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "processorAgreementReviewedAt": zod.date().nullable(),
+  "responsibilitiesNotes": zod.string().nullable(),
+  "privacyOwner": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "updatedBy": zod.number().nullable(),
+  "intakeEnabled": zod.boolean(),
+  "intakePublishedAt": zod.date().nullable(),
+  "intakePublishedBy": zod.number().nullable(),
+  "intakeAssigneeId": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+}))
+
+
+/**
+ * @summary Public - describe a business's online privacy-request form
+ */
+export const GetPrivacyIntakeFormParams = zod.object({
+  "token": zod.coerce.string()
+})
+
+export const GetPrivacyIntakeFormResponse = zod.object({
+  "organisationName": zod.string(),
+  "privacyNoticeUrl": zod.string().nullable(),
+  "requestTypes": zod.array(zod.enum(['access', 'rectification', 'erasure', 'restriction', 'portability', 'objection', 'other']))
+})
+
+
+/**
+ * @summary Public - submit a privacy rights request for staff review
+ */
+export const SubmitPrivacyIntakeRequestParams = zod.object({
+  "token": zod.coerce.string()
+})
+
+export const submitPrivacyIntakeRequestBodyNameMax = 200;
+
+export const submitPrivacyIntakeRequestBodyEmailMax = 320;
+
+export const submitPrivacyIntakeRequestBodyDetailsMax = 5000;
+
+
+
+export const SubmitPrivacyIntakeRequestBody = zod.object({
+  "requestType": zod.enum(['access', 'rectification', 'erasure', 'restriction', 'portability', 'objection', 'other']),
+  "name": zod.string().min(1).max(submitPrivacyIntakeRequestBodyNameMax),
+  "email": zod.string().max(submitPrivacyIntakeRequestBodyEmailMax),
+  "details": zod.string().min(1).max(submitPrivacyIntakeRequestBodyDetailsMax),
+  "website": zod.string().optional().describe('Leave empty (spam trap)')
+})
+
+export const SubmitPrivacyIntakeRequestResponse = zod.object({
+  "reference": zod.string(),
+  "receivedAt": zod.date()
+})
 
 
 /**
@@ -1359,6 +3245,10 @@ export const CreatePrivacyRecordResponse = zod.union([zod.object({
   "identityVerifiedBy": zod.number().nullable(),
   "decidedAt": zod.date().nullable(),
   "decidedBy": zod.number().nullable(),
+  "source": zod.enum(['staff', 'public_intake']),
+  "publicReference": zod.string().nullable(),
+  "assignedTo": zod.number().nullable(),
+  "adminNotifiedAt": zod.date().nullable(),
   "createdBy": zod.number().nullable(),
   "updatedBy": zod.number().nullable(),
   "createdAt": zod.date(),
@@ -1655,6 +3545,10 @@ export const UpdatePrivacyRecordResponse = zod.union([zod.object({
   "identityVerifiedBy": zod.number().nullable(),
   "decidedAt": zod.date().nullable(),
   "decidedBy": zod.number().nullable(),
+  "source": zod.enum(['staff', 'public_intake']),
+  "publicReference": zod.string().nullable(),
+  "assignedTo": zod.number().nullable(),
+  "adminNotifiedAt": zod.date().nullable(),
   "createdBy": zod.number().nullable(),
   "updatedBy": zod.number().nullable(),
   "createdAt": zod.date(),
@@ -1794,6 +3688,10 @@ export const AddPrivacyRetentionVerificationResponse = zod.object({
  */
 export const getStorageUsageResponseUsedBytesMin = 0;
 
+export const getStorageUsageResponseCapacityBytesMin = 0;
+
+export const getStorageUsageResponseUsageAgeSecondsMin = 0;
+
 export const getStorageUsageResponseObjectCountMin = 0;
 
 
@@ -1820,6 +3718,12 @@ export const getStorageUsageResponseEstimatedCostMarkupPercentMin = 0;
 
 export const GetStorageUsageResponse = zod.object({
   "usedBytes": zod.number().min(getStorageUsageResponseUsedBytesMin),
+  "capacityBytes": zod.number().min(getStorageUsageResponseCapacityBytesMin).nullable().describe('The storage the business pays for (plan allowance plus extra storage); null when uploads aren\'t limited.'),
+  "limitState": zod.enum(['ok', 'nearly_full', 'full', 'not_limited']).describe('Usage against the storage the business pays for. nearly_full is 80% or more; full stops new uploads unless automatic top-up adds storage; not_limited means no paid limit applies (no live subscription, or it couldn\'t be read).'),
+  "autoTopUp": zod.boolean().describe('Whether automatic 10 GB top-up is switched on.'),
+  "usageCheckedAt": zod.date().nullable().describe('When the totals were last reconciled with the storage provider; null before the first check.'),
+  "usageAgeSeconds": zod.number().min(getStorageUsageResponseUsageAgeSecondsMin).nullable().describe('Seconds since usageCheckedAt. Uploads and deletions since then are already included.'),
+  "usageRefreshing": zod.boolean().describe('A reconciliation with the storage provider is running; totals may change shortly.'),
   "objectCount": zod.number().min(getStorageUsageResponseObjectCountMin),
   "warningThresholdBytes": zod.number().min(1),
   "warning": zod.boolean(),
@@ -1837,6 +3741,24 @@ export const GetStorageUsageResponse = zod.object({
   "markupMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostMarkupMinorUnitsMin),
   "markupPercent": zod.number().min(getStorageUsageResponseEstimatedCostMarkupPercentMin)
 }).nullable()
+})
+
+
+/**
+ * @summary Whether this business's storage is nearly full or full, for the in-app banner
+ */
+export const getStorageStatusResponseUsedBytesMin = 0;
+
+export const getStorageStatusResponseCapacityBytesMin = 0;
+
+
+
+export const GetStorageStatusResponse = zod.object({
+  "state": zod.enum(['ok', 'nearly_full', 'full', 'not_limited']).describe('Usage against the storage the business pays for. nearly_full is 80% or more; full stops new uploads unless automatic top-up adds storage; not_limited means no paid limit applies (no live subscription, or it couldn\'t be read).'),
+  "canManage": zod.boolean().describe('Whether this user can add storage or change automatic top-up.'),
+  "autoTopUp": zod.boolean(),
+  "usedBytes": zod.number().min(getStorageStatusResponseUsedBytesMin).nullable().describe('Only for users who can manage storage.'),
+  "capacityBytes": zod.number().min(getStorageStatusResponseCapacityBytesMin).nullable().describe('Only for users who can manage storage, and null when not limited.')
 })
 
 
@@ -1899,23 +3821,150 @@ export const RequestUploadUrlResponse = zod.object({
 
 
 /**
+ * @summary Request a signed upload URL for a photo or video on an unresolved action
+ */
+export const RequestTrackActionMediaUploadParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const requestTrackActionMediaUploadBodyNameMax = 200;
+
+export const requestTrackActionMediaUploadBodyContentTypeMax = 100;
+
+
+
+export const RequestTrackActionMediaUploadBody = zod.object({
+  "name": zod.string().min(1).max(requestTrackActionMediaUploadBodyNameMax),
+  "contentType": zod.string().min(1).max(requestTrackActionMediaUploadBodyContentTypeMax)
+})
+
+export const RequestTrackActionMediaUploadResponse = zod.object({
+  "uploadUrl": zod.string(),
+  "objectPath": zod.string()
+})
+
+
+/**
+ * @summary Check an uploaded photo or video and attach it to an unresolved action
+ */
+export const AttachTrackActionMediaParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const attachTrackActionMediaBodyObjectPathMax = 1000;
+
+
+
+export const AttachTrackActionMediaBody = zod.object({
+  "objectPath": zod.string().min(1).max(attachTrackActionMediaBodyObjectPathMax)
+})
+
+export const AttachTrackActionMediaResponse = zod.object({
+  "mediaUrls": zod.array(zod.string())
+})
+
+
+/**
+ * Frees storage once an issue is finished. The issue, its notes and its history stay; the history records who deleted which file and when.
+ * @summary Delete a photo or video from a resolved or closed issue (owners and admins)
+ */
+export const DeleteFixTrackIssueMediaParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const deleteFixTrackIssueMediaBodyObjectPathMax = 1000;
+
+
+
+export const DeleteFixTrackIssueMediaBody = zod.object({
+  "objectPath": zod.string().min(1).max(deleteFixTrackIssueMediaBodyObjectPathMax)
+})
+
+export const DeleteFixTrackIssueMediaResponse = zod.object({
+  "mediaUrls": zod.array(zod.string())
+})
+
+
+/**
+ * A manager picks a contractor from the business's list, or adds a new one, and the job email (details, photos, a link to pick a visit date and a "job done" link) is sent straight away. The manager's choice is the approval, so the email does not wait in Contractor Approvals. If sending fails, the email stays in Contractor Approvals to retry.
+ * @summary Give a job to a contractor and email it to them (managers)
+ */
+export const AssignFixTrackContractorParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const assignFixTrackContractorBodyNewContractorNameMax = 200;
+
+export const assignFixTrackContractorBodyNewContractorCompanyMax = 200;
+
+export const assignFixTrackContractorBodyNewContractorEmailMin = 3;
+export const assignFixTrackContractorBodyNewContractorEmailMax = 320;
+
+export const assignFixTrackContractorBodyNewContractorPhoneMax = 50;
+
+
+
+export const AssignFixTrackContractorBody = zod.object({
+  "contractorId": zod.number().optional(),
+  "newContractor": zod.object({
+  "name": zod.string().min(1).max(assignFixTrackContractorBodyNewContractorNameMax),
+  "company": zod.string().max(assignFixTrackContractorBodyNewContractorCompanyMax).nullish(),
+  "email": zod.string().min(assignFixTrackContractorBodyNewContractorEmailMin).max(assignFixTrackContractorBodyNewContractorEmailMax),
+  "phone": zod.string().max(assignFixTrackContractorBodyNewContractorPhoneMax).nullish()
+}).optional(),
+  "targetDate": zod.date().nullish().describe('Left out keeps the issue\'s target date; null clears it.'),
+  "replace": zod.boolean().optional().describe('Confirms replacing a job already emailed to a contractor.'),
+  "mode": zod.enum(['assign', 'quote']).optional().describe('\"quote\" emails a quote request instead of giving the contractor the job. Left out means \"assign\".')
+}).describe('Exactly one of contractorId and newContractor.')
+
+export const AssignFixTrackContractorResponse = zod.object({
+  "ok": zod.boolean(),
+  "queueId": zod.number(),
+  "mode": zod.string().optional(),
+  "subject": zod.string().optional(),
+  "bodyHtml": zod.string().optional(),
+  "contractorId": zod.number(),
+  "contractorName": zod.string(),
+  "message": zod.string()
+})
+
+
+/**
  * @summary List fire safety logbook entries
  */
 export const ListFireSafetyChecksQueryParams = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill']).optional(),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).optional(),
   "siteId": zod.coerce.number().optional()
 })
+
+export const listFireSafetyChecksResponseDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const listFireSafetyChecksResponseEvacuationSecondsMax = 86400;
+
+
 
 export const ListFireSafetyChecksResponseItem = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
+  "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "drillTime": zod.string().regex(listFireSafetyChecksResponseDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
+  "evacuationSeconds": zod.number().min(1).max(listFireSafetyChecksResponseEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
+  "staffPresent": zod.array(zod.object({
+  "staffRosterId": zod.number().nullable().describe('Null when the roster entry has since been deleted.'),
+  "name": zod.string()
+})).optional().describe('Fire drills. Roster staff ticked as present (names as recorded). Empty for other checks.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -1925,26 +3974,61 @@ export const ListFireSafetyChecksResponse = zod.array(ListFireSafetyChecksRespon
 /**
  * @summary Record a fire safety check
  */
+export const createFireSafetyCheckBodyDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createFireSafetyCheckBodyEvacuationSecondsMax = 86400;
+
+export const createFireSafetyCheckBodyStaffPresentIdsMax = 2000;
+
+
+
 export const CreateFireSafetyCheckBody = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "siteId": zod.number().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "performedBy": zod.string().nullish()
+  "performedBy": zod.string().nullish(),
+  "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
+  "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "drillTime": zod.string().regex(createFireSafetyCheckBodyDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
+  "evacuationSeconds": zod.number().min(1).max(createFireSafetyCheckBodyEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
+  "staffPresentIds": zod.array(zod.number()).max(createFireSafetyCheckBodyStaffPresentIdsMax).optional().describe('Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.')
 })
+
+export const createFireSafetyCheckResponseDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createFireSafetyCheckResponseEvacuationSecondsMax = 86400;
+
+
 
 export const CreateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
+  "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "drillTime": zod.string().regex(createFireSafetyCheckResponseDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
+  "evacuationSeconds": zod.number().min(1).max(createFireSafetyCheckResponseEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
+  "staffPresent": zod.array(zod.object({
+  "staffRosterId": zod.number().nullable().describe('Null when the roster entry has since been deleted.'),
+  "name": zod.string()
+})).optional().describe('Fire drills. Roster staff ticked as present (names as recorded). Empty for other checks.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -1954,18 +4038,615 @@ export const CreateFireSafetyCheckResponse = zod.object({
  * @summary Per-check-type due status (last done, next due, overdue flags)
  */
 export const GetFireSafetyStatusQueryParams = zod.object({
-  "siteId": zod.coerce.number().optional()
+  "siteId": zod.coerce.number().optional().describe('Use the site\'s checks and its risk-assessed frequencies.')
 })
 
 export const GetFireSafetyStatusResponseItem = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "frequencyDays": zod.number(),
   "lastDate": zod.string().nullish(),
   "lastResult": zod.enum(['pass', 'fail', 'action_required']).nullable(),
   "dueDate": zod.string().nullish(),
-  "status": zod.enum(['ok', 'due_soon', 'overdue', 'never'])
+  "status": zod.enum(['ok', 'due_soon', 'overdue', 'never']),
+  "siteId": zod.number().nullish().describe('The site this row\'s status comes from; across all sites, the worst site for this check type. Null when no site is visible.'),
+  "siteName": zod.string().nullish().describe('Name of the site in siteId.'),
+  "siteCount": zod.number().optional().describe('How many visible sites were assessed for this check type.'),
+  "sitesAffected": zod.number().optional().describe('How many of those sites are overdue or have never recorded the check.')
 })
 export const GetFireSafetyStatusResponse = zod.array(GetFireSafetyStatusResponseItem)
+
+
+/**
+ * @summary A site's escape routes, ticked on each escape route sign-off and night fire walk
+ */
+export const GetFireEscapeRoutesQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('The site. Omit for a business with no sites.')
+})
+
+export const getFireEscapeRoutesResponseRoutesItemNameMax = 200;
+
+export const getFireEscapeRoutesResponseRoutesItemLocationMax = 200;
+
+
+
+export const GetFireEscapeRoutesResponse = zod.object({
+  "siteId": zod.number().nullable(),
+  "routes": zod.array(zod.object({
+  "name": zod.string().max(getFireEscapeRoutesResponseRoutesItemNameMax).describe('e.g. \"Final fire exit door route 1\" or \"Escape stairway 2\".'),
+  "location": zod.string().max(getFireEscapeRoutesResponseRoutesItemLocationMax).nullish().describe('Where it leads, or the assembly point (optional).')
+})),
+  "shared": zod.boolean().describe('True when the site has no list of its own yet and these are the business-wide routes saved before routes were set per site.')
+})
+
+
+/**
+ * @summary Replace a site's escape route list (managers)
+ */
+export const UpdateFireEscapeRoutesQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('The site. Omit for a business with no sites.')
+})
+
+export const updateFireEscapeRoutesBodyRoutesItemNameMax = 200;
+
+export const updateFireEscapeRoutesBodyRoutesItemLocationMax = 200;
+
+export const updateFireEscapeRoutesBodyRoutesMax = 100;
+
+
+
+export const UpdateFireEscapeRoutesBody = zod.object({
+  "routes": zod.array(zod.object({
+  "name": zod.string().max(updateFireEscapeRoutesBodyRoutesItemNameMax).describe('e.g. \"Final fire exit door route 1\" or \"Escape stairway 2\".'),
+  "location": zod.string().max(updateFireEscapeRoutesBodyRoutesItemLocationMax).nullish().describe('Where it leads, or the assembly point (optional).')
+})).max(updateFireEscapeRoutesBodyRoutesMax)
+})
+
+export const updateFireEscapeRoutesResponseRoutesItemNameMax = 200;
+
+export const updateFireEscapeRoutesResponseRoutesItemLocationMax = 200;
+
+
+
+export const UpdateFireEscapeRoutesResponse = zod.object({
+  "siteId": zod.number().nullable(),
+  "routes": zod.array(zod.object({
+  "name": zod.string().max(updateFireEscapeRoutesResponseRoutesItemNameMax).describe('e.g. \"Final fire exit door route 1\" or \"Escape stairway 2\".'),
+  "location": zod.string().max(updateFireEscapeRoutesResponseRoutesItemLocationMax).nullish().describe('Where it leads, or the assembly point (optional).')
+})),
+  "shared": zod.boolean().describe('True when the site has no list of its own yet and these are the business-wide routes saved before routes were set per site.')
+})
+
+
+/**
+ * @summary Night porter fire walks (22:00, 02:00, 06:00) for each site with a night porter, tonight and the last six nights
+ */
+export const GetNightFireWalksQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const GetNightFireWalksResponse = zod.object({
+  "walkTimes": zod.array(zod.string()),
+  "graceMinutes": zod.number().describe('A walk counts as missed this many minutes after its time.'),
+  "sites": zod.array(zod.object({
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "nights": zod.array(zod.object({
+  "nightOf": zod.string().describe('The evening the night starts (YYYY-MM-DD); its 02:00 and 06:00 walks fall on the next day.'),
+  "walks": zod.array(zod.object({
+  "date": zod.string().describe('The calendar day the walk falls on (YYYY-MM-DD).'),
+  "time": zod.enum(['22:00', '02:00', '06:00']),
+  "status": zod.enum(['done', 'failed', 'due', 'missed', 'upcoming', 'not_needed']).describe('done or failed once recorded (failed = something found); due from its time until an hour after; missed after that; upcoming before its time; not_needed before the site had a night porter.'),
+  "checkId": zod.number().nullable(),
+  "performedBy": zod.string().nullable()
+}))
+})).describe('Tonight (or the night now ending) first, then the six nights before.'),
+  "missedCount": zod.number().describe('Walks missed over the nights listed.')
+})).describe('Sites with a night porter that the caller can see.')
+})
+
+
+/**
+ * @summary Active roster staff with the latest fire drill each took part in
+ */
+export const GetFireDrillAttendanceQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Staff at this site and staff with no site. Omit for every visible member.')
+})
+
+export const GetFireDrillAttendanceResponse = zod.object({
+  "periodMonths": zod.number().describe('Everyone should take part in a drill at least once in this many months.'),
+  "staff": zod.array(zod.object({
+  "staffRosterId": zod.number(),
+  "name": zod.string(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "lastDrillDate": zod.string().nullable().describe('The latest fire drill they were ticked present at.'),
+  "due": zod.boolean().describe('True when they have not taken part in a fire drill within periodMonths.')
+}))
+})
+
+
+/**
+ * @summary List manual call points with when each was last tested
+ */
+export const ListFireCallPointsQueryParams = zod.object({
+  "siteId": zod.coerce.string().optional().describe('A site id, or \"none\" for call points not tied to a site. Omit for every visible site.'),
+  "includeArchived": zod.enum(['true', 'false']).optional()
+})
+
+export const ListFireCallPointsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
+  "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.'),
+  "archivedAt": zod.date().nullable(),
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
+  "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
+})
+export const ListFireCallPointsResponse = zod.array(ListFireCallPointsResponseItem)
+
+
+/**
+ * @summary Add a manual call point (managers)
+ */
+export const CreateFireCallPointBody = zod.object({
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "location": zod.string().nullish(),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas (75 dB at the bedhead).')
+})
+
+export const CreateFireCallPointResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
+  "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.'),
+  "archivedAt": zod.date().nullable(),
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
+  "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
+})
+
+
+/**
+ * @summary Set a site's call point rotation order (managers)
+ */
+export const OrderFireCallPointsBody = zod.object({
+  "siteId": zod.number().nullable(),
+  "ids": zod.array(zod.number()).describe('Every call point in use at the site, first to last.')
+})
+
+export const OrderFireCallPointsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
+  "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.'),
+  "archivedAt": zod.date().nullable(),
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
+  "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
+})
+export const OrderFireCallPointsResponse = zod.array(OrderFireCallPointsResponseItem)
+
+
+/**
+ * @summary Download the CSV template for uploading a call point list (managers)
+ */
+export const GetFireCallPointImportTemplateResponse = zod.unknown()
+
+
+/**
+ * The browser sends the spreadsheet's header row and cell text. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error. New call points join the end of their site's rotation in file order.
+ * @summary Preview or import a spreadsheet of call points (managers)
+ */
+export const ImportFireCallPointsBody = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "preview": zod.boolean().optional(),
+  "siteId": zod.number().nullish().describe('The site for rows whose Site cell is blank.')
+})
+
+export const ImportFireCallPointsResponse = zod.object({
+  "preview": zod.boolean(),
+  "committed": zod.boolean(),
+  "summary": zod.object({
+  "total": zod.number(),
+  "create": zod.number(),
+  "update": zod.number(),
+  "skip": zod.number(),
+  "error": zod.number()
+}),
+  "rows": zod.array(zod.object({
+  "row": zod.number(),
+  "action": zod.enum(['create', 'update', 'skip', 'error']),
+  "label": zod.string(),
+  "reasons": zod.array(zod.string())
+})),
+  "ignoredHeaders": zod.array(zod.string()),
+  "error": zod.string().optional()
+})
+
+
+/**
+ * @summary Download the CSV template for uploading LegionellaTrack outlets, tanks and calorifiers (managers)
+ */
+export const GetLegionellaOutletImportTemplateResponse = zod.unknown()
+
+
+/**
+ * The browser sends the spreadsheet's header row and cell text: Name, Type (Hot, Cold, TMV, Little used, Cold water tank or Calorifier), Location and Site. Outlets join the site's outlet list; cold water tanks and calorifiers join the equipment list, where tank checks name them. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error.
+ * @summary Preview or import a spreadsheet of LegionellaTrack outlets, tanks and calorifiers (managers)
+ */
+export const ImportLegionellaOutletsBody = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "preview": zod.boolean().optional(),
+  "siteId": zod.number().nullish().describe('The site for rows whose Site cell is blank.')
+})
+
+export const ImportLegionellaOutletsResponse = zod.object({
+  "preview": zod.boolean(),
+  "committed": zod.boolean(),
+  "summary": zod.object({
+  "total": zod.number(),
+  "create": zod.number(),
+  "update": zod.number(),
+  "skip": zod.number(),
+  "error": zod.number()
+}),
+  "rows": zod.array(zod.object({
+  "row": zod.number(),
+  "action": zod.enum(['create', 'update', 'skip', 'error']),
+  "label": zod.string(),
+  "reasons": zod.array(zod.string())
+})),
+  "ignoredHeaders": zod.array(zod.string()),
+  "error": zod.string().optional()
+})
+
+
+/**
+ * @summary Download the CSV template for importing suppliers' allergen information (managers)
+ */
+export const GetAllergenIngredientImportTemplateResponse = zod.unknown()
+
+
+/**
+ * The browser sends the spreadsheet's header row and cell text: a column per allergen (Y, N or May) or Contains and May contain lists. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error. Rows match existing ingredients by site and name; changed allergens update every dish using the ingredient, each with a change log entry.
+ * @summary Preview or import suppliers' allergen information as KitchenTrack ingredients (managers)
+ */
+export const ImportAllergenIngredientsBody = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "preview": zod.boolean().optional(),
+  "siteId": zod.number().nullish().describe('The site for rows whose Site cell is blank.')
+})
+
+export const ImportAllergenIngredientsResponse = zod.object({
+  "preview": zod.boolean(),
+  "committed": zod.boolean(),
+  "summary": zod.object({
+  "total": zod.number(),
+  "create": zod.number(),
+  "update": zod.number(),
+  "skip": zod.number(),
+  "error": zod.number()
+}),
+  "rows": zod.array(zod.object({
+  "row": zod.number(),
+  "action": zod.enum(['create', 'update', 'skip', 'error']),
+  "label": zod.string(),
+  "reasons": zod.array(zod.string())
+})),
+  "ignoredHeaders": zod.array(zod.string()),
+  "error": zod.string().optional()
+})
+
+
+/**
+ * @summary Download the CSV template for importing compliance checks (owners and consultants)
+ */
+export const GetComplianceCheckImportTemplateResponse = zod.unknown()
+
+
+/**
+ * The browser sends the spreadsheet's rows; headings below a title row are found. Each line is matched to ComplyTrack's own check where there is one, then to an existing check with that title at the site. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error. siteId is the site for rows whose Site cell is blank.
+ * @summary Preview or import a business's compliance checklist (owners and consultants)
+ */
+export const ImportComplianceChecksBody = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "preview": zod.boolean().optional(),
+  "siteId": zod.number().nullish().describe('The site for rows whose Site cell is blank.')
+})
+
+export const ImportComplianceChecksResponse = zod.object({
+  "preview": zod.boolean(),
+  "committed": zod.boolean(),
+  "summary": zod.object({
+  "total": zod.number(),
+  "create": zod.number(),
+  "update": zod.number(),
+  "skip": zod.number(),
+  "error": zod.number()
+}),
+  "rows": zod.array(zod.object({
+  "row": zod.number(),
+  "action": zod.enum(['create', 'update', 'skip', 'error']),
+  "label": zod.string(),
+  "reasons": zod.array(zod.string())
+})),
+  "ignoredHeaders": zod.array(zod.string()),
+  "error": zod.string().optional()
+})
+
+
+/**
+ * @summary The AI features add-on, whether this business has it, and how much of its allowance is used
+ */
+export const getAiAddonResponseOnePercentUsedMin = 0;
+export const getAiAddonResponseOnePercentUsedMax = 100;
+
+export const getAiAddonResponseOneCarriedOverPercentMin = 0;
+
+export const getAiAddonResponseOneNextLapsePercentMin = 0;
+
+export const getAiAddonResponseTwoTopUpsThisPeriodMin = 0;
+
+export const getAiAddonResponseTwoAutoTopUpLimitMin = 0;
+
+
+
+export const GetAiAddonResponse = zod.object({
+  "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
+  "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
+  "percentUsed": zod.number().min(getAiAddonResponseOnePercentUsedMin).max(getAiAddonResponseOnePercentUsedMax).describe('Share of what is available this period, allowance carried over included, that is used'),
+  "resetsAt": zod.date().nullable().describe('When the next month\'s allowance is added'),
+  "usedUp": zod.boolean().describe('Everything available, allowance carried over included, is used up'),
+  "carriedOverPercent": zod.number().min(getAiAddonResponseOneCarriedOverPercentMin).describe('Unused allowance carried over from earlier months, as a share of one month\'s allowance (150 = a month and a half)'),
+  "nextLapseAt": zod.date().nullable().describe('When the oldest carried-over allowance lapses if unused'),
+  "nextLapsePercent": zod.number().min(getAiAddonResponseOneNextLapsePercentMin).describe('How much lapses then, as a share of one month\'s allowance')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups). Unused allowance and top-ups carry over, oldest used first, and lapse 12 months after the end of the month they were for. Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").').and(zod.object({
+  "price": zod.object({
+  "unitAmount": zod.number().describe('Monthly price in pence, before VAT'),
+  "currency": zod.string()
+}).nullable(),
+  "purchasable": zod.boolean().describe('The add-on can be bought now (Stripe ready and the price exists)'),
+  "topUp": zod.object({
+  "amount": zod.number().describe('Price in pence, before VAT, charged at once (or invoiced by ALPS on an included allowance)'),
+  "allowance": zod.number().describe('AI use it adds, in pence, until the add-on renews'),
+  "currency": zod.string()
+}).nullable().describe('The top-up an owner can buy now; null unless the add-on is on and billing is ready. On an included allowance (plan \"included\") the owner agrees to it and ALPS adds the price to their consultancy invoice.'),
+  "topUpsThisPeriod": zod.number().min(getAiAddonResponseTwoTopUpsThisPeriodMin).describe('Top-ups paid for since the add-on last renewed'),
+  "autoTopUp": zod.boolean().describe('A top-up is bought automatically when the allowance runs out'),
+  "autoTopUpLimit": zod.number().min(getAiAddonResponseTwoAutoTopUpLimitMin).describe('Most automatic top-ups in one period')
+}))
+
+
+/**
+ * add puts one £15 monthly item on the subscription and charges the first month at once (nothing is switched on if the charge fails). remove takes it off at once with no refund. top_up charges a one-off top-up at once and adds its AI use until the add-on renews; the same requestId never charges twice. auto_top_up switches automatic top-ups on or off.
+ * @summary Switch the AI features add-on on or off, buy a top-up, or set automatic top-ups (owners and consultants)
+ */
+export const ChangeAiAddonBody = zod.object({
+  "action": zod.enum(['add', 'remove', 'top_up', 'auto_top_up']),
+  "requestId": zod.string().optional().describe('top_up only: a new UUID for each purchase, reused on retry'),
+  "enabled": zod.boolean().optional().describe('auto_top_up only: switch automatic top-ups on or off')
+})
+
+export const changeAiAddonResponseOnePercentUsedMin = 0;
+export const changeAiAddonResponseOnePercentUsedMax = 100;
+
+export const changeAiAddonResponseOneCarriedOverPercentMin = 0;
+
+export const changeAiAddonResponseOneNextLapsePercentMin = 0;
+
+export const changeAiAddonResponseTwoTopUpsThisPeriodMin = 0;
+
+export const changeAiAddonResponseTwoAutoTopUpLimitMin = 0;
+
+
+
+export const ChangeAiAddonResponse = zod.object({
+  "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
+  "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
+  "percentUsed": zod.number().min(changeAiAddonResponseOnePercentUsedMin).max(changeAiAddonResponseOnePercentUsedMax).describe('Share of what is available this period, allowance carried over included, that is used'),
+  "resetsAt": zod.date().nullable().describe('When the next month\'s allowance is added'),
+  "usedUp": zod.boolean().describe('Everything available, allowance carried over included, is used up'),
+  "carriedOverPercent": zod.number().min(changeAiAddonResponseOneCarriedOverPercentMin).describe('Unused allowance carried over from earlier months, as a share of one month\'s allowance (150 = a month and a half)'),
+  "nextLapseAt": zod.date().nullable().describe('When the oldest carried-over allowance lapses if unused'),
+  "nextLapsePercent": zod.number().min(changeAiAddonResponseOneNextLapsePercentMin).describe('How much lapses then, as a share of one month\'s allowance')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups). Unused allowance and top-ups carry over, oldest used first, and lapse 12 months after the end of the month they were for. Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").').and(zod.object({
+  "price": zod.object({
+  "unitAmount": zod.number().describe('Monthly price in pence, before VAT'),
+  "currency": zod.string()
+}).nullable(),
+  "purchasable": zod.boolean().describe('The add-on can be bought now (Stripe ready and the price exists)'),
+  "topUp": zod.object({
+  "amount": zod.number().describe('Price in pence, before VAT, charged at once (or invoiced by ALPS on an included allowance)'),
+  "allowance": zod.number().describe('AI use it adds, in pence, until the add-on renews'),
+  "currency": zod.string()
+}).nullable().describe('The top-up an owner can buy now; null unless the add-on is on and billing is ready. On an included allowance (plan \"included\") the owner agrees to it and ALPS adds the price to their consultancy invoice.'),
+  "topUpsThisPeriod": zod.number().min(changeAiAddonResponseTwoTopUpsThisPeriodMin).describe('Top-ups paid for since the add-on last renewed'),
+  "autoTopUp": zod.boolean().describe('A top-up is bought automatically when the allowance runs out'),
+  "autoTopUpLimit": zod.number().min(changeAiAddonResponseTwoAutoTopUpLimitMin).describe('Most automatic top-ups in one period')
+}))
+
+
+/**
+ * @summary Whether ComplyTrack can read a photo or document of an appliance list, and this month's use
+ */
+export const getPatRegisterReadingResponseAiPercentUsedMin = 0;
+export const getPatRegisterReadingResponseAiPercentUsedMax = 100;
+
+export const getPatRegisterReadingResponseAiCarriedOverPercentMin = 0;
+
+export const getPatRegisterReadingResponseAiNextLapsePercentMin = 0;
+
+
+
+export const GetPatRegisterReadingResponse = zod.object({
+  "available": zod.boolean(),
+  "monthlyLimit": zod.number().describe('Readings a business may have each month; 0 means no limit'),
+  "usedThisMonth": zod.number(),
+  "ai": zod.object({
+  "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
+  "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
+  "percentUsed": zod.number().min(getPatRegisterReadingResponseAiPercentUsedMin).max(getPatRegisterReadingResponseAiPercentUsedMax).describe('Share of what is available this period, allowance carried over included, that is used'),
+  "resetsAt": zod.date().nullable().describe('When the next month\'s allowance is added'),
+  "usedUp": zod.boolean().describe('Everything available, allowance carried over included, is used up'),
+  "carriedOverPercent": zod.number().min(getPatRegisterReadingResponseAiCarriedOverPercentMin).describe('Unused allowance carried over from earlier months, as a share of one month\'s allowance (150 = a month and a half)'),
+  "nextLapseAt": zod.date().nullable().describe('When the oldest carried-over allowance lapses if unused'),
+  "nextLapsePercent": zod.number().min(getPatRegisterReadingResponseAiNextLapsePercentMin).describe('How much lapses then, as a share of one month\'s allowance')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups). Unused allowance and top-ups carry over, oldest used first, and lapse 12 months after the end of the month they were for. Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").'),
+  "sites": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+}))
+})
+
+
+/**
+ * Claude reads the file and returns rows in the PAT appliance import's columns. Nothing is saved: the browser sends the rows to POST /imports/pat-appliances for the usual preview and import. The file is not stored. Off until the server has an Anthropic API key; each business has a monthly number of readings.
+ * @summary Read a photo, scan, PDF or Word list of appliances into register rows (managers)
+ */
+export const readPatRegisterListBodyFileNameMax = 255;
+
+
+
+export const ReadPatRegisterListBody = zod.object({
+  "fileName": zod.string().max(readPatRegisterListBodyFileNameMax),
+  "mimeType": zod.string().describe('image\/jpeg, image\/png, image\/webp, image\/gif, application\/pdf, .docx or text\/plain'),
+  "data": zod.string().describe('The file as base64 (8 MB at most before encoding)'),
+  "siteId": zod.number().nullish().describe('The site the list is for, if the person chose one')
+})
+
+export const ReadPatRegisterListResponse = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "unclear": zod.number().describe('Rows that were hard to read; their Notes start with \"Check:\"')
+})
+
+
+/**
+ * @summary Whether ComplyTrack can read a photo or document list for an import, and this month's use
+ */
+export const GetImportListReadingParams = zod.object({
+  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster', 'allergen-ingredients', 'legionella-outlets'])
+})
+
+export const getImportListReadingResponseAiPercentUsedMin = 0;
+export const getImportListReadingResponseAiPercentUsedMax = 100;
+
+export const getImportListReadingResponseAiCarriedOverPercentMin = 0;
+
+export const getImportListReadingResponseAiNextLapsePercentMin = 0;
+
+
+
+export const GetImportListReadingResponse = zod.object({
+  "available": zod.boolean(),
+  "monthlyLimit": zod.number().describe('Readings a business may have each month; 0 means no limit'),
+  "usedThisMonth": zod.number(),
+  "ai": zod.object({
+  "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
+  "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
+  "percentUsed": zod.number().min(getImportListReadingResponseAiPercentUsedMin).max(getImportListReadingResponseAiPercentUsedMax).describe('Share of what is available this period, allowance carried over included, that is used'),
+  "resetsAt": zod.date().nullable().describe('When the next month\'s allowance is added'),
+  "usedUp": zod.boolean().describe('Everything available, allowance carried over included, is used up'),
+  "carriedOverPercent": zod.number().min(getImportListReadingResponseAiCarriedOverPercentMin).describe('Unused allowance carried over from earlier months, as a share of one month\'s allowance (150 = a month and a half)'),
+  "nextLapseAt": zod.date().nullable().describe('When the oldest carried-over allowance lapses if unused'),
+  "nextLapsePercent": zod.number().min(getImportListReadingResponseAiNextLapsePercentMin).describe('How much lapses then, as a share of one month\'s allowance')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups). Unused allowance and top-ups carry over, oldest used first, and lapse 12 months after the end of the month they were for. Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").'),
+  "sites": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+}))
+})
+
+
+/**
+ * Claude reads the file and returns rows in the import's own columns (RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment, the staff roster or KitchenTrack suppliers' allergen information). Nothing is saved: the browser sends the rows through the import's usual preview. The file is not stored. Off until the server has an Anthropic API key; readings share the business's monthly number with the PAT register reading.
+ * @summary Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
+ */
+export const ReadImportListParams = zod.object({
+  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster', 'allergen-ingredients', 'legionella-outlets'])
+})
+
+export const readImportListBodyFileNameMax = 255;
+
+
+
+export const ReadImportListBody = zod.object({
+  "fileName": zod.string().max(readImportListBodyFileNameMax),
+  "mimeType": zod.string().describe('image\/jpeg, image\/png, image\/webp, image\/gif, application\/pdf, .docx or text\/plain'),
+  "data": zod.string().describe('The file as base64 (8 MB at most before encoding)'),
+  "siteId": zod.number().nullish().describe('The site the list is for, if the person chose one')
+})
+
+export const ReadImportListResponse = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "unclear": zod.number().describe('Rows that were hard to read'),
+  "unclearRows": zod.array(zod.number()).describe('File row numbers (the header row is row 1) of the rows that were hard to read; where the import has a Notes column, their Notes start with \"Check:\"')
+})
+
+
+/**
+ * For "Upload your lists", where many files are dropped at once. Claude only says which of the business's imports the file is (PAT appliances, RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment or the staff roster); the rows are read later by that import. Uses the AI allowance but not the monthly reading number. The file is not stored. Off until the server has an Anthropic API key.
+ * @summary Say which import a photo, scan, PDF or Word list belongs in (owners and consultants)
+ */
+export const sortImportListBodyFileNameMax = 255;
+
+
+
+export const SortImportListBody = zod.object({
+  "fileName": zod.string().max(sortImportListBodyFileNameMax),
+  "mimeType": zod.string().describe('image\/jpeg, image\/png, image\/webp, image\/gif, application\/pdf, .docx or text\/plain'),
+  "data": zod.string().describe('The file as base64 (8 MB at most before encoding)'),
+  "siteId": zod.number().nullish().describe('The site the list is for, if the person chose one')
+})
+
+export const SortImportListResponse = zod.object({
+  "kind": zod.union([zod.literal('pat-appliances'),zod.literal('room-track-rooms'),zod.literal('contractors'),zod.literal('fire-call-points'),zod.literal('greentrack-equipment'),zod.literal('staff-roster'),zod.literal(null)]).nullable().describe('The import the file belongs in; null when it is none of them')
+})
+
+
+/**
+ * @summary Rename, move, archive or restore a call point (managers)
+ */
+export const UpdateFireCallPointParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateFireCallPointBody = zod.object({
+  "name": zod.string().optional(),
+  "location": zod.string().nullish(),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas (75 dB at the bedhead).'),
+  "archived": zod.boolean().optional()
+})
+
+export const UpdateFireCallPointResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
+  "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.'),
+  "archivedAt": zod.date().nullable(),
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
+  "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
+})
 
 
 /**
@@ -1975,25 +4656,60 @@ export const UpdateFireSafetyCheckParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const updateFireSafetyCheckBodyDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const updateFireSafetyCheckBodyEvacuationSecondsMax = 86400;
+
+export const updateFireSafetyCheckBodyStaffPresentIdsMax = 2000;
+
+
+
 export const UpdateFireSafetyCheckBody = zod.object({
   "checkDate": zod.string().optional(),
   "result": zod.enum(['pass', 'fail']).optional(),
   "siteId": zod.number().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "performedBy": zod.string().nullish()
+  "performedBy": zod.string().nullish(),
+  "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
+  "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "drillTime": zod.string().regex(updateFireSafetyCheckBodyDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
+  "evacuationSeconds": zod.number().min(1).max(updateFireSafetyCheckBodyEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
+  "staffPresentIds": zod.array(zod.number()).max(updateFireSafetyCheckBodyStaffPresentIdsMax).optional().describe('Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.')
 })
+
+export const updateFireSafetyCheckResponseDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const updateFireSafetyCheckResponseEvacuationSecondsMax = 86400;
+
+
 
 export const UpdateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
+  "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "drillTime": zod.string().regex(updateFireSafetyCheckResponseDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
+  "evacuationSeconds": zod.number().min(1).max(updateFireSafetyCheckResponseEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
+  "staffPresent": zod.array(zod.object({
+  "staffRosterId": zod.number().nullable().describe('Null when the roster entry has since been deleted.'),
+  "name": zod.string()
+})).optional().describe('Fire drills. Roster staff ticked as present (names as recorded). Empty for other checks.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -2032,7 +4748,7 @@ export const GetFoodSafetyConfigResponse = zod.object({
   "food_show_sous_vide": zod.string().nullish(),
   "food_num_fridges": zod.string().nullish(),
   "food_num_freezers": zod.string().nullish(),
-  "food_jurisdiction": zod.enum(['scotland', 'england_wales']).nullish().describe('Food-safety jurisdiction used to choose the standard reheating limit.'),
+  "food_jurisdiction": zod.enum(['scotland', 'england_wales', 'northern_ireland', 'ireland', 'australia', 'new_zealand', 'canada', 'united_states', 'other']).nullish().describe('Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels.'),
   "food_cooking_limit": zod.string().nullish(),
   "food_cooling_limit": zod.string().nullish(),
   "food_reheating_limit": zod.string().nullish(),
@@ -2065,7 +4781,7 @@ export const UpdateFoodSafetyConfigBody = zod.object({
   "food_show_sous_vide": zod.string().nullish(),
   "food_num_fridges": zod.string().nullish(),
   "food_num_freezers": zod.string().nullish(),
-  "food_jurisdiction": zod.enum(['scotland', 'england_wales']).nullish().describe('Food-safety jurisdiction used to choose the standard reheating limit.'),
+  "food_jurisdiction": zod.enum(['scotland', 'england_wales', 'northern_ireland', 'ireland', 'australia', 'new_zealand', 'canada', 'united_states', 'other']).nullish().describe('Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels.'),
   "food_cooking_limit": zod.string().nullish(),
   "food_cooling_limit": zod.string().nullish(),
   "food_reheating_limit": zod.string().nullish(),
@@ -2101,7 +4817,7 @@ export const ResetFoodSafetyConfigResponse = zod.object({
   "food_show_sous_vide": zod.string().nullish(),
   "food_num_fridges": zod.string().nullish(),
   "food_num_freezers": zod.string().nullish(),
-  "food_jurisdiction": zod.enum(['scotland', 'england_wales']).nullish().describe('Food-safety jurisdiction used to choose the standard reheating limit.'),
+  "food_jurisdiction": zod.enum(['scotland', 'england_wales', 'northern_ireland', 'ireland', 'australia', 'new_zealand', 'canada', 'united_states', 'other']).nullish().describe('Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels.'),
   "food_cooking_limit": zod.string().nullish(),
   "food_cooling_limit": zod.string().nullish(),
   "food_reheating_limit": zod.string().nullish(),
@@ -2540,6 +5256,153 @@ export const UpdateHotTubCheckResponse = zod.object({
 
 
 /**
+ * @summary The tree register, each tree with its last inspection and when it is next due
+ */
+export const ListTreeTrackTreesQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional(),
+  "includeRemoved": zod.coerce.boolean().optional().describe('Include trees marked felled or removed')
+})
+
+export const listTreeTrackTreesResponseOneInspectionIntervalMonthsMax = 60;
+
+
+
+export const ListTreeTrackTreesResponseItem = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "ref": zod.string().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(listTreeTrackTreesResponseOneInspectionIntervalMonthsMax),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed'),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+}).and(zod.object({
+  "lastInspected": zod.date().nullish().describe('Last routine inspection (visual, detailed or risk assessment)'),
+  "lastCheckDate": zod.date().nullish(),
+  "lastCheckType": zod.string().nullish(),
+  "openIssue": zod.object({
+  "checkDate": zod.date().optional(),
+  "severity": zod.string().nullish()
+}).nullish().describe('The latest inspection found a problem'),
+  "nextDue": zod.date().nullish(),
+  "status": zod.enum(['ok', 'due_soon', 'overdue', 'never'])
+}))
+export const ListTreeTrackTreesResponse = zod.array(ListTreeTrackTreesResponseItem)
+
+
+/**
+ * @summary Add a tree to the register (Owners and consultants)
+ */
+export const createTreeTrackTreeBodyInspectionIntervalMonthsMax = 60;
+
+
+
+export const CreateTreeTrackTreeBody = zod.object({
+  "ref": zod.string().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).optional().describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(createTreeTrackTreeBodyInspectionIntervalMonthsMax).optional(),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed')
+})
+
+export const createTreeTrackTreeResponseInspectionIntervalMonthsMax = 60;
+
+
+
+export const CreateTreeTrackTreeResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "ref": zod.string().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(createTreeTrackTreeResponseInspectionIntervalMonthsMax),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed'),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Change a tree on the register, or mark it felled or removed (Owners and consultants)
+ */
+export const UpdateTreeTrackTreeParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const updateTreeTrackTreeBodyInspectionIntervalMonthsMax = 60;
+
+
+
+export const UpdateTreeTrackTreeBody = zod.object({
+  "ref": zod.string().optional().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).optional().describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(updateTreeTrackTreeBodyInspectionIntervalMonthsMax).optional(),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed')
+})
+
+export const updateTreeTrackTreeResponseInspectionIntervalMonthsMax = 60;
+
+
+
+export const UpdateTreeTrackTreeResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "ref": zod.string().describe('Tag number, name or group, such as T12'),
+  "species": zod.string().nullish(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish().describe('Where the tree is, in words'),
+  "what3words": zod.string().nullish().describe('what3words address, stored as word.word.word'),
+  "latitude": zod.number().nullish(),
+  "longitude": zod.number().nullish(),
+  "riskZone": zod.enum(['high', 'medium', 'low']).describe('How busy the area under the tree is'),
+  "inspectionIntervalMonths": zod.number().min(1).max(updateTreeTrackTreeResponseInspectionIntervalMonthsMax),
+  "notes": zod.string().nullish(),
+  "removedAt": zod.date().nullish().describe('Day the tree was felled or removed'),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Delete a tree added by mistake; one with inspections is marked felled instead (Owners and consultants)
+ */
+export const DeleteTreeTrackTreeParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteTreeTrackTreeResponse = zod.void()
+
+
+/**
  * @summary Get Bike hire configuration
  */
 export const GetBikeTrackConfigResponse = zod.object({
@@ -2573,7 +5436,8 @@ export const UpdateBikeTrackConfigResponse = zod.object({
  */
 export const GetGreenTrackConfigResponse = zod.object({
   "green_show_fuel": zod.string().optional(),
-  "green_default_operators": zod.string().optional()
+  "green_default_operators": zod.string().optional(),
+  "green_default_site_id": zod.string().optional().describe('The site new machines and the Daily checks tab start on (\"\" for none)')
 })
 
 
@@ -2582,12 +5446,865 @@ export const GetGreenTrackConfigResponse = zod.object({
  */
 export const UpdateGreenTrackConfigBody = zod.object({
   "green_show_fuel": zod.string().optional(),
-  "green_default_operators": zod.string().optional()
+  "green_default_operators": zod.string().optional(),
+  "green_default_site_id": zod.string().optional().describe('The site new machines and the Daily checks tab start on (\"\" for none)')
 })
 
 export const UpdateGreenTrackConfigResponse = zod.object({
   "green_show_fuel": zod.string().optional(),
-  "green_default_operators": zod.string().optional()
+  "green_default_operators": zod.string().optional(),
+  "green_default_site_id": zod.string().optional().describe('The site new machines and the Daily checks tab start on (\"\" for none)')
+})
+
+
+/**
+ * Current hours are the latest reading (by date) from standalone hour readings, pre-use checks, fuel logs and service records.
+ * @summary Each active machine's hour meter, hours used and service due by hours
+ */
+export const GetGreenTrackMachineHoursResponse = zod.object({
+  "dueSoonHours": zod.number(),
+  "machines": zod.array(zod.object({
+  "machineId": zod.number(),
+  "machineName": zod.string(),
+  "machineType": zod.string(),
+  "siteId": zod.number().nullish(),
+  "currentHours": zod.number().nullable(),
+  "lastReadingDate": zod.string().nullable(),
+  "hoursLast7Days": zod.number().nullable(),
+  "hoursLast30Days": zod.number().nullable(),
+  "lastServiceDate": zod.string().nullable(),
+  "nextServiceHours": zod.number().nullable(),
+  "hoursToService": zod.number().nullable(),
+  "serviceHoursState": zod.enum(['overdue', 'due_soon', 'ok', 'none'])
+}))
+})
+
+
+/**
+ * @summary List hour meter readings from every source, newest first
+ */
+export const ListGreenTrackHourReadingsQueryParams = zod.object({
+  "machineId": zod.coerce.number().optional(),
+  "limit": zod.coerce.number().optional()
+})
+
+export const ListGreenTrackHourReadingsResponseItem = zod.object({
+  "id": zod.number().nullish().describe('Set only for standalone readings, which are edited on this route'),
+  "key": zod.string(),
+  "source": zod.enum(['reading', 'pre_use_check', 'fuel_log', 'service']),
+  "sourceLabel": zod.string(),
+  "sourceId": zod.number(),
+  "machineId": zod.number(),
+  "machineName": zod.string(),
+  "machineType": zod.string().optional(),
+  "readingDate": zod.string(),
+  "hours": zod.number(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish()
+})
+export const ListGreenTrackHourReadingsResponse = zod.array(ListGreenTrackHourReadingsResponseItem)
+
+
+/**
+ * @summary Log an hour meter reading
+ */
+export const CreateGreenTrackHourReadingBody = zod.object({
+  "machineId": zod.number(),
+  "readingDate": zod.date(),
+  "hours": zod.number(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "meterReplaced": zod.boolean().optional().describe('Confirms a reading lower than an earlier one (meter replaced or reset)')
+})
+
+export const CreateGreenTrackHourReadingResponse = zod.object({
+  "id": zod.number().optional(),
+  "machine_id": zod.number().optional(),
+  "reading_date": zod.string().optional(),
+  "hours": zod.number().optional()
+}).describe('The stored reading (database column names)')
+
+
+/**
+ * @summary Correct a standalone hour meter reading
+ */
+export const UpdateGreenTrackHourReadingParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateGreenTrackHourReadingBody = zod.object({
+  "readingDate": zod.date().optional(),
+  "hours": zod.number().optional(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "meterReplaced": zod.boolean().optional()
+})
+
+export const UpdateGreenTrackHourReadingResponse = zod.object({
+  "id": zod.number().optional(),
+  "machine_id": zod.number().optional(),
+  "reading_date": zod.string().optional(),
+  "hours": zod.number().optional()
+}).describe('The stored reading (database column names)')
+
+
+/**
+ * @summary Delete a standalone hour meter reading (managers)
+ */
+export const DeleteGreenTrackHourReadingParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteGreenTrackHourReadingResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary List greenkeeping shed opening and closing checklists
+ */
+export const ListGreenTrackShedChecksQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional(),
+  "date": zod.coerce.string().optional(),
+  "type": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']).optional()
+})
+
+export const ListGreenTrackShedChecksResponseItem = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "checklistType": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']),
+  "checkDate": zod.string(),
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish()
+})
+export const ListGreenTrackShedChecksResponse = zod.array(ListGreenTrackShedChecksResponseItem)
+
+
+/**
+ * @summary Save the day's shed checklist for a site (creates it, or updates its draft)
+ */
+export const SaveGreenTrackShedCheckBody = zod.object({
+  "siteId": zod.number().nullish(),
+  "checklistType": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']),
+  "checkDate": zod.string(),
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})).optional(),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish().describe('Set to submit; every item must be answered and failed items need a note')
+})
+
+export const SaveGreenTrackShedCheckResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "checklistType": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']),
+  "checkDate": zod.string(),
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish()
+})
+
+
+/**
+ * @summary One shed checklist
+ */
+export const GetGreenTrackShedCheckParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetGreenTrackShedCheckResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "checklistType": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']),
+  "checkDate": zod.string(),
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish()
+})
+
+
+/**
+ * @summary Edit or submit a draft shed checklist
+ */
+export const UpdateGreenTrackShedCheckParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateGreenTrackShedCheckBody = zod.object({
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})).optional(),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish()
+})
+
+export const UpdateGreenTrackShedCheckResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "checklistType": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']),
+  "checkDate": zod.string(),
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish()
+})
+
+
+/**
+ * @summary Delete a draft shed checklist
+ */
+export const DeleteGreenTrackShedCheckParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteGreenTrackShedCheckResponse = zod.void()
+
+
+/**
+ * @summary The department that does a site's shed checks, and the departments that could
+ */
+export const GetGreenTrackShedTeamQueryParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const GetGreenTrackShedTeamResponse = zod.object({
+  "siteId": zod.number(),
+  "departmentId": zod.number().nullable(),
+  "departmentName": zod.string().nullable(),
+  "chosen": zod.boolean().describe('False when the department was matched by \"green\" in its name'),
+  "departments": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+}))
+})
+
+
+/**
+ * @summary Choose the department that does a site's shed checks (Owners); null matches by name again
+ */
+export const SetGreenTrackShedTeamBody = zod.object({
+  "siteId": zod.number(),
+  "departmentId": zod.number().nullable()
+})
+
+export const SetGreenTrackShedTeamResponse = zod.object({
+  "siteId": zod.number(),
+  "departmentId": zod.number().nullable(),
+  "departmentName": zod.string().nullable(),
+  "chosen": zod.boolean().describe('False when the department was matched by \"green\" in its name'),
+  "departments": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+}))
+})
+
+
+/**
+ * @summary Every active machine's pre-start check for a day, or its "not in use" mark
+ */
+export const GetGreenTrackPreStartDayQueryParams = zod.object({
+  "date": zod.coerce.string().optional().describe('Defaults to the business\'s today'),
+  "siteId": zod.coerce.number().optional().describe('Machines at this site and machines with no site')
+})
+
+export const GetGreenTrackPreStartDayResponse = zod.object({
+  "date": zod.string(),
+  "machines": zod.array(zod.object({
+  "machineId": zod.number(),
+  "name": zod.string(),
+  "type": zod.string().nullable(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "status": zod.enum(['checked', 'failed', 'not_in_use', 'todo']),
+  "checkId": zod.number().nullable(),
+  "checkedBy": zod.string().nullable(),
+  "notInUseId": zod.number().nullable(),
+  "notInUseReason": zod.string().nullable(),
+  "markedBy": zod.string().nullable()
+})),
+  "total": zod.number(),
+  "checked": zod.number(),
+  "failed": zod.number(),
+  "notInUse": zod.number(),
+  "todo": zod.number()
+})
+
+
+/**
+ * @summary Mark a machine as not in use for a day, so it needs no pre-start check
+ */
+export const MarkGreenTrackMachineNotInUseBody = zod.object({
+  "machineId": zod.number(),
+  "checkDate": zod.string(),
+  "reason": zod.string().nullish()
+})
+
+export const MarkGreenTrackMachineNotInUseResponse = zod.object({
+  "id": zod.number().optional(),
+  "machine_id": zod.number().optional(),
+  "check_date": zod.string().optional(),
+  "reason": zod.string().nullish()
+}).describe('The stored mark (database column names)')
+
+
+/**
+ * @summary Remove a "not in use" mark
+ */
+export const DeleteGreenTrackMachineNotInUseParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteGreenTrackMachineNotInUseResponse = zod.void()
+
+
+/**
+ * @summary List spraying and stock products with their stock on hand
+ */
+export const ListGreenTrackProductsResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "category": zod.enum(['pesticide', 'fertiliser', 'top_dressing', 'seed', 'wetting_agent', 'other']),
+  "unit": zod.enum(['L', 'kg', 't', 'bag', 'unit']),
+  "mappNumber": zod.string().nullish(),
+  "activeIngredient": zod.string().nullish(),
+  "supplier": zod.string().nullish(),
+  "reorderLevel": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "active": zod.boolean(),
+  "stockOnHand": zod.number().describe('Worked out from deliveries, counts, write-offs and records, in the product\'s unit'),
+  "lowStock": zod.boolean(),
+  "lastDeliveryDate": zod.date().nullish(),
+  "lastCountDate": zod.date().nullish(),
+  "createdAt": zod.date().optional(),
+  "updatedAt": zod.date().optional()
+})
+export const ListGreenTrackProductsResponse = zod.array(ListGreenTrackProductsResponseItem)
+
+
+/**
+ * @summary Add a product (pesticide, fertiliser, top dressing, seed...)
+ */
+export const CreateGreenTrackProductBody = zod.object({
+  "name": zod.string().optional(),
+  "category": zod.enum(['pesticide', 'fertiliser', 'top_dressing', 'seed', 'wetting_agent', 'other']).optional(),
+  "unit": zod.enum(['L', 'kg', 't', 'bag', 'unit']).optional(),
+  "mappNumber": zod.string().nullish(),
+  "activeIngredient": zod.string().nullish(),
+  "supplier": zod.string().nullish(),
+  "reorderLevel": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "active": zod.boolean().optional(),
+  "openingStock": zod.number().nullish().describe('Only when adding a product. The amount in stock now, saved as a stock count dated today.')
+})
+
+export const CreateGreenTrackProductResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "category": zod.enum(['pesticide', 'fertiliser', 'top_dressing', 'seed', 'wetting_agent', 'other']),
+  "unit": zod.enum(['L', 'kg', 't', 'bag', 'unit']),
+  "mappNumber": zod.string().nullish(),
+  "activeIngredient": zod.string().nullish(),
+  "supplier": zod.string().nullish(),
+  "reorderLevel": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "active": zod.boolean(),
+  "stockOnHand": zod.number().describe('Worked out from deliveries, counts, write-offs and records, in the product\'s unit'),
+  "lowStock": zod.boolean(),
+  "lastDeliveryDate": zod.date().nullish(),
+  "lastCountDate": zod.date().nullish(),
+  "createdAt": zod.date().optional(),
+  "updatedAt": zod.date().optional()
+})
+
+
+/**
+ * The unit cannot change once the product has stock or spraying records (409).
+ * @summary Update a product, or archive it with active false
+ */
+export const UpdateGreenTrackProductParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateGreenTrackProductBody = zod.object({
+  "name": zod.string().optional(),
+  "category": zod.enum(['pesticide', 'fertiliser', 'top_dressing', 'seed', 'wetting_agent', 'other']).optional(),
+  "unit": zod.enum(['L', 'kg', 't', 'bag', 'unit']).optional(),
+  "mappNumber": zod.string().nullish(),
+  "activeIngredient": zod.string().nullish(),
+  "supplier": zod.string().nullish(),
+  "reorderLevel": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "active": zod.boolean().optional(),
+  "openingStock": zod.number().nullish().describe('Only when adding a product. The amount in stock now, saved as a stock count dated today.')
+})
+
+export const UpdateGreenTrackProductResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "category": zod.enum(['pesticide', 'fertiliser', 'top_dressing', 'seed', 'wetting_agent', 'other']),
+  "unit": zod.enum(['L', 'kg', 't', 'bag', 'unit']),
+  "mappNumber": zod.string().nullish(),
+  "activeIngredient": zod.string().nullish(),
+  "supplier": zod.string().nullish(),
+  "reorderLevel": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "active": zod.boolean(),
+  "stockOnHand": zod.number().describe('Worked out from deliveries, counts, write-offs and records, in the product\'s unit'),
+  "lowStock": zod.boolean(),
+  "lastDeliveryDate": zod.date().nullish(),
+  "lastCountDate": zod.date().nullish(),
+  "createdAt": zod.date().optional(),
+  "updatedAt": zod.date().optional()
+})
+
+
+/**
+ * @summary Delete a product with no stock or spraying records (managers)
+ */
+export const DeleteGreenTrackProductParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteGreenTrackProductResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary A product's stock history, newest first, with the balance after each entry
+ */
+export const GetGreenTrackProductHistoryParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetGreenTrackProductHistoryResponse = zod.object({
+  "product": zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "category": zod.enum(['pesticide', 'fertiliser', 'top_dressing', 'seed', 'wetting_agent', 'other']),
+  "unit": zod.enum(['L', 'kg', 't', 'bag', 'unit']),
+  "mappNumber": zod.string().nullish(),
+  "activeIngredient": zod.string().nullish(),
+  "supplier": zod.string().nullish(),
+  "reorderLevel": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "active": zod.boolean(),
+  "stockOnHand": zod.number().describe('Worked out from deliveries, counts, write-offs and records, in the product\'s unit'),
+  "lowStock": zod.boolean(),
+  "lastDeliveryDate": zod.date().nullish(),
+  "lastCountDate": zod.date().nullish(),
+  "createdAt": zod.date().optional(),
+  "updatedAt": zod.date().optional()
+}),
+  "entries": zod.array(zod.object({
+  "key": zod.string(),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use', 'application']),
+  "productId": zod.number(),
+  "date": zod.date(),
+  "change": zod.number(),
+  "balance": zod.number(),
+  "countedQuantity": zod.number().nullish(),
+  "movementId": zod.number().nullish(),
+  "applicationId": zod.number().nullish(),
+  "detail": zod.string().nullish(),
+  "recordedBy": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary List deliveries, stock counts and write-offs
+ */
+export const listGreenTrackStockMovementsQueryLimitMax = 1000;
+
+
+
+export const ListGreenTrackStockMovementsQueryParams = zod.object({
+  "productId": zod.coerce.number().optional(),
+  "limit": zod.coerce.number().min(1).max(listGreenTrackStockMovementsQueryLimitMax).optional()
+})
+
+export const ListGreenTrackStockMovementsResponseItem = zod.object({
+  "id": zod.number(),
+  "productId": zod.number(),
+  "productName": zod.string(),
+  "unit": zod.string(),
+  "movementDate": zod.date(),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use']),
+  "quantity": zod.number().describe('Signed change (a write-off or use is negative; a count is 0)'),
+  "countedQuantity": zod.number().nullish(),
+  "supplier": zod.string().nullish(),
+  "batchNumber": zod.string().nullish(),
+  "reference": zod.string().nullish(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish()
+})
+export const ListGreenTrackStockMovementsResponse = zod.array(ListGreenTrackStockMovementsResponseItem)
+
+
+/**
+ * @summary Log a delivery, stock count or write-off
+ */
+export const CreateGreenTrackStockMovementBody = zod.object({
+  "productId": zod.number(),
+  "movementDate": zod.date(),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use']),
+  "quantity": zod.number().optional().describe('Delivered, written-off or used quantity (above 0). \"use\" is refused for pesticides, whose use goes in a spraying record.'),
+  "countedQuantity": zod.number().optional().describe('The quantity counted, for a stock count'),
+  "supplier": zod.string().nullish(),
+  "batchNumber": zod.string().nullish(),
+  "reference": zod.string().nullish(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish()
+})
+
+export const CreateGreenTrackStockMovementResponse = zod.object({
+  "id": zod.number(),
+  "productId": zod.number(),
+  "productName": zod.string(),
+  "unit": zod.string(),
+  "movementDate": zod.date(),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use']),
+  "quantity": zod.number().describe('Signed change (a write-off or use is negative; a count is 0)'),
+  "countedQuantity": zod.number().nullish(),
+  "supplier": zod.string().nullish(),
+  "batchNumber": zod.string().nullish(),
+  "reference": zod.string().nullish(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish()
+})
+
+
+/**
+ * @summary Correct a stock record (the product and kind stay as recorded)
+ */
+export const UpdateGreenTrackStockMovementParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateGreenTrackStockMovementBody = zod.object({
+  "movementDate": zod.date().optional(),
+  "quantity": zod.number().optional(),
+  "countedQuantity": zod.number().optional(),
+  "supplier": zod.string().nullish(),
+  "batchNumber": zod.string().nullish(),
+  "reference": zod.string().nullish(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish()
+})
+
+export const UpdateGreenTrackStockMovementResponse = zod.object({
+  "id": zod.number(),
+  "productId": zod.number(),
+  "productName": zod.string(),
+  "unit": zod.string(),
+  "movementDate": zod.date(),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use']),
+  "quantity": zod.number().describe('Signed change (a write-off or use is negative; a count is 0)'),
+  "countedQuantity": zod.number().nullish(),
+  "supplier": zod.string().nullish(),
+  "batchNumber": zod.string().nullish(),
+  "reference": zod.string().nullish(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish()
+})
+
+
+/**
+ * @summary Delete a stock record (managers)
+ */
+export const DeleteGreenTrackStockMovementParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteGreenTrackStockMovementResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary The spraying book (spraying, spreading and top dressing records)
+ */
+export const listGreenTrackApplicationsQueryLimitMax = 1000;
+
+
+
+export const ListGreenTrackApplicationsQueryParams = zod.object({
+  "from": zod.date().optional(),
+  "to": zod.date().optional(),
+  "productId": zod.coerce.number().optional(),
+  "limit": zod.coerce.number().min(1).max(listGreenTrackApplicationsQueryLimitMax).optional()
+})
+
+export const ListGreenTrackApplicationsResponseItem = zod.object({
+  "id": zod.number(),
+  "applicationDate": zod.date(),
+  "startTime": zod.string().nullish().describe('HH:MM'),
+  "endTime": zod.string().nullish().describe('HH:MM'),
+  "method": zod.enum(['spray', 'granular', 'top_dressing', 'other']),
+  "machineId": zod.number().nullish(),
+  "areas": zod.array(zod.enum(['greens', 'tees', 'fairways', 'approaches', 'surrounds', 'bunkers', 'rough', 'practice', 'other'])),
+  "areaDetails": zod.string().nullish(),
+  "areaHectares": zod.number().nullish(),
+  "waterVolumeLitres": zod.number().nullish(),
+  "nozzle": zod.string().nullish(),
+  "reason": zod.string().nullish(),
+  "operatorName": zod.string().nullish(),
+  "operatorRosterId": zod.number().nullish(),
+  "operatorCertificate": zod.string().nullish(),
+  "weather": zod.string().nullish(),
+  "wind": zod.string().nullish(),
+  "temperatureC": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "machineName": zod.string().nullish(),
+  "products": zod.array(zod.object({
+  "productId": zod.number(),
+  "productName": zod.string(),
+  "category": zod.string(),
+  "unit": zod.string(),
+  "mappNumber": zod.string().nullish(),
+  "ratePerHectare": zod.number().nullish(),
+  "quantityUsed": zod.number()
+})),
+  "createdAt": zod.date().optional(),
+  "updatedAt": zod.date().optional()
+})
+export const ListGreenTrackApplicationsResponse = zod.array(ListGreenTrackApplicationsResponseItem)
+
+
+/**
+ * @summary Record a spraying, spreading or top dressing; the products used come off stock
+ */
+export const createGreenTrackApplicationBodyProductsMax = 20;
+
+
+
+export const CreateGreenTrackApplicationBody = zod.object({
+  "applicationDate": zod.date(),
+  "startTime": zod.string().nullish().describe('HH:MM'),
+  "endTime": zod.string().nullish().describe('HH:MM'),
+  "method": zod.enum(['spray', 'granular', 'top_dressing', 'other']).optional(),
+  "machineId": zod.number().nullish(),
+  "areas": zod.array(zod.enum(['greens', 'tees', 'fairways', 'approaches', 'surrounds', 'bunkers', 'rough', 'practice', 'other'])).optional(),
+  "areaDetails": zod.string().nullish(),
+  "areaHectares": zod.number().nullish(),
+  "waterVolumeLitres": zod.number().nullish(),
+  "nozzle": zod.string().nullish(),
+  "reason": zod.string().nullish(),
+  "operatorName": zod.string().nullish(),
+  "operatorRosterId": zod.number().nullish(),
+  "operatorCertificate": zod.string().nullish(),
+  "weather": zod.string().nullish(),
+  "wind": zod.string().nullish(),
+  "temperatureC": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "products": zod.array(zod.object({
+  "productId": zod.number(),
+  "ratePerHectare": zod.number().nullish(),
+  "quantityUsed": zod.number().describe('In the product\'s unit; this comes off stock')
+})).min(1).max(createGreenTrackApplicationBodyProductsMax)
+})
+
+export const CreateGreenTrackApplicationResponse = zod.object({
+  "id": zod.number(),
+  "applicationDate": zod.date(),
+  "startTime": zod.string().nullish().describe('HH:MM'),
+  "endTime": zod.string().nullish().describe('HH:MM'),
+  "method": zod.enum(['spray', 'granular', 'top_dressing', 'other']),
+  "machineId": zod.number().nullish(),
+  "areas": zod.array(zod.enum(['greens', 'tees', 'fairways', 'approaches', 'surrounds', 'bunkers', 'rough', 'practice', 'other'])),
+  "areaDetails": zod.string().nullish(),
+  "areaHectares": zod.number().nullish(),
+  "waterVolumeLitres": zod.number().nullish(),
+  "nozzle": zod.string().nullish(),
+  "reason": zod.string().nullish(),
+  "operatorName": zod.string().nullish(),
+  "operatorRosterId": zod.number().nullish(),
+  "operatorCertificate": zod.string().nullish(),
+  "weather": zod.string().nullish(),
+  "wind": zod.string().nullish(),
+  "temperatureC": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "machineName": zod.string().nullish(),
+  "products": zod.array(zod.object({
+  "productId": zod.number(),
+  "productName": zod.string(),
+  "category": zod.string(),
+  "unit": zod.string(),
+  "mappNumber": zod.string().nullish(),
+  "ratePerHectare": zod.number().nullish(),
+  "quantityUsed": zod.number()
+})),
+  "createdAt": zod.date().optional(),
+  "updatedAt": zod.date().optional()
+}).and(zod.object({
+  "stockWarnings": zod.array(zod.object({
+  "productId": zod.number(),
+  "productName": zod.string(),
+  "unit": zod.string(),
+  "stockOnHand": zod.number()
+}))
+}))
+
+
+/**
+ * @summary Correct a spraying record; sending products replaces the list
+ */
+export const UpdateGreenTrackApplicationParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const updateGreenTrackApplicationBodyProductsMax = 20;
+
+
+
+export const UpdateGreenTrackApplicationBody = zod.object({
+  "applicationDate": zod.date().optional(),
+  "startTime": zod.string().nullish().describe('HH:MM'),
+  "endTime": zod.string().nullish().describe('HH:MM'),
+  "method": zod.enum(['spray', 'granular', 'top_dressing', 'other']).optional(),
+  "machineId": zod.number().nullish(),
+  "areas": zod.array(zod.enum(['greens', 'tees', 'fairways', 'approaches', 'surrounds', 'bunkers', 'rough', 'practice', 'other'])).optional(),
+  "areaDetails": zod.string().nullish(),
+  "areaHectares": zod.number().nullish(),
+  "waterVolumeLitres": zod.number().nullish(),
+  "nozzle": zod.string().nullish(),
+  "reason": zod.string().nullish(),
+  "operatorName": zod.string().nullish(),
+  "operatorRosterId": zod.number().nullish(),
+  "operatorCertificate": zod.string().nullish(),
+  "weather": zod.string().nullish(),
+  "wind": zod.string().nullish(),
+  "temperatureC": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "products": zod.array(zod.object({
+  "productId": zod.number(),
+  "ratePerHectare": zod.number().nullish(),
+  "quantityUsed": zod.number().describe('In the product\'s unit; this comes off stock')
+})).min(1).max(updateGreenTrackApplicationBodyProductsMax).optional()
+})
+
+export const UpdateGreenTrackApplicationResponse = zod.object({
+  "id": zod.number(),
+  "applicationDate": zod.date(),
+  "startTime": zod.string().nullish().describe('HH:MM'),
+  "endTime": zod.string().nullish().describe('HH:MM'),
+  "method": zod.enum(['spray', 'granular', 'top_dressing', 'other']),
+  "machineId": zod.number().nullish(),
+  "areas": zod.array(zod.enum(['greens', 'tees', 'fairways', 'approaches', 'surrounds', 'bunkers', 'rough', 'practice', 'other'])),
+  "areaDetails": zod.string().nullish(),
+  "areaHectares": zod.number().nullish(),
+  "waterVolumeLitres": zod.number().nullish(),
+  "nozzle": zod.string().nullish(),
+  "reason": zod.string().nullish(),
+  "operatorName": zod.string().nullish(),
+  "operatorRosterId": zod.number().nullish(),
+  "operatorCertificate": zod.string().nullish(),
+  "weather": zod.string().nullish(),
+  "wind": zod.string().nullish(),
+  "temperatureC": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "machineName": zod.string().nullish(),
+  "products": zod.array(zod.object({
+  "productId": zod.number(),
+  "productName": zod.string(),
+  "category": zod.string(),
+  "unit": zod.string(),
+  "mappNumber": zod.string().nullish(),
+  "ratePerHectare": zod.number().nullish(),
+  "quantityUsed": zod.number()
+})),
+  "createdAt": zod.date().optional(),
+  "updatedAt": zod.date().optional()
+}).and(zod.object({
+  "stockWarnings": zod.array(zod.object({
+  "productId": zod.number(),
+  "productName": zod.string(),
+  "unit": zod.string(),
+  "stockOnHand": zod.number()
+}))
+}))
+
+
+/**
+ * @summary Delete a spraying record, putting its products back on stock (managers)
+ */
+export const DeleteGreenTrackApplicationParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteGreenTrackApplicationResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * Covers PUWER and LOLER examinations and NSTS sprayer tests. The link expires after 15 minutes.
+ * @summary Get a short-lived download link for an inspection's uploaded certificate
+ */
+export const GetGreenTrackInspectionCertificateUrlParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetGreenTrackInspectionCertificateUrlResponse = zod.object({
+  "downloadUrl": zod.string(),
+  "fileName": zod.string().nullish()
 })
 
 
@@ -2598,7 +6315,8 @@ export const GetIncidentConfigResponse = zod.object({
   "incident_departments": zod.string().optional(),
   "incident_default_reporter": zod.string().optional(),
   "incident_show_investigation": zod.string().optional(),
-  "incident_locations": zod.string().optional()
+  "incident_locations": zod.string().optional(),
+  "regulator_nation": zod.string().optional().describe('The nation in the Compliance Hub profile (england, wales, scotland, northern_ireland or multi_nation), or empty. Northern Ireland reports go to HSENI. Read only.')
 })
 
 
@@ -2616,7 +6334,8 @@ export const UpdateIncidentConfigResponse = zod.object({
   "incident_departments": zod.string().optional(),
   "incident_default_reporter": zod.string().optional(),
   "incident_show_investigation": zod.string().optional(),
-  "incident_locations": zod.string().optional()
+  "incident_locations": zod.string().optional(),
+  "regulator_nation": zod.string().optional().describe('The nation in the Compliance Hub profile (england, wales, scotland, northern_ireland or multi_nation), or empty. Northern Ireland reports go to HSENI. Read only.')
 })
 
 
@@ -2924,6 +6643,272 @@ export const DeletePATPresetTemplateResponse = zod.object({
 
 
 /**
+ * @summary Contractor testing visits at the caller's sites, newest first (not Viewers)
+ */
+export const ListPATContractorVisitsQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const ListPATContractorVisitsResponse = zod.object({
+  "canManage": zod.boolean().describe('Whether the caller can set up and end visits'),
+  "visits": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string(),
+  "contractorEmail": zod.string().nullable(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "linkExpiresAt": zod.date(),
+  "status": zod.enum(['open', 'expired', 'signed_off', 'ended']),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "tested": zod.number(),
+  "passed": zod.number(),
+  "failed": zod.number(),
+  "onSiteNow": zod.number().describe('Contractors signed in through this visit\'s link and still on site'),
+  "signedOffAt": zod.date().nullable(),
+  "signedOffName": zod.string().nullable(),
+  "signedOffCompany": zod.string().nullable(),
+  "certificateRef": zod.string().nullable(),
+  "nextTestDue": zod.date().nullable(),
+  "signOffNotes": zod.string().nullable(),
+  "certificateUrl": zod.string().nullable().describe('The contractor\'s uploaded certificate (signed-in download)'),
+  "certificateFileName": zod.string().nullable(),
+  "patCertificateId": zod.number().nullable().describe('The PATrack certificate recorded at sign-off'),
+  "endedAt": zod.date().nullable()
+}))
+})
+
+
+/**
+ * The link is returned once; only its digest is kept. It works from set-up until two days after the last visit day, for this site only.
+ * @summary Set up a contractor's testing visit and email them the link (Owners and Managers)
+ */
+export const createPATContractorVisitBodySendEmailDefault = true;
+
+export const CreatePATContractorVisitBody = zod.object({
+  "siteId": zod.number(),
+  "contractorId": zod.number().nullish().describe('From the Contractors list; else give contractorName'),
+  "contractorName": zod.string().nullish(),
+  "contractorEmail": zod.string().nullish(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "sendEmail": zod.boolean().default(createPATContractorVisitBodySendEmailDefault)
+})
+
+export const CreatePATContractorVisitResponse = zod.object({
+  "visit": zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string(),
+  "contractorEmail": zod.string().nullable(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "linkExpiresAt": zod.date(),
+  "status": zod.enum(['open', 'expired', 'signed_off', 'ended']),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "tested": zod.number(),
+  "passed": zod.number(),
+  "failed": zod.number(),
+  "onSiteNow": zod.number().describe('Contractors signed in through this visit\'s link and still on site'),
+  "signedOffAt": zod.date().nullable(),
+  "signedOffName": zod.string().nullable(),
+  "signedOffCompany": zod.string().nullable(),
+  "certificateRef": zod.string().nullable(),
+  "nextTestDue": zod.date().nullable(),
+  "signOffNotes": zod.string().nullable(),
+  "certificateUrl": zod.string().nullable().describe('The contractor\'s uploaded certificate (signed-in download)'),
+  "certificateFileName": zod.string().nullable(),
+  "patCertificateId": zod.number().nullable().describe('The PATrack certificate recorded at sign-off'),
+  "endedAt": zod.date().nullable()
+}),
+  "link": zod.string().describe('The contractor\'s link; shown once'),
+  "emailedTo": zod.string().nullable(),
+  "emailError": zod.string().nullable()
+})
+
+
+/**
+ * @summary One visit with every result, each sign-in and the sign-off signature
+ */
+export const GetPATContractorVisitParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetPATContractorVisitResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string(),
+  "contractorEmail": zod.string().nullable(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "linkExpiresAt": zod.date(),
+  "status": zod.enum(['open', 'expired', 'signed_off', 'ended']),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "tested": zod.number(),
+  "passed": zod.number(),
+  "failed": zod.number(),
+  "onSiteNow": zod.number().describe('Contractors signed in through this visit\'s link and still on site'),
+  "signedOffAt": zod.date().nullable(),
+  "signedOffName": zod.string().nullable(),
+  "signedOffCompany": zod.string().nullable(),
+  "certificateRef": zod.string().nullable(),
+  "nextTestDue": zod.date().nullable(),
+  "signOffNotes": zod.string().nullable(),
+  "certificateUrl": zod.string().nullable().describe('The contractor\'s uploaded certificate (signed-in download)'),
+  "certificateFileName": zod.string().nullable(),
+  "patCertificateId": zod.number().nullable().describe('The PATrack certificate recorded at sign-off'),
+  "endedAt": zod.date().nullable()
+}).and(zod.object({
+  "signOffSignature": zod.string().nullable().describe('PNG data URL'),
+  "results": zod.array(zod.object({
+  "id": zod.number().describe('The PATrack test'),
+  "applianceId": zod.number(),
+  "applianceName": zod.string(),
+  "applianceType": zod.string().nullable(),
+  "location": zod.string().nullable(),
+  "assetTag": zod.string().nullable(),
+  "result": zod.enum(['pass', 'fail']),
+  "visualInspection": zod.string().nullable(),
+  "earthContinuityOhms": zod.string().nullable(),
+  "insulationMohms": zod.string().nullable(),
+  "operatingCurrent": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "testedBy": zod.string().nullable(),
+  "testDate": zod.date(),
+  "updatedAt": zod.date()
+})),
+  "signIns": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "company": zod.string(),
+  "signedInAt": zod.date(),
+  "signedOutAt": zod.date().nullable(),
+  "fireProcedureShown": zod.boolean(),
+  "asbestosStatus": zod.enum(['register', 'none_expected', 'missing'])
+}))
+}))
+
+
+/**
+ * @summary Replace an open visit's link (the old one stops working) and email the new one
+ */
+export const RenewPATContractorVisitLinkParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const renewPATContractorVisitLinkBodySendEmailDefault = true;
+
+export const RenewPATContractorVisitLinkBody = zod.object({
+  "sendEmail": zod.boolean().default(renewPATContractorVisitLinkBodySendEmailDefault).describe('Email the new link to the contractor')
+})
+
+export const RenewPATContractorVisitLinkResponse = zod.object({
+  "visit": zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string(),
+  "contractorEmail": zod.string().nullable(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "linkExpiresAt": zod.date(),
+  "status": zod.enum(['open', 'expired', 'signed_off', 'ended']),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "tested": zod.number(),
+  "passed": zod.number(),
+  "failed": zod.number(),
+  "onSiteNow": zod.number().describe('Contractors signed in through this visit\'s link and still on site'),
+  "signedOffAt": zod.date().nullable(),
+  "signedOffName": zod.string().nullable(),
+  "signedOffCompany": zod.string().nullable(),
+  "certificateRef": zod.string().nullable(),
+  "nextTestDue": zod.date().nullable(),
+  "signOffNotes": zod.string().nullable(),
+  "certificateUrl": zod.string().nullable().describe('The contractor\'s uploaded certificate (signed-in download)'),
+  "certificateFileName": zod.string().nullable(),
+  "patCertificateId": zod.number().nullable().describe('The PATrack certificate recorded at sign-off'),
+  "endedAt": zod.date().nullable()
+}),
+  "link": zod.string().describe('The contractor\'s link; shown once'),
+  "emailedTo": zod.string().nullable(),
+  "emailError": zod.string().nullable()
+})
+
+
+/**
+ * @summary Close a visit's link early; results already logged stay on PATrack
+ */
+export const EndPATContractorVisitParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const EndPATContractorVisitResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string(),
+  "contractorEmail": zod.string().nullable(),
+  "startsOn": zod.date(),
+  "endsOn": zod.date(),
+  "linkExpiresAt": zod.date(),
+  "status": zod.enum(['open', 'expired', 'signed_off', 'ended']),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "tested": zod.number(),
+  "passed": zod.number(),
+  "failed": zod.number(),
+  "onSiteNow": zod.number().describe('Contractors signed in through this visit\'s link and still on site'),
+  "signedOffAt": zod.date().nullable(),
+  "signedOffName": zod.string().nullable(),
+  "signedOffCompany": zod.string().nullable(),
+  "certificateRef": zod.string().nullable(),
+  "nextTestDue": zod.date().nullable(),
+  "signOffNotes": zod.string().nullable(),
+  "certificateUrl": zod.string().nullable().describe('The contractor\'s uploaded certificate (signed-in download)'),
+  "certificateFileName": zod.string().nullable(),
+  "patCertificateId": zod.number().nullable().describe('The PATrack certificate recorded at sign-off'),
+  "endedAt": zod.date().nullable()
+})
+
+
+/**
+ * The daily checks the client's services make each site responsible for, with the AM/PM checklists and manager sign-offs dated in the range (department-scoped users see their department's and shared sites).
+ * @summary Daily checklist and sign-off history for the status page
+ */
+export const GetDailyTrackHistoryQueryParams = zod.object({
+  "from": zod.date(),
+  "to": zod.date()
+})
+
+export const GetDailyTrackHistoryResponse = zod.object({
+  "requirements": zod.array(zod.enum(['kitchen_opening', 'premises_opening', 'kitchen_closing', 'premises_closing', 'signoff'])).describe('The checks each site is expected to complete per day, in display order'),
+  "checklists": zod.array(zod.object({
+  "checkDate": zod.date(),
+  "siteId": zod.number().nullable(),
+  "checklistType": zod.string(),
+  "submittedAt": zod.date().nullable()
+})),
+  "signoffs": zod.array(zod.object({
+  "signoffDate": zod.date(),
+  "siteId": zod.number().nullable(),
+  "submittedAt": zod.date().nullable()
+}))
+})
+
+
+/**
  * @summary List premises inspections
  */
 export const ListPremisesInspectionsQueryParams = zod.object({
@@ -2950,7 +6935,8 @@ export const ListPremisesInspectionsResponseItem = zod.object({
   "inspectedBy": zod.string().nullish(),
   "createdBy": zod.number().nullish(),
   "createdAt": zod.date().optional(),
-  "updatedAt": zod.date().optional()
+  "updatedAt": zod.date().optional(),
+  "superseded": zod.boolean().optional().describe('True when a later inspection of the same type and area at the same site exists, so this one\'s next inspection date no longer applies. Returned by the list.')
 })
 export const ListPremisesInspectionsResponse = zod.array(ListPremisesInspectionsResponseItem)
 
@@ -2988,7 +6974,8 @@ export const CreatePremisesInspectionResponse = zod.object({
   "inspectedBy": zod.string().nullish(),
   "createdBy": zod.number().nullish(),
   "createdAt": zod.date().optional(),
-  "updatedAt": zod.date().optional()
+  "updatedAt": zod.date().optional(),
+  "superseded": zod.boolean().optional().describe('True when a later inspection of the same type and area at the same site exists, so this one\'s next inspection date no longer applies. Returned by the list.')
 })
 
 
@@ -3150,6 +7137,45 @@ export const CreateFoodSafetyRecordResponse = zod.object({
 
 
 /**
+ * Fills one unit's AM or PM reading in the day's diary, creating the diary (with every fridge and freezer on the list) when needed. Used by "Say it" voice logging. A reading already recorded is never overwritten (409 READING_ALREADY_RECORDED), a submitted diary is not changed (409 DIARY_SUBMITTED), and a reading outside the limits needs the corrective action taken (400 KITCHEN_CORRECTIVE_ACTION_REQUIRED).
+ * @summary Record one fridge or freezer reading in the day's diary
+ */
+export const RecordFoodSafetyColdReadingQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Scope to a site\'s diary. Omit for the whole-organisation diary.')
+})
+
+export const RecordFoodSafetyColdReadingBody = zod.object({
+  "recordDate": zod.string().describe('The diary\'s local calendar date (YYYY-MM-DD).'),
+  "unit": zod.string().describe('The fridge or freezer\'s name on the kitchen\'s list.'),
+  "slot": zod.enum(['am', 'pm']),
+  "temperature": zod.number(),
+  "correctiveAction": zod.string().optional().describe('Required when the reading is outside the unit\'s limits.'),
+  "recordedAt": zod.date().optional(),
+  "spoken": zod.string().optional().describe('The words heard when the reading was spoken (\"Say it\"), kept as evidence.')
+})
+
+export const RecordFoodSafetyColdReadingResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "recordDate": zod.string(),
+  "deliveries": zod.array(zod.unknown()).optional(),
+  "coldFood": zod.array(zod.unknown()).optional(),
+  "hotTemperature": zod.array(zod.unknown()).optional(),
+  "hotHolding": zod.array(zod.unknown()).optional(),
+  "cookingLimit": zod.string().optional(),
+  "coolingLimit": zod.string().optional(),
+  "reheatingLimit": zod.string().optional(),
+  "hotHoldingLimit": zod.string().optional(),
+  "correctives": zod.string().nullish(),
+  "managerSignature": zod.string().nullish(),
+  "submittedAt": zod.date().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
  * @summary Get the food safety record for a specific date
  */
 export const GetFoodSafetyRecordByDateParams = zod.object({
@@ -3204,8 +7230,62 @@ export const GetFoodSafetySummaryResponse = zod.object({
   "days": zod.array(zod.object({
   "date": zod.date(),
   "hasRecord": zod.boolean().describe('Whether a diary record exists for this date.'),
-  "submitted": zod.boolean().describe('Whether the diary record has been submitted.')
+  "submitted": zod.boolean().describe('Whether the diary record has been submitted.'),
+  "nonOperating": zod.boolean().describe('The diary scope was marked closed and has no record for this date, so it is not a missing day.'),
+  "closure": zod.object({
+  "id": zod.number(),
+  "date": zod.date(),
+  "reason": zod.string(),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "addedAfterDay": zod.boolean().describe('The closure was recorded after the day itself.')
+}).nullable()
 }))
+})
+
+
+/**
+ * For every site the user can see: diary days recorded, in draft, closed and missed (counted up to yesterday, from the site's first diary record), and the KitchenTrack actions raised in the month and still open.
+ * @summary KitchenTrack month summary for Owners and Managers
+ */
+export const getFoodSafetyMonthSummaryQueryMonthRegExp = new RegExp('^[0-9]{4}-[0-9]{2}$');
+
+
+export const GetFoodSafetyMonthSummaryQueryParams = zod.object({
+  "month": zod.coerce.string().regex(getFoodSafetyMonthSummaryQueryMonthRegExp).optional().describe('The month as YYYY-MM. Defaults to the business\'s current month.')
+})
+
+export const GetFoodSafetyMonthSummaryResponse = zod.object({
+  "month": zod.string(),
+  "from": zod.date(),
+  "through": zod.date().nullable().describe('The last day counted (yesterday, or the month\'s last day). Null when no day has finished yet.'),
+  "today": zod.date(),
+  "sites": zod.array(zod.object({
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "startedOn": zod.date().nullable().describe('The site\'s first diary record; days before it are not counted.'),
+  "daysCounted": zod.number(),
+  "recordedDays": zod.number(),
+  "draftDays": zod.number(),
+  "closedDays": zod.number(),
+  "missedDays": zod.number(),
+  "missedDates": zod.array(zod.date()),
+  "failedReadings": zod.number(),
+  "actionsRaised": zod.number(),
+  "actionsOpen": zod.number()
+})),
+  "totals": zod.object({
+  "daysCounted": zod.number(),
+  "recordedDays": zod.number(),
+  "draftDays": zod.number(),
+  "closedDays": zod.number(),
+  "missedDays": zod.number(),
+  "failedReadings": zod.number(),
+  "actionsRaised": zod.number(),
+  "actionsResolved": zod.number(),
+  "actionsOpen": zod.number(),
+  "actionsOverdue": zod.number()
+})
 })
 
 
@@ -3223,7 +7303,67 @@ export const GetFoodSafetyMissingDatesResponse = zod.object({
   "to": zod.date(),
   "siteId": zod.number().nullable(),
   "missingDates": zod.array(zod.date()).describe('Dates with no food safety diary record.'),
-  "draftDates": zod.array(zod.date()).describe('Dates with a diary record that has not been submitted.')
+  "draftDates": zod.array(zod.date()).describe('Dates with a diary record that has not been submitted.'),
+  "nonOperatingDates": zod.array(zod.date()).optional().describe('Dates marked closed (non-operating) with no diary record. Not counted as missing.')
+})
+
+
+/**
+ * @summary List days marked closed (non-operating) for a diary scope
+ */
+export const ListKitchenClosedDaysQueryParams = zod.object({
+  "from": zod.date(),
+  "to": zod.date(),
+  "siteId": zod.coerce.number().optional().describe('Scope to a site\'s diary. Omit for the whole-organisation diary.')
+})
+
+export const ListKitchenClosedDaysResponse = zod.object({
+  "from": zod.date(),
+  "to": zod.date(),
+  "siteId": zod.number().nullable(),
+  "closedDays": zod.array(zod.object({
+  "id": zod.number(),
+  "date": zod.date(),
+  "reason": zod.string(),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "addedAfterDay": zod.boolean().describe('The closure was recorded after the day itself.')
+}))
+})
+
+
+/**
+ * @summary Mark a range of days closed (non-operating) for a diary scope (admins)
+ */
+export const CreateKitchenClosedDaysQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Scope to a site\'s diary. Omit for the whole-organisation diary.')
+})
+
+export const createKitchenClosedDaysBodyReasonMax = 200;
+
+
+
+export const CreateKitchenClosedDaysBody = zod.object({
+  "from": zod.date(),
+  "to": zod.date(),
+  "reason": zod.string().min(1).max(createKitchenClosedDaysBodyReasonMax)
+})
+
+export const CreateKitchenClosedDaysResponse = zod.object({
+  "siteId": zod.number().nullable(),
+  "created": zod.array(zod.date())
+})
+
+
+/**
+ * @summary Remove a closure (admins); it stays in the history
+ */
+export const RemoveKitchenClosedDayParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const RemoveKitchenClosedDayResponse = zod.object({
+  "ok": zod.boolean()
 })
 
 
@@ -3268,6 +7408,7 @@ export const UpdateFoodSafetyRecordBody = zod.object({
   "hotTemperature": zod.record(zod.string(), zod.unknown()).optional(),
   "cooling": zod.record(zod.string(), zod.unknown()).optional(),
   "reheating": zod.record(zod.string(), zod.unknown()).optional(),
+  "sousVide": zod.record(zod.string(), zod.unknown()).optional().describe('One sous vide reading (item, waterTemp, coreTemp, timeStarted, timeFinished, holdMinutes).'),
   "correctives": zod.string().optional(),
   "expectedCorrectives": zod.string().nullable()
 }).optional(),
@@ -3324,6 +7465,8 @@ export const ListLegionellaChecksResponseItem = zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('The named cold water tank or calorifier (equipment list item) the check was made on.'),
+  "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -3341,7 +7484,9 @@ export const CreateLegionellaCheckBody = zod.unknown().and(zod.object({
   "siteId": zod.number().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "performedBy": zod.string().nullish()
+  "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('A cold water tank or calorifier on the equipment list (its site must match siteId).'),
+  "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.')
 })).describe('temperature is required for calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, and cold_nonsent_temp checks.')
 
 export const CreateLegionellaCheckResponse = zod.object({
@@ -3355,6 +7500,8 @@ export const CreateLegionellaCheckResponse = zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('The named cold water tank or calorifier (equipment list item) the check was made on.'),
+  "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -3497,7 +7644,9 @@ export const UpdateLegionellaCheckBody = zod.object({
   "siteId": zod.number().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "performedBy": zod.string().nullish()
+  "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('Move the check to another named tank or calorifier at the same site.'),
+  "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.')
 }).describe('For an existing temperature check, temperature is required. New results use pass or fail.')
 
 export const UpdateLegionellaCheckResponse = zod.object({
@@ -3511,6 +7660,8 @@ export const UpdateLegionellaCheckResponse = zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('The named cold water tank or calorifier (equipment list item) the check was made on.'),
+  "findings": zod.record(zod.string(), zod.string()).nullish().describe('Condition answers (sediment, biofilm, lid, screens) for cold_tank_inspection, calorifier_inspection, cold_tank_clean, calorifier_clean, shower_clean and outlet_flush, keyed by question. An answer that needs action saves the check as a fail.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -3524,5 +7675,1456 @@ export const DeleteLegionellaCheckParams = zod.object({
 })
 
 export const DeleteLegionellaCheckResponse = zod.void()
+
+
+/**
+ * @summary List the equipment list (plant no track keeps a record of)
+ */
+export const ListEquipmentQueryParams = zod.object({
+  "siteId": zod.coerce.string().optional().describe('A site id, or \"none\" for items not tied to a site. Omit for every visible site.'),
+  "includeArchived": zod.enum(['true', 'false']).optional()
+})
+
+export const ListEquipmentResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "name": zod.string(),
+  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'ladder', 'other']),
+  "typeLabel": zod.string(),
+  "location": zod.string().nullable(),
+  "make": zod.string().nullable(),
+  "model": zod.string().nullable(),
+  "serialNo": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "active": zod.boolean(),
+  "complianceItems": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string()
+})),
+  "labelCode": zod.string().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+export const ListEquipmentResponse = zod.array(ListEquipmentResponseItem)
+
+
+/**
+ * @summary Add an equipment item (Owners, consultants and Managers)
+ */
+export const CreateEquipmentBody = zod.object({
+  "name": zod.string(),
+  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'ladder', 'other']),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish(),
+  "make": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "serialNo": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "active": zod.boolean().optional(),
+  "complianceItemIds": zod.array(zod.number()).optional()
+})
+
+export const CreateEquipmentResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "name": zod.string(),
+  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'ladder', 'other']),
+  "typeLabel": zod.string(),
+  "location": zod.string().nullable(),
+  "make": zod.string().nullable(),
+  "model": zod.string().nullable(),
+  "serialNo": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "active": zod.boolean(),
+  "complianceItems": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string()
+})),
+  "labelCode": zod.string().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Change, archive or restore an equipment item, and its linked Compliance Checks
+ */
+export const UpdateEquipmentParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateEquipmentBody = zod.object({
+  "name": zod.string().optional(),
+  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'ladder', 'other']).optional(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish(),
+  "make": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "serialNo": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "active": zod.boolean().optional(),
+  "complianceItemIds": zod.array(zod.number()).optional()
+})
+
+export const UpdateEquipmentResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "name": zod.string(),
+  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'ladder', 'other']),
+  "typeLabel": zod.string(),
+  "location": zod.string().nullable(),
+  "make": zod.string().nullable(),
+  "model": zod.string().nullable(),
+  "serialNo": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "active": zod.boolean(),
+  "complianceItems": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string()
+})),
+  "labelCode": zod.string().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Copy FireTrack's extinguisher list onto a site's equipment list
+ */
+export const ImportExtinguisherPointsBody = zod.object({
+  "siteId": zod.number().nullish()
+})
+
+export const ImportExtinguisherPointsResponse = zod.object({
+  "added": zod.number(),
+  "alreadyListed": zod.number()
+})
+
+
+/**
+ * @summary Everything that can carry a QR label, with its code once printed
+ */
+export const ListEquipmentLabelsQueryParams = zod.object({
+  "siteId": zod.coerce.string().optional().describe('A site id, or \"none\" for items not tied to a site. Omit for every visible site.')
+})
+
+export const ListEquipmentLabelsResponseItem = zod.object({
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
+  "ref": zod.string(),
+  "track": zod.string(),
+  "name": zod.string(),
+  "detail": zod.string().nullable(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "code": zod.string().nullable(),
+  "url": zod.string().nullable()
+})
+export const ListEquipmentLabelsResponse = zod.array(ListEquipmentLabelsResponseItem)
+
+
+/**
+ * @summary A PDF sheet of QR labels; items without a code get one
+ */
+export const PrintEquipmentLabelSheetBody = zod.object({
+  "items": zod.array(zod.object({
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
+  "ref": zod.string().describe('The record\'s id, \"<siteId or 0>:<unit id>\" for a kitchen fridge or freezer, or \"<point>:<siteId or 0>\" for a track\'s checks at a site.')
+})),
+  "size": zod.enum(['standard', 'large']).optional()
+})
+
+export const PrintEquipmentLabelSheetResponse = zod.unknown()
+
+
+/**
+ * @summary Replace a lost or damaged label; the old code stops working
+ */
+export const ReplaceEquipmentLabelBody = zod.object({
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
+  "ref": zod.string().describe('The record\'s id, \"<siteId or 0>:<unit id>\" for a kitchen fridge or freezer, or \"<point>:<siteId or 0>\" for a track\'s checks at a site.')
+})
+
+export const ReplaceEquipmentLabelResponse = zod.object({
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
+  "ref": zod.string(),
+  "track": zod.string(),
+  "name": zod.string(),
+  "detail": zod.string().nullable(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "code": zod.string().nullable(),
+  "url": zod.string().nullable()
+})
+
+
+/**
+ * @summary What a scanned QR label shows
+ */
+export const ScanEquipmentLabelParams = zod.object({
+  "code": zod.coerce.string()
+})
+
+export const ScanEquipmentLabelResponse = zod.object({
+  "code": zod.string(),
+  "clientId": zod.number(),
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
+  "track": zod.string(),
+  "name": zod.string(),
+  "detail": zod.string().nullable(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "active": zod.boolean(),
+  "statuses": zod.array(zod.object({
+  "label": zod.string(),
+  "state": zod.enum(['ok', 'due_soon', 'overdue', 'never', 'problem', 'info']),
+  "text": zod.string(),
+  "note": zod.string().optional()
+})),
+  "actions": zod.array(zod.object({
+  "label": zod.string(),
+  "href": zod.string(),
+  "primary": zod.boolean().optional()
+})),
+  "history": zod.array(zod.object({
+  "date": zod.string(),
+  "text": zod.string(),
+  "state": zod.enum(['ok', 'due_soon', 'overdue', 'never', 'problem', 'info'])
+}))
+})
+
+
+/**
+ * @summary COSHHTrack assessment reviews and checks that are due, overdue or not yet recorded
+ */
+export const GetCoshhTrackStatusQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const GetCoshhTrackStatusResponse = zod.object({
+  "today": zod.string(),
+  "dueSoonDays": zod.number(),
+  "overdue": zod.number(),
+  "dueSoon": zod.number(),
+  "missing": zod.number(),
+  "items": zod.array(zod.object({
+  "kind": zod.enum(['assessment_review', 'lev_examination', 'health_surveillance', 'exposure_monitoring', 'staff_briefing']),
+  "recordId": zod.number(),
+  "assessmentId": zod.number().nullable(),
+  "label": zod.string(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "dueDate": zod.string().nullable(),
+  "daysUntilDue": zod.number().nullable().describe('Negative = overdue by that many days; null for items not recorded yet.'),
+  "status": zod.enum(['overdue', 'due_soon', 'ok', 'missing'])
+}))
+})
+
+
+/**
+ * @summary List COSHH assessments
+ */
+export const ListCoshhAssessmentsQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const ListCoshhAssessmentsResponseItem = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "substanceId": zod.number().nullish(),
+  "task": zod.string(),
+  "whoAtRisk": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "howOften": zod.string().nullish(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureLimits": zod.string().nullish(),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "healthSurveillanceRequired": zod.boolean(),
+  "monitoringRequired": zod.boolean(),
+  "levRequired": zod.boolean(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish(),
+  "assessor": zod.string().nullish(),
+  "assessmentDate": zod.string(),
+  "reviewDue": zod.string().nullish(),
+  "status": zod.string(),
+  "documentObjectPath": zod.string().nullish(),
+  "documentFileName": zod.string().nullish(),
+  "documentFileSize": zod.number().nullish(),
+  "documentMimeType": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "draftSource": zod.string().nullish(),
+  "draftedAt": zod.string().nullish(),
+  "checkedBy": zod.number().nullish(),
+  "checkedByName": zod.string().nullish(),
+  "checkedAt": zod.string().nullish(),
+  "revision": zod.number().describe('Goes up when a change alters what staff read, so they sign the assessment again.'),
+  "signOffDepartments": zod.array(zod.string()),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "deletedAt": zod.string().nullish(),
+  "reviewOverdue": zod.boolean()
+})
+export const ListCoshhAssessmentsResponse = zod.array(ListCoshhAssessmentsResponseItem)
+
+
+/**
+ * @summary Record a COSHH assessment (owners, consultants and managers)
+ */
+export const CreateCoshhAssessmentBody = zod.object({
+  "siteId": zod.number(),
+  "substanceId": zod.number().nullish(),
+  "task": zod.string(),
+  "whoAtRisk": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.enum(['inhalation', 'skin', 'eyes', 'ingestion', 'injection'])).optional(),
+  "howOften": zod.string().nullish(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.union([zod.literal('danger'),zod.literal('warning'),zod.literal('none'),zod.literal(null)]).nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureLimits": zod.string().nullish(),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.enum(['gloves', 'eye_protection', 'face_shield', 'respirator', 'apron_overalls', 'footwear'])).optional(),
+  "ppeDetails": zod.string().nullish(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']),
+  "healthSurveillanceRequired": zod.boolean().optional(),
+  "monitoringRequired": zod.boolean().optional(),
+  "levRequired": zod.boolean().optional(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish(),
+  "assessor": zod.string().nullish(),
+  "assessmentDate": zod.string(),
+  "reviewDue": zod.string().nullish().describe('Omitted on create = 12 months after the assessment date.'),
+  "status": zod.enum(['current', 'archived']).optional(),
+  "notes": zod.string().nullish(),
+  "draftSource": zod.union([zod.literal('ai'),zod.literal(null)]).nullish().describe('Set to ai when the form was pre-filled from a safety data sheet.'),
+  "draftedAt": zod.date().nullish(),
+  "checkedAgainstSds": zod.boolean().optional().describe('Required (true) to save an AI draft; the saver is recorded as having checked it.'),
+  "signOffDepartments": zod.array(zod.string()).optional().describe('Departments (staff list names) whose staff must read and sign it in TrainTrack; empty means everyone at the site.'),
+  "objectPath": zod.string().nullish().describe('A fresh upload from POST \/registers\/uploads\/request-url, null to detach, omitted to keep.'),
+  "fileName": zod.string().nullish()
+})
+
+export const CreateCoshhAssessmentResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "substanceId": zod.number().nullish(),
+  "task": zod.string(),
+  "whoAtRisk": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "howOften": zod.string().nullish(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureLimits": zod.string().nullish(),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "healthSurveillanceRequired": zod.boolean(),
+  "monitoringRequired": zod.boolean(),
+  "levRequired": zod.boolean(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish(),
+  "assessor": zod.string().nullish(),
+  "assessmentDate": zod.string(),
+  "reviewDue": zod.string().nullish(),
+  "status": zod.string(),
+  "documentObjectPath": zod.string().nullish(),
+  "documentFileName": zod.string().nullish(),
+  "documentFileSize": zod.number().nullish(),
+  "documentMimeType": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "draftSource": zod.string().nullish(),
+  "draftedAt": zod.string().nullish(),
+  "checkedBy": zod.number().nullish(),
+  "checkedByName": zod.string().nullish(),
+  "checkedAt": zod.string().nullish(),
+  "revision": zod.number().describe('Goes up when a change alters what staff read, so they sign the assessment again.'),
+  "signOffDepartments": zod.array(zod.string()),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "deletedAt": zod.string().nullish(),
+  "reviewOverdue": zod.boolean()
+})
+
+
+/**
+ * @summary Whether ComplyTrack can draft a COSHH assessment from a safety data sheet, and the AI allowance (owners, consultants and managers)
+ */
+export const getCoshhSdsReadingResponseAiPercentUsedMin = 0;
+export const getCoshhSdsReadingResponseAiPercentUsedMax = 100;
+
+export const getCoshhSdsReadingResponseAiCarriedOverPercentMin = 0;
+
+export const getCoshhSdsReadingResponseAiNextLapsePercentMin = 0;
+
+
+
+export const GetCoshhSdsReadingResponse = zod.object({
+  "available": zod.boolean().describe('False until the server has an Anthropic API key.'),
+  "ai": zod.object({
+  "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
+  "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
+  "percentUsed": zod.number().min(getCoshhSdsReadingResponseAiPercentUsedMin).max(getCoshhSdsReadingResponseAiPercentUsedMax).describe('Share of what is available this period, allowance carried over included, that is used'),
+  "resetsAt": zod.date().nullable().describe('When the next month\'s allowance is added'),
+  "usedUp": zod.boolean().describe('Everything available, allowance carried over included, is used up'),
+  "carriedOverPercent": zod.number().min(getCoshhSdsReadingResponseAiCarriedOverPercentMin).describe('Unused allowance carried over from earlier months, as a share of one month\'s allowance (150 = a month and a half)'),
+  "nextLapseAt": zod.date().nullable().describe('When the oldest carried-over allowance lapses if unused'),
+  "nextLapsePercent": zod.number().min(getCoshhSdsReadingResponseAiNextLapsePercentMin).describe('How much lapses then, as a share of one month\'s allowance')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups). Unused allowance and top-ups carry over, oldest used first, and lapse 12 months after the end of the month they were for. Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").')
+})
+
+
+/**
+ * Claude reads the supplier's safety data sheet (one PDF, photo or Word file, or up to 10 photos of its pages) and returns the New assessment form's fields: hazards, exposure limits, controls, PPE, storage, spills, first aid and disposal, plus a suggested task, who is at risk, risk level and follow-up. Nothing is saved or stored here: the person checks it against the sheet and saves it with POST /coshh-track/assessments (draftSource ai, checkedAgainstSds true). Off until the server has an Anthropic API key; uses the AI features add-on's allowance.
+ * @summary Draft a COSHH assessment from a safety data sheet with AI (owners, consultants and managers)
+ */
+export const readCoshhSafetyDataSheetBodyFilesMax = 10;
+
+
+
+export const ReadCoshhSafetyDataSheetBody = zod.object({
+  "files": zod.array(zod.object({
+  "fileName": zod.string(),
+  "mimeType": zod.string(),
+  "data": zod.string().describe('The file, base64-encoded (20 MB at most, all files together).')
+})).min(1).max(readCoshhSafetyDataSheetBodyFilesMax)
+})
+
+export const ReadCoshhSafetyDataSheetResponse = zod.object({
+  "productName": zod.string(),
+  "supplier": zod.string().nullable(),
+  "sdsDate": zod.date().nullable(),
+  "hazardPictograms": zod.array(zod.string()),
+  "signalWord": zod.enum(['danger', 'warning', 'none']).nullable(),
+  "hazardStatements": zod.string(),
+  "healthEffects": zod.string(),
+  "exposureLimits": zod.string(),
+  "exposureRoutes": zod.array(zod.string()),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string(),
+  "controls": zod.string(),
+  "storage": zod.string(),
+  "spillProcedure": zod.string(),
+  "firstAid": zod.string(),
+  "disposal": zod.string(),
+  "task": zod.string(),
+  "whoAtRisk": zod.string(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']),
+  "healthSurveillanceRequired": zod.boolean(),
+  "monitoringRequired": zod.boolean(),
+  "levRequired": zod.boolean(),
+  "summary": zod.string(),
+  "unclear": zod.array(zod.string())
+})
+
+
+/**
+ * @summary Update a COSHH assessment (owners, consultants and managers)
+ */
+export const UpdateCoshhAssessmentParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateCoshhAssessmentBody = zod.object({
+  "siteId": zod.number(),
+  "substanceId": zod.number().nullish(),
+  "task": zod.string(),
+  "whoAtRisk": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.enum(['inhalation', 'skin', 'eyes', 'ingestion', 'injection'])).optional(),
+  "howOften": zod.string().nullish(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.union([zod.literal('danger'),zod.literal('warning'),zod.literal('none'),zod.literal(null)]).nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureLimits": zod.string().nullish(),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.enum(['gloves', 'eye_protection', 'face_shield', 'respirator', 'apron_overalls', 'footwear'])).optional(),
+  "ppeDetails": zod.string().nullish(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']),
+  "healthSurveillanceRequired": zod.boolean().optional(),
+  "monitoringRequired": zod.boolean().optional(),
+  "levRequired": zod.boolean().optional(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish(),
+  "assessor": zod.string().nullish(),
+  "assessmentDate": zod.string(),
+  "reviewDue": zod.string().nullish().describe('Omitted on create = 12 months after the assessment date.'),
+  "status": zod.enum(['current', 'archived']).optional(),
+  "notes": zod.string().nullish(),
+  "draftSource": zod.union([zod.literal('ai'),zod.literal(null)]).nullish().describe('Set to ai when the form was pre-filled from a safety data sheet.'),
+  "draftedAt": zod.date().nullish(),
+  "checkedAgainstSds": zod.boolean().optional().describe('Required (true) to save an AI draft; the saver is recorded as having checked it.'),
+  "signOffDepartments": zod.array(zod.string()).optional().describe('Departments (staff list names) whose staff must read and sign it in TrainTrack; empty means everyone at the site.'),
+  "objectPath": zod.string().nullish().describe('A fresh upload from POST \/registers\/uploads\/request-url, null to detach, omitted to keep.'),
+  "fileName": zod.string().nullish()
+})
+
+export const UpdateCoshhAssessmentResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "substanceId": zod.number().nullish(),
+  "task": zod.string(),
+  "whoAtRisk": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "howOften": zod.string().nullish(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureLimits": zod.string().nullish(),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "healthSurveillanceRequired": zod.boolean(),
+  "monitoringRequired": zod.boolean(),
+  "levRequired": zod.boolean(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish(),
+  "assessor": zod.string().nullish(),
+  "assessmentDate": zod.string(),
+  "reviewDue": zod.string().nullish(),
+  "status": zod.string(),
+  "documentObjectPath": zod.string().nullish(),
+  "documentFileName": zod.string().nullish(),
+  "documentFileSize": zod.number().nullish(),
+  "documentMimeType": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "draftSource": zod.string().nullish(),
+  "draftedAt": zod.string().nullish(),
+  "checkedBy": zod.number().nullish(),
+  "checkedByName": zod.string().nullish(),
+  "checkedAt": zod.string().nullish(),
+  "revision": zod.number().describe('Goes up when a change alters what staff read, so they sign the assessment again.'),
+  "signOffDepartments": zod.array(zod.string()),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "deletedAt": zod.string().nullish(),
+  "reviewOverdue": zod.boolean()
+})
+
+
+/**
+ * @summary Remove a COSHH assessment (kept in the audit trail and export)
+ */
+export const DeleteCoshhAssessmentParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteCoshhAssessmentResponse = zod.void()
+
+
+/**
+ * @summary Short-lived download link for an assessment's attached document
+ */
+export const GetCoshhAssessmentDocumentUrlParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetCoshhAssessmentDocumentUrlResponse = zod.object({
+  "downloadUrl": zod.string(),
+  "fileName": zod.string().nullish()
+})
+
+
+/**
+ * @summary List LEV examinations, health checks, exposure monitoring and staff briefings
+ */
+export const ListCoshhChecksQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional(),
+  "checkType": zod.enum(['lev_examination', 'health_surveillance', 'exposure_monitoring', 'staff_briefing']).optional(),
+  "assessmentId": zod.coerce.number().optional()
+})
+
+export const ListCoshhChecksResponseItem = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "assessmentId": zod.number().nullish(),
+  "checkType": zod.string(),
+  "checkDate": zod.string(),
+  "subject": zod.string().nullish(),
+  "carriedOutBy": zod.string().nullish(),
+  "result": zod.string(),
+  "actionRequired": zod.string().nullish(),
+  "nextDueDate": zod.string().nullish(),
+  "reportObjectPath": zod.string().nullish(),
+  "reportFileName": zod.string().nullish(),
+  "reportFileSize": zod.number().nullish(),
+  "reportMimeType": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "deletedAt": zod.string().nullish()
+})
+export const ListCoshhChecksResponse = zod.array(ListCoshhChecksResponseItem)
+
+
+/**
+ * @summary Record a COSHH check
+ */
+export const CreateCoshhCheckBody = zod.object({
+  "siteId": zod.number(),
+  "assessmentId": zod.number().nullish(),
+  "checkType": zod.enum(['lev_examination', 'health_surveillance', 'exposure_monitoring', 'staff_briefing']),
+  "checkDate": zod.string(),
+  "subject": zod.string().nullish().describe('The extraction system, the person checked or briefed, or the area monitored.'),
+  "carriedOutBy": zod.string().nullish(),
+  "result": zod.enum(['pass', 'fail']).optional(),
+  "actionRequired": zod.string().nullish().describe('Required when the result is fail.'),
+  "nextDueDate": zod.string().nullish().describe('Omitted on create = the suggested interval (LEV 14 months, others 12).'),
+  "notes": zod.string().nullish(),
+  "objectPath": zod.string().nullish(),
+  "fileName": zod.string().nullish()
+})
+
+export const CreateCoshhCheckResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "assessmentId": zod.number().nullish(),
+  "checkType": zod.string(),
+  "checkDate": zod.string(),
+  "subject": zod.string().nullish(),
+  "carriedOutBy": zod.string().nullish(),
+  "result": zod.string(),
+  "actionRequired": zod.string().nullish(),
+  "nextDueDate": zod.string().nullish(),
+  "reportObjectPath": zod.string().nullish(),
+  "reportFileName": zod.string().nullish(),
+  "reportFileSize": zod.number().nullish(),
+  "reportMimeType": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "deletedAt": zod.string().nullish()
+})
+
+
+/**
+ * @summary Update a COSHH check
+ */
+export const UpdateCoshhCheckParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateCoshhCheckBody = zod.object({
+  "siteId": zod.number(),
+  "assessmentId": zod.number().nullish(),
+  "checkType": zod.enum(['lev_examination', 'health_surveillance', 'exposure_monitoring', 'staff_briefing']),
+  "checkDate": zod.string(),
+  "subject": zod.string().nullish().describe('The extraction system, the person checked or briefed, or the area monitored.'),
+  "carriedOutBy": zod.string().nullish(),
+  "result": zod.enum(['pass', 'fail']).optional(),
+  "actionRequired": zod.string().nullish().describe('Required when the result is fail.'),
+  "nextDueDate": zod.string().nullish().describe('Omitted on create = the suggested interval (LEV 14 months, others 12).'),
+  "notes": zod.string().nullish(),
+  "objectPath": zod.string().nullish(),
+  "fileName": zod.string().nullish()
+})
+
+export const UpdateCoshhCheckResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "assessmentId": zod.number().nullish(),
+  "checkType": zod.string(),
+  "checkDate": zod.string(),
+  "subject": zod.string().nullish(),
+  "carriedOutBy": zod.string().nullish(),
+  "result": zod.string(),
+  "actionRequired": zod.string().nullish(),
+  "nextDueDate": zod.string().nullish(),
+  "reportObjectPath": zod.string().nullish(),
+  "reportFileName": zod.string().nullish(),
+  "reportFileSize": zod.number().nullish(),
+  "reportMimeType": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "deletedAt": zod.string().nullish()
+})
+
+
+/**
+ * @summary Remove a COSHH check (kept in the audit trail and export)
+ */
+export const DeleteCoshhCheckParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteCoshhCheckResponse = zod.void()
+
+
+/**
+ * @summary Short-lived download link for a check's attached report
+ */
+export const GetCoshhCheckReportUrlParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetCoshhCheckReportUrlResponse = zod.object({
+  "downloadUrl": zod.string(),
+  "fileName": zod.string().nullish()
+})
+
+
+/**
+ * @summary Current COSHH assessments with who has read and signed them and who still needs to (TrainTrack's COSHH section)
+ */
+export const ListCoshhSignOffsQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const ListCoshhSignOffsResponse = zod.object({
+  "assessments": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string().nullish(),
+  "task": zod.string(),
+  "productName": zod.string().nullish(),
+  "substanceId": zod.number().nullish(),
+  "hasSafetyDataSheet": zod.boolean(),
+  "hasDocument": zod.boolean(),
+  "revision": zod.number(),
+  "signOffDepartments": zod.array(zod.string()),
+  "assessmentDate": zod.date().nullish(),
+  "assessor": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish()
+}).describe('The parts of a current COSHH assessment a person reads before signing.').and(zod.object({
+  "staffTotal": zod.number(),
+  "signedCount": zod.number(),
+  "signed": zod.array(zod.object({
+  "staffRosterId": zod.number(),
+  "name": zod.string(),
+  "department": zod.string().nullish(),
+  "signedAt": zod.date(),
+  "hasSignature": zod.boolean(),
+  "trainTrackRecordId": zod.number().nullish()
+})),
+  "outstanding": zod.array(zod.object({
+  "staffRosterId": zod.number(),
+  "name": zod.string(),
+  "department": zod.string().nullish(),
+  "resign": zod.boolean().describe('They signed an earlier revision, so this is a re-sign after a change.')
+}))
+})))
+})
+
+
+/**
+ * @summary Record staff signing that they have read a current COSHH assessment; each writes a TrainTrack sign-off
+ */
+export const RecordCoshhSignOffsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const recordCoshhSignOffsBodySignOffsMax = 200;
+
+
+
+export const RecordCoshhSignOffsBody = zod.object({
+  "signOffs": zod.array(zod.object({
+  "staffRosterId": zod.number(),
+  "signature": zod.string().nullish().describe('The person\'s signature drawn on this device (base64 PNG).')
+})).min(1).max(recordCoshhSignOffsBodySignOffsMax)
+})
+
+export const RecordCoshhSignOffsResponse = zod.object({
+  "signed": zod.number(),
+  "assessment": zod.union([zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string().nullish(),
+  "task": zod.string(),
+  "productName": zod.string().nullish(),
+  "substanceId": zod.number().nullish(),
+  "hasSafetyDataSheet": zod.boolean(),
+  "hasDocument": zod.boolean(),
+  "revision": zod.number(),
+  "signOffDepartments": zod.array(zod.string()),
+  "assessmentDate": zod.date().nullish(),
+  "assessor": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish()
+}).describe('The parts of a current COSHH assessment a person reads before signing.').and(zod.object({
+  "staffTotal": zod.number(),
+  "signedCount": zod.number(),
+  "signed": zod.array(zod.object({
+  "staffRosterId": zod.number(),
+  "name": zod.string(),
+  "department": zod.string().nullish(),
+  "signedAt": zod.date(),
+  "hasSignature": zod.boolean(),
+  "trainTrackRecordId": zod.number().nullish()
+})),
+  "outstanding": zod.array(zod.object({
+  "staffRosterId": zod.number(),
+  "name": zod.string(),
+  "department": zod.string().nullish(),
+  "resign": zod.boolean().describe('They signed an earlier revision, so this is a re-sign after a change.')
+}))
+})),zod.null()])
+})
+
+
+/**
+ * @summary Report types, tracks, sites and people for the report screens, and whether reports can be read
+ */
+export const getInspectionReportOptionsResponseReadingAiPercentUsedMin = 0;
+export const getInspectionReportOptionsResponseReadingAiPercentUsedMax = 100;
+
+export const getInspectionReportOptionsResponseReadingAiCarriedOverPercentMin = 0;
+
+export const getInspectionReportOptionsResponseReadingAiNextLapsePercentMin = 0;
+
+
+
+export const GetInspectionReportOptionsResponse = zod.object({
+  "reportTypes": zod.array(zod.object({
+  "key": zod.enum(['alps_audit', 'care_inspectorate', 'eho', 'fire_officer', 'hse', 'insurer', 'other']),
+  "label": zod.string()
+})),
+  "modules": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string()
+})),
+  "sites": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+})),
+  "assignees": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "role": zod.string(),
+  "isMaintenanceManager": zod.boolean()
+})),
+  "reading": zod.object({
+  "available": zod.boolean(),
+  "monthlyLimit": zod.number(),
+  "usedThisMonth": zod.number(),
+  "ai": zod.object({
+  "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
+  "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
+  "percentUsed": zod.number().min(getInspectionReportOptionsResponseReadingAiPercentUsedMin).max(getInspectionReportOptionsResponseReadingAiPercentUsedMax).describe('Share of what is available this period, allowance carried over included, that is used'),
+  "resetsAt": zod.date().nullable().describe('When the next month\'s allowance is added'),
+  "usedUp": zod.boolean().describe('Everything available, allowance carried over included, is used up'),
+  "carriedOverPercent": zod.number().min(getInspectionReportOptionsResponseReadingAiCarriedOverPercentMin).describe('Unused allowance carried over from earlier months, as a share of one month\'s allowance (150 = a month and a half)'),
+  "nextLapseAt": zod.date().nullable().describe('When the oldest carried-over allowance lapses if unused'),
+  "nextLapsePercent": zod.number().min(getInspectionReportOptionsResponseReadingAiNextLapsePercentMin).describe('How much lapses then, as a share of one month\'s allowance')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups). Unused allowance and top-ups carry over, oldest used first, and lapse 12 months after the end of the month they were for. Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").')
+})
+})
+
+
+/**
+ * @summary Uploaded audit and inspection reports (Owners, Managers for their sites, consultants)
+ */
+export const ListInspectionReportsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "reportType": zod.enum(['alps_audit', 'care_inspectorate', 'eho', 'fire_officer', 'hse', 'insurer', 'other']),
+  "title": zod.string(),
+  "reportDate": zod.date().nullable(),
+  "fileName": zod.string().nullable(),
+  "aiStatus": zod.string(),
+  "uploadedByName": zod.string(),
+  "createdAt": zod.date(),
+  "draftCount": zod.number(),
+  "actionCount": zod.number(),
+  "openCount": zod.number()
+})
+export const ListInspectionReportsResponse = zod.array(ListInspectionReportsResponseItem)
+
+
+/**
+ * @summary Register a report uploaded through /storage/uploads/request-url
+ */
+export const CreateInspectionReportBody = zod.object({
+  "title": zod.string(),
+  "reportType": zod.enum(['alps_audit', 'care_inspectorate', 'eho', 'fire_officer', 'hse', 'insurer', 'other']),
+  "reportDate": zod.date().nullish(),
+  "siteId": zod.number().nullish(),
+  "objectPath": zod.string(),
+  "fileName": zod.string()
+})
+
+export const CreateInspectionReportResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "reportType": zod.enum(['alps_audit', 'care_inspectorate', 'eho', 'fire_officer', 'hse', 'insurer', 'other']),
+  "title": zod.string(),
+  "reportDate": zod.date().nullable(),
+  "fileName": zod.string().nullable(),
+  "fileSize": zod.number().nullish(),
+  "mimeType": zod.string().nullish(),
+  "readable": zod.boolean(),
+  "draftActions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+})),
+  "aiStatus": zod.string(),
+  "aiSummary": zod.string().nullable(),
+  "aiError": zod.string().nullable(),
+  "aiReadCount": zod.number(),
+  "uploadedByName": zod.string(),
+  "createdAt": zod.date()
+})
+
+
+/**
+ * @summary A report, the list being checked, and the actions created from it
+ */
+export const GetInspectionReportParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetInspectionReportResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "reportType": zod.enum(['alps_audit', 'care_inspectorate', 'eho', 'fire_officer', 'hse', 'insurer', 'other']),
+  "title": zod.string(),
+  "reportDate": zod.date().nullable(),
+  "fileName": zod.string().nullable(),
+  "fileSize": zod.number().nullish(),
+  "mimeType": zod.string().nullish(),
+  "readable": zod.boolean(),
+  "draftActions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+})),
+  "aiStatus": zod.string(),
+  "aiSummary": zod.string().nullable(),
+  "aiError": zod.string().nullable(),
+  "aiReadCount": zod.number(),
+  "uploadedByName": zod.string(),
+  "createdAt": zod.date()
+}).and(zod.object({
+  "actions": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "module": zod.string(),
+  "title": zod.string(),
+  "instruction": zod.string().nullable(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "status": zod.string(),
+  "ownerName": zod.string().nullable(),
+  "assigneeUserId": zod.number().nullish().describe('The person assigned (gets the reminders)'),
+  "dueDate": zod.date().nullable(),
+  "draftSource": zod.string().nullable(),
+  "confirmedByName": zod.string().nullable(),
+  "createdAt": zod.date(),
+  "dueDateChanges": zod.array(zod.object({
+  "changedAt": zod.date(),
+  "changedByName": zod.string().nullable(),
+  "from": zod.date().nullable(),
+  "to": zod.date().nullable()
+})).optional().describe('Due date changes after the action was created (report detail only), oldest first')
+}))
+}))
+
+
+/**
+ * @summary Remove a report uploaded by mistake (only while no actions come from it)
+ */
+export const DeleteInspectionReportParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteInspectionReportResponse = zod.void()
+
+
+/**
+ * Replaces the list being checked with suggestions. Nothing is created until the list is confirmed. 503 REPORT_READING_UNAVAILABLE when no key is set; 429 REPORT_READING_LIMIT past the monthly or per-report limit. 402 AI_ADDON_REQUIRED without the AI features add-on; 429 AI_ALLOWANCE_USED once this period's AI allowance is used.
+ * @summary Have ComplyTrack read the report and suggest actions (needs ANTHROPIC_API_KEY)
+ */
+export const ReadInspectionReportParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ReadInspectionReportResponse = zod.object({
+  "aiSummary": zod.string().nullable(),
+  "draftActions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+}))
+})
+
+
+/**
+ * @summary Save the list of actions being checked
+ */
+export const SaveInspectionReportDraftParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SaveInspectionReportDraftBody = zod.object({
+  "actions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+}))
+})
+
+export const SaveInspectionReportDraftResponse = zod.object({
+  "draftActions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+}))
+})
+
+
+/**
+ * @summary Create the checked actions as open track actions linked to the report
+ */
+export const ConfirmInspectionReportActionsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ConfirmInspectionReportActionsBody = zod.object({
+  "actions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+}))
+})
+
+export const ConfirmInspectionReportActionsResponse = zod.object({
+  "actions": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "module": zod.string(),
+  "title": zod.string(),
+  "instruction": zod.string().nullable(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "status": zod.string(),
+  "ownerName": zod.string().nullable(),
+  "assigneeUserId": zod.number().nullish().describe('The person assigned (gets the reminders)'),
+  "dueDate": zod.date().nullable(),
+  "draftSource": zod.string().nullable(),
+  "confirmedByName": zod.string().nullable(),
+  "createdAt": zod.date(),
+  "dueDateChanges": zod.array(zod.object({
+  "changedAt": zod.date(),
+  "changedByName": zod.string().nullable(),
+  "from": zod.date().nullable(),
+  "to": zod.date().nullable()
+})).optional().describe('Due date changes after the action was created (report detail only), oldest first')
+})),
+  "emailedTo": zod.array(zod.string()).describe('Owners, Managers and linked consultants emailed the action plan')
+})
+
+
+/**
+ * @summary Download the uploaded report
+ */
+export const DownloadInspectionReportParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DownloadInspectionReportResponse = zod.unknown()
+
+
+/**
+ * @summary List KitchenTrack ingredients with their allergens and the dishes that use them
+ */
+export const ListAllergenIngredientsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable().describe('null when every site can use it'),
+  "name": zod.string(),
+  "supplier": zod.string().nullish(),
+  "productCode": zod.string().nullish(),
+  "contains": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "mayContain": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "notes": zod.string().nullish(),
+  "lastCheckedAt": zod.date().nullish(),
+  "checkedBy": zod.string().nullish(),
+  "usedIn": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "siteId": zod.number().nullable()
+})).describe('Dishes using it, at sites the caller can see'),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+export const ListAllergenIngredientsResponse = zod.array(ListAllergenIngredientsResponseItem)
+
+
+/**
+ * @summary Add an ingredient (for every site, or one site)
+ */
+export const createAllergenIngredientBodyNameMax = 200;
+
+export const createAllergenIngredientBodySupplierMax = 200;
+
+export const createAllergenIngredientBodyProductCodeMax = 100;
+
+export const createAllergenIngredientBodyContainsMax = 14;
+
+export const createAllergenIngredientBodyMayContainMax = 14;
+
+export const createAllergenIngredientBodyNotesMax = 2000;
+
+export const createAllergenIngredientBodyCheckedByMax = 200;
+
+export const createAllergenIngredientBodyChangeReasonMax = 1000;
+
+
+
+export const CreateAllergenIngredientBody = zod.object({
+  "siteId": zod.number().nullable(),
+  "name": zod.string().max(createAllergenIngredientBodyNameMax),
+  "supplier": zod.string().max(createAllergenIngredientBodySupplierMax).nullish(),
+  "productCode": zod.string().max(createAllergenIngredientBodyProductCodeMax).nullish(),
+  "contains": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).max(createAllergenIngredientBodyContainsMax),
+  "mayContain": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).max(createAllergenIngredientBodyMayContainMax).optional(),
+  "notes": zod.string().max(createAllergenIngredientBodyNotesMax).nullish(),
+  "lastCheckedAt": zod.date().nullish(),
+  "checkedBy": zod.string().max(createAllergenIngredientBodyCheckedByMax).nullish(),
+  "changeReason": zod.string().max(createAllergenIngredientBodyChangeReasonMax).nullish().describe('Required when contains or may contain changes on an edit')
+})
+
+export const CreateAllergenIngredientResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable().describe('null when every site can use it'),
+  "name": zod.string(),
+  "supplier": zod.string().nullish(),
+  "productCode": zod.string().nullish(),
+  "contains": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "mayContain": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "notes": zod.string().nullish(),
+  "lastCheckedAt": zod.date().nullish(),
+  "checkedBy": zod.string().nullish(),
+  "usedIn": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "siteId": zod.number().nullable()
+})).describe('Dishes using it, at sites the caller can see'),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Update an ingredient; changed allergens need a reason and update every dish that uses it
+ */
+export const UpdateAllergenIngredientParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const updateAllergenIngredientBodyNameMax = 200;
+
+export const updateAllergenIngredientBodySupplierMax = 200;
+
+export const updateAllergenIngredientBodyProductCodeMax = 100;
+
+export const updateAllergenIngredientBodyContainsMax = 14;
+
+export const updateAllergenIngredientBodyMayContainMax = 14;
+
+export const updateAllergenIngredientBodyNotesMax = 2000;
+
+export const updateAllergenIngredientBodyCheckedByMax = 200;
+
+export const updateAllergenIngredientBodyChangeReasonMax = 1000;
+
+
+
+export const UpdateAllergenIngredientBody = zod.object({
+  "siteId": zod.number().nullable(),
+  "name": zod.string().max(updateAllergenIngredientBodyNameMax),
+  "supplier": zod.string().max(updateAllergenIngredientBodySupplierMax).nullish(),
+  "productCode": zod.string().max(updateAllergenIngredientBodyProductCodeMax).nullish(),
+  "contains": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).max(updateAllergenIngredientBodyContainsMax),
+  "mayContain": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).max(updateAllergenIngredientBodyMayContainMax).optional(),
+  "notes": zod.string().max(updateAllergenIngredientBodyNotesMax).nullish(),
+  "lastCheckedAt": zod.date().nullish(),
+  "checkedBy": zod.string().max(updateAllergenIngredientBodyCheckedByMax).nullish(),
+  "changeReason": zod.string().max(updateAllergenIngredientBodyChangeReasonMax).nullish().describe('Required when contains or may contain changes on an edit')
+})
+
+export const UpdateAllergenIngredientResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable().describe('null when every site can use it'),
+  "name": zod.string(),
+  "supplier": zod.string().nullish(),
+  "productCode": zod.string().nullish(),
+  "contains": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "mayContain": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "notes": zod.string().nullish(),
+  "lastCheckedAt": zod.date().nullish(),
+  "checkedBy": zod.string().nullish(),
+  "usedIn": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "siteId": zod.number().nullable()
+})).describe('Dishes using it, at sites the caller can see'),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+}).and(zod.object({
+  "dishesUpdated": zod.number().describe('Dishes whose allergens changed because of this edit')
+}))
+
+
+/**
+ * @summary Remove an ingredient no dish uses (kept for the record)
+ */
+export const DeleteAllergenIngredientParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteAllergenIngredientResponse = zod.void()
+
+
+/**
+ * @summary An ingredient's allergen change log, newest first
+ */
+export const ListAllergenIngredientChangesParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListAllergenIngredientChangesResponseItem = zod.object({
+  "id": zod.number(),
+  "ingredientId": zod.number(),
+  "changeType": zod.enum(['created', 'allergens_changed', 'removed']),
+  "containsBefore": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).nullish(),
+  "containsAfter": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).nullish(),
+  "mayContainBefore": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).nullish(),
+  "mayContainAfter": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).nullish(),
+  "reason": zod.string().nullish(),
+  "dishesUpdated": zod.number(),
+  "changedByName": zod.string().nullish(),
+  "createdAt": zod.date()
+})
+export const ListAllergenIngredientChangesResponse = zod.array(ListAllergenIngredientChangesResponseItem)
+
+
+/**
+ * @summary List menus at the sites the caller can see
+ */
+export const ListAllergenMenusQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const ListAllergenMenusResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "contentsChangedAt": zod.date(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+export const ListAllergenMenusResponse = zod.array(ListAllergenMenusResponseItem)
+
+
+/**
+ * @summary Add a menu at a site
+ */
+export const createAllergenMenuBodyNameMax = 100;
+
+
+
+export const CreateAllergenMenuBody = zod.object({
+  "siteId": zod.number(),
+  "name": zod.string().max(createAllergenMenuBodyNameMax)
+})
+
+export const CreateAllergenMenuResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "contentsChangedAt": zod.date(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Rename a menu (it stays at its site)
+ */
+export const RenameAllergenMenuParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const renameAllergenMenuBodyNameMax = 100;
+
+
+
+export const RenameAllergenMenuBody = zod.object({
+  "name": zod.string().max(renameAllergenMenuBodyNameMax)
+})
+
+export const RenameAllergenMenuResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "contentsChangedAt": zod.date(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Remove a menu (its dishes stay; kept for the record)
+ */
+export const DeleteAllergenMenuParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteAllergenMenuResponse = zod.void()
+
+
+/**
+ * @summary Allergen charts (one per site and one per menu) with their latest sign-off
+ */
+export const ListAllergenChartsResponseItem = zod.object({
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "menuId": zod.number().nullable().describe('null for the whole-site chart'),
+  "menuName": zod.string().nullable(),
+  "dishCount": zod.number(),
+  "lastSignoff": zod.union([zod.object({
+  "id": zod.number(),
+  "checkedByName": zod.string(),
+  "createdAt": zod.date(),
+  "note": zod.string().nullish(),
+  "dishCount": zod.number()
+}),zod.null()]),
+  "changedSinceCheck": zod.boolean().describe('A dish on the chart changed after the latest sign-off')
+})
+export const ListAllergenChartsResponse = zod.array(ListAllergenChartsResponseItem)
+
+
+/**
+ * @summary Sign-off history for a site's chart, or one menu's chart, newest first
+ */
+export const ListAllergenChartSignoffsQueryParams = zod.object({
+  "siteId": zod.coerce.number(),
+  "menuId": zod.coerce.number().optional()
+})
+
+export const ListAllergenChartSignoffsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "menuId": zod.number().nullable(),
+  "dishCount": zod.number(),
+  "note": zod.string().nullish(),
+  "checkedByName": zod.string(),
+  "createdAt": zod.date()
+})
+export const ListAllergenChartSignoffsResponse = zod.array(ListAllergenChartSignoffsResponseItem)
+
+
+/**
+ * @summary Sign off a chart as checked against current recipes and labels (signed-in person's name)
+ */
+export const signOffAllergenChartBodyNoteMax = 1000;
+
+
+
+export const SignOffAllergenChartBody = zod.object({
+  "siteId": zod.number(),
+  "menuId": zod.number().nullish(),
+  "confirmed": zod.boolean().describe('Must be true; the person confirms every dish was checked against current recipes and labels'),
+  "note": zod.string().max(signOffAllergenChartBodyNoteMax).nullish()
+})
+
+export const SignOffAllergenChartResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "menuId": zod.number().nullable(),
+  "dishCount": zod.number(),
+  "note": zod.string().nullish(),
+  "checkedByName": zod.string(),
+  "createdAt": zod.date()
+})
 
 

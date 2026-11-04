@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { takeLinkParams } from "@/lib/deep-link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
@@ -20,7 +21,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import {
   useGetBikeTrackConfig,
@@ -36,7 +39,11 @@ import { cn } from "@/lib/utils";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
-import { beginApiMutation } from "@/lib/api";
+import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
+import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { sortByLabel } from "@/lib/sort-options";
+import { TrackContractorChecks } from "@/components/track-contractor-checks";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -145,11 +152,12 @@ const CHECK_ITEMS: { key: string; label: string; icon?: string }[] = [
 const baseUrl = `${import.meta.env.BASE_URL?.replace(/\/$/, "") ?? ""}/api`;
 async function apiFetch(path: string, opts?: RequestInit) {
   const mutationSucceeded = beginApiMutation(opts?.method, path);
-  const res = await fetch(`${baseUrl}${path}`, {
+  const res = await fetchWithOverrideReason(withActiveClient(`${baseUrl}${path}`, opts?.body), await withCsrfToken({
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
     ...opts,
-  });
+  }));
+  notifyAuthStatus(res);
   if (res.ok) mutationSucceeded();
   if (res.status === 204) return null;
   const body = await res.json().catch(() => ({}));
@@ -393,15 +401,19 @@ function NewHireDialog({
   onClose,
   bikes,
   onCreated,
+  presetBikeId,
 }: {
   open: boolean;
   onClose: () => void;
   bikes: BikeRow[];
   onCreated: () => void;
+  /** A bike from a scanned QR label: chosen already, so the hire starts at the guest details. */
+  presetBikeId?: number;
 }) {
   const { toast } = useToast();
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
+  const hireMedia = useRecordMedia("bike_hire", { open, disabled: saving });
 
   // Step 1 — bike selection
   const [selectedBikeId, setSelectedBikeId] = useState<number | null>(null);
@@ -425,6 +437,10 @@ function NewHireDialog({
   const availableBikes = useMemo(() => bikes.filter(b => b.active && b.status === "available"), [bikes]);
   const selectedBike = useMemo(() => bikes.find(b => b.id === selectedBikeId), [bikes, selectedBikeId]);
 
+  useEffect(() => {
+    if (open && presetBikeId) { setSelectedBikeId(presetBikeId); setStep(2); }
+  }, [open, presetBikeId]);
+
   // Pre-fill from template on first open
   useEffect(() => {
     if (!open || !config) return;
@@ -446,7 +462,7 @@ function NewHireDialog({
     setStep(1); setSelectedBikeId(null);
     setGuestName(""); setGuestContact(""); setHireDate(todayIso()); setReturnExpected(""); setDepositPence("");
     setCheckItems(emptyCheckItems()); setPerformedBy(""); setCheckNotes(""); setSkipCheck(false);
-    setSaving(false);
+    setSaving(false); hireMedia.clear();
   }
 
   async function handleSubmit() {
@@ -470,7 +486,10 @@ function NewHireDialog({
           checkNotes: checkNotes.trim() || null,
         };
       }
-      await apiFetch("/bike-track/hires", { method: "POST", body: JSON.stringify(body) });
+      const created = await apiFetch("/bike-track/hires", { method: "POST", body: JSON.stringify(body) });
+      // With a pre-hire check they show on the check, otherwise on the hire.
+      if (created?.preCheck?.id) await hireMedia.attach(created.preCheck.id, "bike_check");
+      else await hireMedia.attach(created?.hire?.id);
       toast({ title: "Hire recorded", description: `${selectedBike?.ref} hired to ${guestName.trim()}` });
       reset();
       onCreated();
@@ -607,6 +626,7 @@ function NewHireDialog({
                   No pre-hire check will be recorded. You can add a standalone check later from the Checks log.
                 </p>
               )}
+              {hireMedia.picker}
             </div>
           )}
         </div>
@@ -659,6 +679,7 @@ function ReturnDialog({
   const [notes, setNotes] = useState("");
   const [returnDate, setReturnDate] = useState(todayIso());
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("bike_hire", { open: !!hire, disabled: saving });
 
   async function handleReturn() {
     if (!hire) return;
@@ -679,6 +700,9 @@ function ReturnDialog({
         };
       }
       const result = await apiFetch(`/bike-track/hires/${hire.id}/return`, { method: "POST", body: JSON.stringify(body) });
+      // With a post-return check they show on the check, otherwise on the hire.
+      if (result?.postCheck?.id) await media.attach(result.postCheck.id, "bike_check");
+      else await media.attach(hire.id);
       const bikeStatus = result?.bikeStatus ?? "available";
       toast({
         title: "Bike returned",
@@ -764,6 +788,7 @@ function ReturnDialog({
                 </div>
               </div>
             )}
+            {media.picker}
           </div>
         </div>
 
@@ -807,12 +832,14 @@ function BikeFormDialog({
   const [siteId, setSiteId] = useState(bike?.siteId ? String(bike.siteId) : "");
   const [notes, setNotes] = useState(bike?.notes ?? "");
   const [saving, setSaving] = useState(false);
+  // A new bike starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
 
-  // Sync form when bike changes
+  // Sync form when bike changes (or the dialog opens for a new bike)
   useMemo(() => {
     setRef(bike?.ref ?? ""); setName(bike?.name ?? ""); setType(bike?.type ?? "hybrid");
-    setSiteId(bike?.siteId ? String(bike.siteId) : ""); setNotes(bike?.notes ?? "");
-  }, [bike]);
+    setSiteId(bike ? (bike.siteId ? String(bike.siteId) : "") : workingSiteId ? String(workingSiteId) : ""); setNotes(bike?.notes ?? "");
+  }, [bike, open]);
 
   async function handleSave() {
     if (!ref.trim()) return;
@@ -855,7 +882,7 @@ function BikeFormDialog({
             <Select value={type} onValueChange={setType}>
               <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {typeOpts.map(k => (
+                {sortByLabel(typeOpts, k => BIKE_TYPES[k] ?? k).map(k => (
                   <SelectItem key={k} value={k}>{BIKE_TYPES[k] ?? k}</SelectItem>
                 ))}
               </SelectContent>
@@ -864,10 +891,10 @@ function BikeFormDialog({
           {sites.length > 0 && (
             <div className="space-y-1.5">
               <Label>Site <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Select value={siteId} onValueChange={setSiteId}>
+              <Select value={siteId || "none"} onValueChange={v => setSiteId(v === "none" ? "" : v)}>
                 <SelectTrigger className="rounded-sm"><SelectValue placeholder="No specific site" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">No specific site</SelectItem>
+                  <SelectItem value="none">No specific site</SelectItem>
                   {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -897,12 +924,15 @@ function LogServiceDialog({
   bikes,
   onClose,
   onSaved,
+  spoken,
 }: {
   open: boolean;
   service: ServiceRow | null;
   bikes: BikeRow[];
   onClose: () => void;
   onSaved: () => void;
+  /** Filled in from Say it ("service bike 4, new brake pads"). */
+  spoken?: { bikeId: number; notes: string } | null;
 }) {
   const { toast } = useToast();
   const [bikeId, setBikeId] = useState(service ? String(service.bikeId) : "");
@@ -913,6 +943,7 @@ function LogServiceDialog({
   const [costPence, setCostPence] = useState(service?.costPence ? String(service.costPence / 100) : "");
   const [notes, setNotes] = useState(service?.notes ?? "");
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("bike_service", { open, disabled: saving });
 
   // Auto-fill next service date when type or date changes, unless editing existing
   useMemo(() => {
@@ -933,6 +964,12 @@ function LogServiceDialog({
     setNotes(service?.notes ?? "");
   }, [service]);
 
+  useEffect(() => {
+    if (!open || !spoken || service) return;
+    setBikeId(String(spoken.bikeId));
+    setNotes(spoken.notes);
+  }, [open, spoken, service]);
+
   async function handleSave() {
     if (!bikeId && !service) return;
     setSaving(true);
@@ -950,7 +987,8 @@ function LogServiceDialog({
         toast({ title: "Service record updated" });
       } else {
         body.bikeId = parseInt(bikeId);
-        await apiFetch("/bike-track/services", { method: "POST", body: JSON.stringify(body) });
+        const created = await apiFetch("/bike-track/services", { method: "POST", body: JSON.stringify(body) });
+        await media.attach(created?.id);
         toast({ title: "Service logged" });
       }
       onSaved();
@@ -980,7 +1018,7 @@ function LogServiceDialog({
               <Select value={bikeId} onValueChange={setBikeId}>
                 <SelectTrigger className="rounded-sm"><SelectValue placeholder="Select a bike…" /></SelectTrigger>
                 <SelectContent>
-                  {activeBikes.map(b => (
+                  {sortByLabel(activeBikes, b => b.ref).map(b => (
                     <SelectItem key={b.id} value={String(b.id)}>
                       {b.ref}{b.name ? ` — ${b.name}` : ""}
                     </SelectItem>
@@ -1000,9 +1038,9 @@ function LogServiceDialog({
               <Select value={serviceType} onValueChange={setServiceType}>
                 <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="adhoc">Ad-hoc / Repair</SelectItem>
                   <SelectItem value="annual">Annual</SelectItem>
                   <SelectItem value="interim">Interim (6-month)</SelectItem>
-                  <SelectItem value="adhoc">Ad-hoc / Repair</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1029,6 +1067,7 @@ function LogServiceDialog({
             <Label>Notes <span className="text-muted-foreground text-xs">optional</span></Label>
             <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Work carried out, parts replaced, observations…" rows={3} className="rounded-sm" />
           </div>
+          {service ? <CheckPhotoUploader entityType="bike_service" entityId={service.id} /> : media.picker}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving} className="rounded-sm">Cancel</Button>
@@ -1061,6 +1100,9 @@ export default function BikeTrackPage() {
   const [deleteBikeId, setDeleteBikeId] = useState<number | null>(null);
   const [logService, setLogService] = useState<ServiceRow | "new" | null>(null);
   const [deleteServiceId, setDeleteServiceId] = useState<number | null>(null);
+  const [scanBikeId, setScanBikeId] = useState<number | null>(null);
+  const [hireBikeId, setHireBikeId] = useState<number>();
+  const [spokenService, setSpokenService] = useState<{ bikeId: number; notes: string } | null>(null);
 
   // ── Queries ─────────────────────────────────────────────────────────────────
 
@@ -1105,6 +1147,49 @@ export default function BikeTrackPage() {
     for (const s of latestServicesArr) m[s.bikeId] = s;
     return m;
   }, [latestServicesArr]);
+
+  // A scanned QR label: a hired bike opens its return, an available bike
+  // starts a hire, anything else shows the bike in the fleet.
+  useEffect(() => {
+    const link = takeLinkParams(["bike"] as const);
+    const id = Number(link?.bike);
+    if (Number.isSafeInteger(id) && id > 0) setScanBikeId(id);
+  }, []);
+  useEffect(() => {
+    if (scanBikeId === null || bikesLoading || hiresLoading) return;
+    const bike = bikes.find(b => b.id === scanBikeId);
+    setScanBikeId(null);
+    if (!bike) return;
+    const hire = hires.find(h => h.bikeId === bike.id && h.status === "active");
+    if (bike.status === "hired" && hire) { setActiveTab("hires"); setReturnHire(hire); }
+    else if (bike.active && bike.status === "available") { setHireBikeId(bike.id); setShowNewHire(true); }
+    else { setActiveTab("fleet"); setSearch(bike.ref); }
+  }, [scanBikeId, bikesLoading, hiresLoading]);
+
+  // Say it: "bike 4 back", "hire out bike 4" or "service bike 4, new brake pads".
+  useSayItFill(["bike"], fill => {
+    const bike = matchSpokenItem(fill.item, bikes.filter(b => b.active).map(b => ({
+      ...b, name: `Bike ${b.ref}`, aliases: [b.ref, b.name],
+    })));
+    if (!bike) {
+      toast({ title: `Couldn't find ${fill.item ?? "that bike"}`, description: "Choose the bike from the list." });
+      setActiveTab("fleet");
+      return;
+    }
+    if (fill.values.intent === "service") {
+      setActiveTab("services");
+      setSpokenService({ bikeId: bike.id, notes: withSpokenNote("", fill.text) });
+      setLogService("new");
+      return;
+    }
+    const hire = hires.find(h => h.bikeId === bike.id && h.status === "active");
+    if (fill.values.intent !== "hire" && hire) { setActiveTab("hires"); setReturnHire(hire); }
+    else if (fill.values.intent !== "return" && bike.status === "available") { setHireBikeId(bike.id); setShowNewHire(true); }
+    else {
+      toast({ title: `${bike.ref} is ${bike.status}`, description: fill.values.intent === "return" ? "It isn't out on hire." : "It can't be hired out right now." });
+      setActiveTab("fleet"); setSearch(bike.ref);
+    }
+  }, !bikesLoading && !hiresLoading);
 
   function invalidate() {
     qc.invalidateQueries({ queryKey: ["bikes"] });
@@ -1177,7 +1262,7 @@ export default function BikeTrackPage() {
     setExporting(true);
     try {
       const params = new URLSearchParams({ from: exportFrom, to: exportTo, format: exportFormat });
-      const response = await fetch(`${baseUrl}/bike-track/hires/export?${params}`, { credentials: "include" });
+      const response = await fetch(withActiveClient(`${baseUrl}/bike-track/hires/export?${params}`), { credentials: "include" });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error(body?.error ?? "The register could not be downloaded");
@@ -1212,7 +1297,7 @@ export default function BikeTrackPage() {
                 <Lock className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h2 className="text-2xl font-display font-medium text-foreground mb-2">BikeTrack</h2>
+                <h2 className="text-2xl font-display font-bold text-foreground mb-2">BikeTrack</h2>
                 <p className="text-muted-foreground mb-1">
                   Bike hire logbook — manage your fleet, record guest hires, and complete pre-hire and post-return safety checks.
                 </p>
@@ -1304,7 +1389,8 @@ export default function BikeTrackPage() {
       {/* ── Overview tab ─────────────────────────────────────────────────────── */}
       {activeTab === "overview" && (
         <div className="space-y-4">
-          <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Active Hires</h3>
+          <TrackContractorChecks module="bike" />
+          <h3 className="font-bold text-sm text-muted-foreground uppercase tracking-wide">Active Hires</h3>
           {activeHires.length === 0 ? (
             <div className="text-center py-10 border border-dashed rounded-sm">
               <Bike className="w-8 h-8 mx-auto text-muted-foreground/30 mb-2" />
@@ -1580,6 +1666,7 @@ export default function BikeTrackPage() {
                           </Badge>
                         </td>
                         <td className="px-4 py-3 hidden sm:table-cell">
+                          <RecordSignedBy recordType="bike_hire" recordId={h.id} compact className="mb-1" /><RecordSignedBy recordType="bike_return" recordId={h.id} compact className="mb-1" />
                           <CheckPhotoUploader entityType="bike_hire" entityId={h.id} compact />
                         </td>
                         <td className="px-4 py-3">
@@ -1748,6 +1835,7 @@ export default function BikeTrackPage() {
                             {s.costPence ? `£${(s.costPence / 100).toFixed(2)}` : "—"}
                           </td>
                           <td className="px-4 py-3 hidden sm:table-cell">
+                            <RecordSignedBy recordType="bike_service" recordId={s.id} compact className="mb-1" />
                             <CheckPhotoUploader entityType="bike_service" entityId={s.id} compact />
                           </td>
                           <td className="px-4 py-3">
@@ -1777,7 +1865,8 @@ export default function BikeTrackPage() {
       {/* ── Dialogs ───────────────────────────────────────────────────────────── */}
       <NewHireDialog
         open={showNewHire}
-        onClose={() => setShowNewHire(false)}
+        onClose={() => { setShowNewHire(false); setHireBikeId(undefined); }}
+        presetBikeId={hireBikeId}
         bikes={bikes}
         onCreated={invalidate}
       />
@@ -1816,8 +1905,9 @@ export default function BikeTrackPage() {
         open={logService !== null}
         service={logService === "new" ? null : logService}
         bikes={bikes}
-        onClose={() => setLogService(null)}
+        onClose={() => { setLogService(null); setSpokenService(null); }}
         onSaved={invalidate}
+        spoken={spokenService}
       />
 
       <AlertDialog open={deleteServiceId !== null} onOpenChange={v => { if (!v) setDeleteServiceId(null); }}>

@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { ComplianceItemNeedsActionReason } from './complianceItemNeedsActionReason';
 import type { ComplianceItemPriority } from './complianceItemPriority';
 import type { ComplianceItemStatus } from './complianceItemStatus';
 
@@ -23,11 +24,26 @@ export interface ComplianceItem {
   contractorName?: string | null;
   contractorEmail?: string | null;
   assignedTo?: string | null;
+  /** The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it. */
+  assigneeUserId?: number | null;
   dueDate?: Date | null;
   leadTimeDays?: number | null;
+  /**
+     * Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
+     * @minimum 1
+     * @maximum 120
+     */
+  frequencyMonths?: number | null;
   notificationSentAt?: Date | null;
   completedAt?: Date | null;
+  /** The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it). */
+  completedInHouseBy?: string | null;
   notes?: string | null;
+  /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date. */
+  needsAction?: boolean;
+  needsActionReason?: ComplianceItemNeedsActionReason;
+  /** Open C1/C2/FI/ID/AR defects on the newest certificate. */
+  openDefectCount?: number;
   createdAt: Date;
   updatedAt: Date;
 }

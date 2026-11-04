@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,8 +16,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
+import { useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { apiFetch } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 
 type Tab = 'my-documents' | 'documents' | 'training';
 
@@ -56,9 +58,46 @@ interface TrainingRecord {
   status: 'valid' | 'expiring_soon' | 'expired';
 }
 
+/** A row of GET /api/train-track/records (snake_case, as the web app reads it). */
+interface TrainTrackRecordRow {
+  id: number;
+  record_type: string | null;
+  staff_name: string | null;
+  training_type: string | null;
+  document_title: string | null;
+  completed_date: string | null;
+  expiry_date: string | null;
+}
+
+/** Calendar date (YYYY-MM-DD) from a date column serialised as a date or timestamp. */
+function dateOnly(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(value);
+  return match ? match[1] : null;
+}
+
 function daysUntil(dateStr: string | null): number | null {
   if (!dateStr) return null;
-  return Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86400000);
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const now = new Date();
+  // Local calendar-day difference (DST-safe), not elapsed milliseconds.
+  return Math.round(
+    (Date.UTC(y, m - 1, d) - Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000,
+  );
+}
+
+function toTrainingRecord(row: TrainTrackRecordRow): TrainingRecord {
+  const completedAt = dateOnly(row.completed_date);
+  const expiresAt = dateOnly(row.expiry_date);
+  const days = daysUntil(expiresAt);
+  return {
+    id: row.id,
+    staffName: row.staff_name ?? '',
+    courseName: row.training_type || row.document_title || formatCategory(row.record_type) || 'Training record',
+    completedAt,
+    expiresAt,
+    status: days === null ? 'valid' : days < 0 ? 'expired' : days <= 30 ? 'expiring_soon' : 'valid',
+  };
 }
 
 function formatCategory(category: string | null): string {
@@ -228,7 +267,16 @@ export default function DocsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
+  const { user, hasService } = useAuth();
+  const trainingEnabled = hasService('traintrack');
+  // Notification taps can open a specific tab, e.g. ?tab=training.
+  const params = useLocalSearchParams<{ tab?: string }>();
   const [tab, setTab] = useState<Tab>('my-documents');
+  useEffect(() => {
+    if (params.tab === 'training' || params.tab === 'documents' || params.tab === 'my-documents') {
+      setTab(params.tab);
+    }
+  }, [params.tab]);
   const [signatures, setSignatures] = useState<Record<number, string>>({});
   const [openingDocId, setOpeningDocId] = useState<number | null>(null);
   const [openedDocIds, setOpenedDocIds] = useState<Set<number>>(() => new Set());
@@ -266,8 +314,11 @@ export default function DocsScreen() {
     refetch: refetchTraining,
     isRefetching: trainingRefetching,
   } = useQuery<TrainingRecord[]>({
-    queryKey: ['traintrack-records'],
-    queryFn: () => apiFetch<TrainingRecord[]>('/api/traintrack/staff'),
+    queryKey: ['traintrack-records', user?.clientId],
+    queryFn: async () =>
+      (await apiFetch<TrainTrackRecordRow[]>('/api/train-track/records')).map(toTrainingRecord),
+    // The route answers 403 for clients without TrainTrack.
+    enabled: trainingEnabled,
   });
 
   const acknowledgeMutation = useMutation({
@@ -467,7 +518,9 @@ export default function DocsScreen() {
                 </View>
               </View>
             ))
-        ) : training.length === 0
+        ) : !trainingEnabled
+          ? showEmpty('lock', 'TrainTrack not enabled', 'TrainTrack is not enabled on your account. Contact your administrator to activate this module.')
+          : training.length === 0
           ? showEmpty('book-open', 'No training records', 'Add training records in TrainTrack on the web app.')
           : training.map((r) => <TrainingRow key={r.id} record={r} />)}
       </ScrollView>

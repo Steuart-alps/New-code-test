@@ -90,10 +90,10 @@ try {
     readFile(path.join(workspaceDir, "artifacts/compliance-tracker/src/pages/settings.tsx"), "utf8"),
   ]);
 
-  // A missing synced PestTrack price is a safe failure: it is detected before
-  // Stripe subscription mutation or invoice collection.
-  const priceCheck = billingRoute.indexOf('if (!price) return res.status(400).json({ error: "Service price not configured" });');
-  const activation = billingRoute.indexOf('if (action === "add")');
+  // A missing synced PestTrack price is a safe failure: the catalogue preflight
+  // rejects it before Stripe subscription mutation or invoice collection.
+  const priceCheck = billingRoute.indexOf('if (action === "add" && (pricePreflight.missing.includes(service)');
+  const activation = billingRoute.indexOf("activatePaidAddonService(");
   assert.ok(priceCheck >= 0 && priceCheck < activation, "missing add-on price must fail before activation");
 
   // The route derives the client solely from authenticated context. The

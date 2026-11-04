@@ -1,5 +1,10 @@
 // Focused IncidentTrack RIDDOR audit-trail coverage.
-// Usage: node tests/riddor-audit-history.mjs (with the API server running).
+// Usage: DATABASE_URL=... node tests/riddor-audit-history.mjs (with the API
+// server running on that database). The HSE receipt checks seed an incident
+// attachment row directly, so they need the same DATABASE_URL as the API.
+import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 const day = new Date().toISOString().slice(0, 10);
 let passed = 0;
@@ -46,6 +51,13 @@ async function tenant(label) {
   check(`${label}: login`, loggedIn.status === 200, String(loggedIn.status));
   if (loggedIn.status !== 200) return null;
   return request;
+}
+
+/** Runs SQL against the API's database; returns { ok, out, err }. */
+function psql(statement) {
+  if (!process.env.DATABASE_URL) return { ok: false, out: "", err: "DATABASE_URL is not set" };
+  const run = spawnSync("psql", [process.env.DATABASE_URL, "-v", "ON_ERROR_STOP=1", "-Atqc", statement], { encoding: "utf8" });
+  return { ok: run.status === 0, out: (run.stdout ?? "").trim(), err: (run.stderr ?? "").trim() };
 }
 
 function incident(overrides = {}) {
@@ -260,6 +272,86 @@ async function main() {
       sourceTrack: "IncidentTrack", sourceRecordId: String(id), title: "Late follow-up",
       ownerName: "Duty manager", correctiveAction: "Reopen the incident before creating this action",
     })).status === 404);
+
+  // ── HSE receipt bound to a submission event ────────────────────────────────
+  const receiptPath = `/objects/finalized/tenant-${clientId}/${randomUUID()}.jpg`;
+  const seeded = psql(`
+    INSERT INTO check_photos (client_id, entity_type, entity_id, object_path, caption)
+    VALUES (${Number(clientId)}, 'incident', ${Number(scopedId)}, '${receiptPath}', 'HSE confirmation email')
+    RETURNING id`);
+  check("seed an incident attachment", seeded.ok && /^\d+$/.test(seeded.out), seeded.err);
+  const attachmentId = Number(seeded.out);
+  const otherIncidentPhoto = psql(`
+    INSERT INTO check_photos (client_id, entity_type, entity_id, object_path)
+    VALUES (${Number(clientId)}, 'incident', ${Number(id)}, '/objects/finalized/tenant-${clientId}/${randomUUID()}.jpg')
+    RETURNING id`);
+  const scopedSubmission = (extra = {}) => ({
+    riddorReportable: true, riddorCategory: "specified_injury", reportedToHse: true,
+    hseReference: "RIDDOR-RECEIPT-1", hseReportDate: day, submittedAt: new Date().toISOString(),
+    riddorRationale: "Fractured wrist: a specified injury, reported online to HSE.", ...extra,
+  });
+  check("a receipt cannot be attached to a decision that records no submission",
+    (await owner("PUT", `/incidents/${scopedId}`, {
+      riddorRationale: "Reviewed again; still not reportable.", submissionReceipt: { attachmentId },
+    })).status === 400);
+  check("staff who are not managers cannot attach an HSE receipt",
+    (await alphaStaff("PUT", `/incidents/${scopedId}`, scopedSubmission({ submissionReceipt: { attachmentId } }))).status === 403);
+  check("staff who are not managers cannot sign a receipt upload",
+    (await alphaStaff("POST", "/incidents/riddor-receipts/request-upload", { contentType: "application/pdf" })).status === 403);
+  check("receipt uploads are limited to PDF, JPEG and PNG",
+    (await owner("POST", "/incidents/riddor-receipts/request-upload", { contentType: "text/html" })).status === 400);
+  check("a manager can sign a receipt upload (or storage reports unavailable)",
+    [200, 503].includes((await owner("POST", "/incidents/riddor-receipts/request-upload", { contentType: "application/pdf" })).status));
+  check("another incident's attachment cannot be bound as this receipt",
+    (await owner("PUT", `/incidents/${scopedId}`, scopedSubmission({
+      submissionReceipt: { attachmentId: Number(otherIncidentPhoto.out) },
+    }))).status === 404);
+  check("a forged upload path is refused",
+    [403, 404, 503].includes((await owner("PUT", `/incidents/${scopedId}`, scopedSubmission({
+      submissionReceipt: { objectPath: `/objects/uploads/tenant-${Number(clientId) + 1}/${randomUUID()}`, fileName: "receipt.pdf" },
+    }))).status));
+  check("refused receipts append no history",
+    (await owner("GET", `/incidents/${scopedId}/riddor-history`)).data?.length === 1);
+  const withReceipt = await owner("PUT", `/incidents/${scopedId}`, scopedSubmission({ submissionReceipt: { attachmentId } }));
+  check("a manager records a submission with its HSE receipt (receipt stands in for evidence text)",
+    withReceipt.status === 200, JSON.stringify(withReceipt.data));
+  const receiptHistory = (await owner("GET", `/incidents/${scopedId}/riddor-history`)).data ?? [];
+  const receiptEvent = receiptHistory.find((event) => event.eventType === "submission");
+  const decisionEvent = receiptHistory.find((event) => event.eventType === "decision");
+  check("the receipt shows on its submission event",
+    receiptEvent?.receiptFileName === "HSE confirmation email" && receiptEvent?.receiptSource === "incident_attachment" &&
+    receiptEvent?.receiptContentType === "image/jpeg" && receiptEvent?.hseReference === "RIDDOR-RECEIPT-1",
+    JSON.stringify(receiptEvent));
+  check("the earlier decision has no receipt", decisionEvent && !decisionEvent.receiptFileName);
+  check("history does not expose the stored file path", !JSON.stringify(receiptHistory).includes(receiptPath));
+  const rebind = psql(`UPDATE incident_riddor_events SET receipt_object_path = NULL WHERE id = ${Number(receiptEvent?.id)}`);
+  check("the database refuses to change or detach a bound receipt", !rebind.ok && /append-only/.test(rebind.err), rebind.err);
+  const decisionWithReceipt = psql(`
+    INSERT INTO incident_riddor_events (client_id, incident_id, event_type, riddor_reportable, receipt_object_path)
+    VALUES (${Number(clientId)}, ${Number(scopedId)}, 'decision', true, '${receiptPath}')`);
+  check("the database refuses a receipt on a decision event", !decisionWithReceipt.ok && /submission event/.test(decisionWithReceipt.err),
+    decisionWithReceipt.err);
+  check("the attachment can still be removed from the general list",
+    (await owner("DELETE", `/photos/${attachmentId}`)).status === 200);
+  check("removing the attachment leaves the receipt on its event",
+    (await owner("GET", `/incidents/${scopedId}/riddor-history`)).data?.find((e) => e.id === receiptEvent?.id)?.receiptFileName
+      === "HSE confirmation email");
+  const receiptUrl = `/incidents/${scopedId}/riddor-history/${receiptEvent?.id}/receipt`;
+  check("another tenant cannot download the receipt", [403, 404].includes((await other("GET", receiptUrl)).status));
+  check("another department cannot download the receipt", (await betaStaff("GET", receiptUrl)).status === 403);
+  check("same-department staff who are not managers cannot download the receipt",
+    (await alphaStaff("GET", receiptUrl)).status === 403);
+  check("an event without a receipt has nothing to download",
+    (await owner("GET", `/incidents/${scopedId}/riddor-history/${decisionEvent?.id}/receipt`)).status === 404);
+  const managerDownload = await owner("GET", receiptUrl);
+  check("a manager passes the receipt download checks (storage may be unavailable here)",
+    managerDownload.status === 200 || managerDownload.status === 503 || managerDownload.data?.error === "Receipt file not found",
+    JSON.stringify(managerDownload));
+  const directPath = `/storage${receiptPath}`;
+  check("another department cannot fetch the receipt by its storage path", (await betaStaff("GET", directPath)).status === 403);
+  check("non-manager staff cannot fetch a receipt-only file by its storage path", (await alphaStaff("GET", directPath)).status === 403);
+  check("a manager is not blocked by the receipt guard on the storage path",
+    (await owner("GET", directPath)).status !== 403);
 
   const foreignHistory = await other("GET", `/incidents/${id}/riddor-history`);
   check("tenant isolation protects RIDDOR audit history", [403, 404].includes(foreignHistory.status), String(foreignHistory.status));

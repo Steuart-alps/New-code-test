@@ -8,6 +8,7 @@ import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { build } from "esbuild";
+import { buildOwnedFixturePurgeSql, resolveRunId } from "./fixture-ownership.mjs";
 
 const testsDir = path.dirname(fileURLToPath(import.meta.url));
 const base = process.env.API_BASE;
@@ -77,7 +78,8 @@ async function main() {
     resetTwoFactorWithAlert, deliverTwoFactorResetAlert, runTwoFactorResetAlertRecovery,
     TWO_FACTOR_RESET_ALERT_LEASE_MINUTES, db, pool, usersTable, sql,
   } = lib;
-  const tag = `tfa-alert-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  const runId = resolveRunId();
+  const tag = `tfa-alert-${runId}`;
   const userIds = [];
   const secrets = [];
   const childOutbox = path.join(outDir, "worker-outbox.jsonl");
@@ -301,18 +303,25 @@ async function main() {
     check("a retried route request does not send a second alert",
       routeRetry.status === 200 && (await routeNotices()).length === 1 && (await alertsFor(staff.id)).length === 1);
   } finally {
+    // The registered tenant's starter content leaves audit_log rows that block
+    // a plain DELETE FROM clients, so this run's users and tenant go through the
+    // owned-fixture purge (tests/fixture-ownership.mjs).
+    let cleanupConnection = null;
     try {
       if (userIds.length) {
         const ids = sql.join(userIds.map((id) => sql`${id}`), sql`, `);
         const clientIds = (await db.execute(sql`SELECT DISTINCT client_id FROM users WHERE id IN (${ids}) AND client_id IS NOT NULL`)).rows
           .map((row) => row.client_id);
-        await db.execute(sql`DELETE FROM users WHERE id IN (${ids})`);
-        for (const clientId of clientIds) await db.execute(sql`DELETE FROM clients WHERE id = ${clientId}`).catch(() => {});
+        cleanupConnection = await pool.connect();
+        await cleanupConnection.query(buildOwnedFixturePurgeSql({ runId, clientIds }));
         const left = (await db.execute(sql`SELECT count(*)::int AS n FROM two_factor_reset_notifications WHERE user_id IN (${ids})`)).rows[0];
         check("fixture alerts are removed with their users", left?.n === 0);
       }
     } catch (err) {
+      await cleanupConnection?.query("ROLLBACK").catch(() => {});
       failures.push(`cleanup — ${err?.message ?? err}`);
+    } finally {
+      cleanupConnection?.release();
     }
     await rm(outDir, { recursive: true, force: true }).catch(() => {});
     await pool.end().catch(() => {});

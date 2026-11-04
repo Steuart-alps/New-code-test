@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Self-sufficient runner for the department-isolation test suite.
+# Self-sufficient runner for a department-isolation test suite (default
+# tests/dept-isolation.mjs; pass another suite file as the first argument).
 #
 # The test needs a live API server. If one is already answering on
 # $API_BASE/healthz we use it; otherwise we build and boot a private
@@ -63,4 +64,4 @@ if ! healthy; then
   fi
 fi
 
-node tests/dept-isolation.mjs
+node "${1:-tests/dept-isolation.mjs}"

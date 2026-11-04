@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
 import { apiFetch } from '@/lib/api';
+import { useRecordOutbox } from '@/hooks/useRecordOutbox';
+import { OutboxEntries } from './OutboxEntries';
 import { AquaChoiceRow, AquaEmptyState, AquaField, AquaInput, aquaUiStyles as styles } from './aqua-track-ui';
 import {
   isLocalTime,
@@ -79,16 +81,30 @@ export function PoolChecks({
     setResultOverride(null);
   }
 
+  // Saved on the device first, then sent; resent automatically under the
+  // same entry ID after a lost connection (the server never duplicates it).
+  const outbox = useRecordOutbox('pool-check');
   const mutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
-      apiFetch<PoolCheck>('/api/pool-track', { method: 'POST', body: JSON.stringify(payload) }),
-    onSuccess: async (record) => {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      queryClient.setQueryData<PoolCheck[]>(queryKey, (current) => current ? [record, ...current] : [record]);
-      void queryClient.invalidateQueries({ queryKey: ['pool-checks'] });
+      outbox.send(payload, `Pool check · ${String(payload.checkDate)} ${String(payload.checkTime ?? '')}`.trim()),
+    onSuccess: async (outcome) => {
+      if (outcome.state === 'rejected') {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+        Alert.alert('Unable to record pool check', outcome.error);
+        return;
+      }
       setShowForm(false);
       onFormOpenChange(false);
       resetDraft();
+      if (outcome.state === 'queued') {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+        Alert.alert('Saved on this device', 'No connection right now. The pool check is saved on this device and will be sent automatically when you are back online.');
+        return;
+      }
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      const record = outcome.response as PoolCheck | undefined;
+      if (record?.id) queryClient.setQueryData<PoolCheck[]>(queryKey, (current) => current ? [record, ...current] : [record]);
+      void queryClient.invalidateQueries({ queryKey: ['pool-checks'] });
       Alert.alert('Logged', 'Pool check recorded successfully.');
     },
     onError: (error: Error) => {
@@ -169,6 +185,7 @@ export function PoolChecks({
 
   return (
     <View>
+      <OutboxEntries entries={outbox.entries} readError={outbox.readError} />
       <TouchableOpacity
         style={[styles.primaryButton, { backgroundColor: colors.navy }, (mutation.isPending || (!showForm && !canUseSite)) && styles.disabled]}
         onPress={toggleForm}

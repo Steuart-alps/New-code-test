@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { apiFetch } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,6 +31,7 @@ const NEW_SECTION = "__new__";
 export function ChecklistTemplateEditor({
   open, onOpenChange, type, typeLabel, siteId, siteName, defaultItems, onSaved,
 }: Props) {
+  const { toast } = useToast();
   const [items, setItems] = useState<TemplateItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -37,6 +39,7 @@ export function ChecklistTemplateEditor({
 
   // Add-item form state
   const [newLabel, setNewLabel] = useState("");
+  const newLabelRef = useRef<HTMLInputElement>(null);
   const [newSection, setNewSection] = useState("");
   const [newSectionCustom, setNewSectionCustom] = useState("");
 
@@ -92,9 +95,11 @@ export function ChecklistTemplateEditor({
     if (!label) return;
     const section = newSection === NEW_SECTION
       ? newSectionCustom.trim() || undefined
-      : newSection || undefined;
+      : newSection === "__none__" ? undefined : newSection || undefined;
     setItems(prev => [...prev, { label, section, checked: false }]);
     setNewLabel("");
+    // Ready for the next item without clicking back into the box.
+    newLabelRef.current?.focus();
   };
 
   const resetToDefault = () => {
@@ -113,7 +118,12 @@ export function ChecklistTemplateEditor({
         const data = await r.json();
         onSaved(data.items ?? items);
         onOpenChange(false);
+      } else {
+        const data = await r.json().catch(() => ({}));
+        toast({ title: "Could not save checklist", description: data.error ?? `Error ${r.status}`, variant: "destructive" });
       }
+    } catch (err: any) {
+      toast({ title: "Could not save checklist", description: err?.message, variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -128,7 +138,12 @@ export function ChecklistTemplateEditor({
       if (r.ok) {
         onSaved(defaultItems);
         onOpenChange(false);
+      } else {
+        const data = await r.json().catch(() => ({}));
+        toast({ title: "Could not reset checklist", description: data.error ?? `Error ${r.status}`, variant: "destructive" });
       }
+    } catch (err: any) {
+      toast({ title: "Could not reset checklist", description: err?.message, variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -138,7 +153,7 @@ export function ChecklistTemplateEditor({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-lg flex flex-col p-0">
         <SheetHeader className="px-6 pt-6 pb-4 border-b shrink-0">
-          <SheetTitle className="font-display">Customise checklist</SheetTitle>
+          <SheetTitle className="font-display font-bold">Customise checklist</SheetTitle>
           <SheetDescription>
             <span className="font-medium text-foreground">{typeLabel}</span>
             {siteName ? <> · {siteName}</> : <> · all sites</>}
@@ -213,6 +228,7 @@ export function ChecklistTemplateEditor({
                   <Label className="text-xs">Check item *</Label>
                   <div className="flex gap-2">
                     <Input
+                      ref={newLabelRef}
                       value={newLabel}
                       onChange={e => setNewLabel(e.target.value)}
                       onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addItem(); } }}

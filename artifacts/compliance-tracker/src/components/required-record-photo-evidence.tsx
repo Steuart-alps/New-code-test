@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, ImagePlus, Trash2 } from "lucide-react";
+import { Camera, Loader2, ImagePlus, Trash2 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
+import { useFileDrop } from "@/hooks/use-file-drop";
+import { useCameraCapture } from "@/components/camera-capture";
+import { cn } from "@/lib/utils";
 import { getApiErrorMessage } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -162,6 +165,12 @@ export function RequiredRecordPhotoEvidence({
   evidence,
 }: { evidence: ReturnType<typeof useNewRecordPhotoEvidence> }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  // One photo at a time is verified, so a drop of several takes the first.
+  const addFirst = (files: File[]) => { if (files[0]) void evidence.addFile(files[0]); };
+  const drop = useFileDrop(addFirst,
+    evidence.enabled && evidence.required && !evidence.uploading && evidence.photos.length < 10);
+  const camera = useCameraCapture(addFirst, { fileInput: () => cameraRef.current });
   if (!evidence.enabled) return null;
   if (evidence.loading) return (
     <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -176,11 +185,12 @@ export function RequiredRecordPhotoEvidence({
   );
   if (!evidence.required) return null;
   return (
-    <fieldset className="space-y-3 rounded-md border border-border p-3" aria-label="Required photo evidence">
+    <fieldset {...drop.dropZoneProps} className={cn("space-y-3 rounded-md border p-3 transition-colors", drop.isDragging ? "border-primary bg-primary/5" : "border-border")} aria-label="Required photo evidence">
       <legend className="px-1 text-sm font-medium">Required photo evidence</legend>
       <Badge variant="outline">{evidence.photos.length}/{evidence.minimum} required photos attached</Badge>
       <p className="text-xs text-muted-foreground">
         Attach at least {evidence.minimum} verified {evidence.minimum === 1 ? "photo" : "photos"} before saving.
+        <span className="hidden sm:inline"> You can drag a photo here.</span>
       </p>
       {evidence.photos.map(photo => (
         <div key={photo.id} className="flex items-center justify-between gap-2 text-sm">
@@ -192,19 +202,35 @@ export function RequiredRecordPhotoEvidence({
         </div>
       ))}
       {evidence.uploadError && <p role="alert" className="text-sm text-destructive">{evidence.uploadError}</p>}
-      <Button type="button" variant="outline"
-        disabled={evidence.uploading || evidence.photos.length >= 10}
-        onClick={() => inputRef.current?.click()}>
-        {evidence.uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ImagePlus className="mr-2 h-4 w-4" />}
-        {evidence.uploading ? "Verifying photo…" : "Add required photo"}
-      </Button>
-      <input ref={inputRef} type="file" accept="image/jpeg,image/png" capture="environment"
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="outline"
+          disabled={evidence.uploading || evidence.photos.length >= 10}
+          onClick={camera.open}>
+          <Camera className="mr-2 h-4 w-4" />Take photo
+        </Button>
+        <Button type="button" variant="outline"
+          disabled={evidence.uploading || evidence.photos.length >= 10}
+          onClick={() => inputRef.current?.click()}>
+          {evidence.uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ImagePlus className="mr-2 h-4 w-4" />}
+          {evidence.uploading ? "Verifying photo…" : "Add required photo"}
+        </Button>
+      </div>
+      {/* No `capture`: phones then offer both the camera and the photo library. */}
+      <input ref={inputRef} type="file" accept="image/jpeg,image/png"
         aria-label="Select required photo" className="hidden"
         onChange={event => {
           const file = event.target.files?.[0];
           event.target.value = "";
           if (file) void evidence.addFile(file);
         }} />
+      <input ref={cameraRef} type="file" accept="image/jpeg,image/png" capture="environment"
+        tabIndex={-1} aria-hidden="true" className="hidden"
+        onChange={event => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) void evidence.addFile(file);
+        }} />
+      {camera.dialog}
     </fieldset>
   );
 }

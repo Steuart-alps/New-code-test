@@ -1,4 +1,5 @@
 import PDFDocument from "pdfkit";
+import { PDF_BOLD_FONT, PDF_REGULAR_FONT } from "./pdfFonts";
 
 export type CleaningScheduleCompletion = {
   taskArea?: string;
@@ -11,6 +12,7 @@ export type CleaningScheduleCompletion = {
 export type CleaningScheduleLog = {
   date: string;
   frequency: string;
+  siteName: string | null;
   completions: CleaningScheduleCompletion[];
   signedBy: string;
   submittedAt: Date | null;
@@ -18,6 +20,8 @@ export type CleaningScheduleLog = {
 
 export type CleaningScheduleRegister = {
   businessName: string;
+  /** The site the export is limited to, or null for every site. */
+  siteName: string | null;
   dateFrom: string;
   dateTo: string;
   frequency: string;
@@ -25,8 +29,8 @@ export type CleaningScheduleRegister = {
   logs: CleaningScheduleLog[];
 };
 
-const REGULAR_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
-const BOLD_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
+const REGULAR_FONT = PDF_REGULAR_FONT;
+const BOLD_FONT = PDF_BOLD_FONT;
 
 function value(value: string | undefined): string {
   return value?.trim() || "Not recorded";
@@ -61,7 +65,9 @@ export async function createCleaningSchedulePdf(register: CleaningScheduleRegist
   });
 
   doc.font(BOLD_FONT).fontSize(18).fillColor("#111827").text("Cleaning Schedule Completion Record");
-  doc.font(BOLD_FONT).fontSize(11).text(value(register.businessName));
+  doc.font(BOLD_FONT).fontSize(13).text(`Business: ${value(register.businessName)}`);
+  doc.font(BOLD_FONT).fontSize(13)
+    .text(`Site: ${register.siteName === null ? "All sites" : value(register.siteName)}`);
   doc.font(REGULAR_FONT).fontSize(8).fillColor("#4b5563")
     .text(`${register.frequency} logs · ${formatDate(register.dateFrom)} to ${formatDate(register.dateTo)}`)
     .text(`Generated: ${register.generatedAt} · Prepared for food hygiene inspections`);
@@ -69,7 +75,11 @@ export async function createCleaningSchedulePdf(register: CleaningScheduleRegist
 
   if (register.logs.length === 0) {
     doc.font(REGULAR_FONT).fontSize(10).fillColor("#111827")
-      .text("No cleaning logs were recorded for the selected date range and frequency.");
+      .text(
+        register.siteName === null
+          ? "No cleaning logs were recorded for the selected date range and frequency."
+          : "No cleaning logs were recorded for this site in the selected date range and frequency.",
+      );
   }
 
   for (const [index, log] of register.logs.entries()) {
@@ -77,6 +87,10 @@ export async function createCleaningSchedulePdf(register: CleaningScheduleRegist
     const completed = log.completions.filter((item) => item.done).length;
     doc.font(BOLD_FONT).fontSize(11).fillColor("#111827")
       .text(`${index + 1}. ${formatDate(log.date)} — ${completed}/${log.completions.length} tasks completed`);
+    if (register.siteName === null) {
+      doc.font(REGULAR_FONT).fontSize(8).fillColor("#374151")
+        .text(`Site: ${log.siteName ?? "Account-level (not tied to a kitchen)"}`);
+    }
     doc.font(REGULAR_FONT).fontSize(8).fillColor("#374151")
       .text(
         log.submittedAt

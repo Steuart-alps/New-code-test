@@ -33,6 +33,18 @@ class SharedLocalStorage {
     }
   }
 
+  removeItem(key) {
+    this.values.delete(key);
+  }
+
+  get length() {
+    return this.values.size;
+  }
+
+  key(index) {
+    return Array.from(this.values.keys())[index] ?? null;
+  }
+
   asWrittenBy(context, callback) {
     this.writer = context;
     try {
@@ -125,6 +137,18 @@ class BlockedStorage {
   setItem() {
     throw new Error("storage access denied");
   }
+
+  removeItem() {
+    throw new Error("storage access denied");
+  }
+
+  get length() {
+    throw new Error("storage access denied");
+  }
+
+  key() {
+    throw new Error("storage access denied");
+  }
 }
 
 try {
@@ -137,6 +161,7 @@ try {
   });
 
   const {
+    clearApprovalRefreshStateForUser,
     getApprovalRefreshStorageKey,
     readPersistedApprovalRefreshState,
     persistApprovalRefreshState,
@@ -236,6 +261,54 @@ try {
     "same-tab navigation can use the scoped memory fallback",
   );
   unsubscribeBlockedSecondTab();
+
+  // Signing out forgets only the signed-out user's state, for every client,
+  // in storage and in the tab's memory.
+  const signOutStorage = new SharedLocalStorage();
+  const signOutTab = new FakeBrowserContext(signOutStorage);
+  const signedOutKeys = [getApprovalRefreshStorageKey(1, 42), getApprovalRefreshStorageKey(1, 43)];
+  const keptKeys = [getApprovalRefreshStorageKey(12, 42), getApprovalRefreshStorageKey(2, 1)];
+  for (const key of [...signedOutKeys, ...keptKeys]) {
+    persistApprovalRefreshState(signOutTab, key, new Set([501, 502]), [502]);
+  }
+  signOutStorage.values.set("complytrack:activeClient", "unrelated");
+  clearApprovalRefreshStateForUser(signOutTab, 1);
+  for (const key of signedOutKeys) {
+    assert.equal(signOutStorage.getItem(key), null, `${key} is removed from storage`);
+  }
+  for (const key of keptKeys) {
+    assert.deepEqual(
+      JSON.parse(signOutStorage.getItem(key)),
+      { knownQueueIds: [501, 502], newRequestIds: [502] },
+      `${key} belongs to another user and stays`,
+    );
+  }
+  assert.equal(signOutStorage.getItem("complytrack:activeClient"), "unrelated");
+
+  // A queue load already in flight at sign-out cannot write the state back.
+  persistApprovalRefreshState(signOutTab, signedOutKeys[0], new Set([501, 502]), [502]);
+  assert.equal(signOutStorage.getItem(signedOutKeys[0]), null, "a late load must not restore it");
+
+  // Signing in again starts from a fresh baseline, then saves as usual.
+  assert.equal(readPersistedApprovalRefreshState(signOutTab, signedOutKeys[0]), null,
+    "memory holds nothing for the signed-out user");
+  persistApprovalRefreshState(signOutTab, signedOutKeys[0], new Set([501, 502, 503]), []);
+  assert.deepEqual(readPersistedApprovalRefreshState(signOutTab, signedOutKeys[0]), {
+    knownQueueIds: [501, 502, 503],
+    newRequestIds: [],
+  });
+
+  // Blocked storage still drops the in-memory copy and leaves other users'.
+  const blockedSignOutTab = new FakeBrowserContext(new BlockedStorage());
+  persistApprovalRefreshState(blockedSignOutTab, getApprovalRefreshStorageKey(3, 42), new Set([601]), [601]);
+  persistApprovalRefreshState(blockedSignOutTab, getApprovalRefreshStorageKey(4, 42), new Set([602]), [602]);
+  clearApprovalRefreshStateForUser(blockedSignOutTab, 3);
+  assert.equal(readPersistedApprovalRefreshState(blockedSignOutTab, getApprovalRefreshStorageKey(3, 42)), null);
+  assert.deepEqual(readPersistedApprovalRefreshState(blockedSignOutTab, getApprovalRefreshStorageKey(4, 42)), {
+    knownQueueIds: [602],
+    newRequestIds: [602],
+  });
+  clearApprovalRefreshStateForUser(blockedSignOutTab, null);
 
   console.log("Contractor approval cross-tab storage safeguards passed.");
 } finally {

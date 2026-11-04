@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { Check, Copy, Download, KeyRound, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, clearCsrfToken } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,6 +42,7 @@ export default function MandatoryTwoFactorPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "That code was not accepted");
+      clearCsrfToken(); // enrolment signs in with a new session and CSRF token
       setRecoveryCodes(data.recoveryCodes ?? []);
       await refresh();
     } catch (err: unknown) {
@@ -85,7 +86,7 @@ export default function MandatoryTwoFactorPage() {
         <div className="w-full max-w-lg bg-white shadow-xl p-8 space-y-6">
           <div className="flex items-center gap-3 text-emerald-700">
             <ShieldCheck className="w-7 h-7" />
-            <h1 className="text-2xl font-display text-[#162D42]">Two-factor authentication enabled</h1>
+            <h1 className="text-2xl font-display font-bold text-[#162D42]">Two-factor authentication enabled</h1>
           </div>
           <div className="rounded-sm border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 space-y-3">
             <p className="font-semibold">Save these recovery codes now</p>
@@ -107,7 +108,7 @@ export default function MandatoryTwoFactorPage() {
         <div className="flex items-center gap-3">
           <KeyRound className="w-7 h-7 text-primary" />
           <div>
-            <h1 className="text-2xl font-display text-[#162D42]">Set up two-factor authentication</h1>
+            <h1 className="text-2xl font-display font-bold text-[#162D42]">Set up two-factor authentication</h1>
             <p className="text-sm text-muted-foreground mt-1">This is required before you can use ComplyTrack.</p>
           </div>
         </div>

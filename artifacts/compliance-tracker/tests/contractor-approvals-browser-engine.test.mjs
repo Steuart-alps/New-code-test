@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +20,36 @@ const tempDir = await mkdtemp(path.join(tmpdir(), "contractor-approvals-browser-
 const helperBundle = path.join(tempDir, "contractor-approval-refresh-state.mjs");
 let httpServer;
 let browser;
+let context;
+const tabs = {};
+// CI sets this: on failure a Playwright trace and a screenshot of each tab are
+// written here for upload. The pages only ever hold this file's fixture keys
+// and ids, never tenant data.
+const failureDir = process.env.APPROVAL_FAILURE_DIR;
+
+async function recordFailure(error) {
+  const message = String(error?.message ?? error).split("\n")[0];
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    await appendFile(process.env.GITHUB_STEP_SUMMARY, [
+      `### ${browserName}: private approval refresh check failed`,
+      "",
+      `**Failing check:** ${message}`,
+      "",
+      "```",
+      String(error?.stack ?? error).split("\n").slice(0, 12).join("\n"),
+      "```",
+      "",
+      failureDir ? `The trace and tab screenshots are in the \`approval-browser-failure-${browserName}\` artifact.` : "",
+      "",
+    ].join("\n")).catch(() => {});
+  }
+  if (!failureDir || !context) return;
+  await mkdir(failureDir, { recursive: true });
+  for (const [name, page] of Object.entries(tabs)) {
+    await page.screenshot({ path: path.join(failureDir, `${browserName}-${name}.png`), fullPage: true }).catch(() => {});
+  }
+  await context.tracing.stop({ path: path.join(failureDir, `${browserName}-trace.zip`) }).catch(() => {});
+}
 
 async function startFixtureServer(helperContents) {
   httpServer = createServer((request, response) => {
@@ -53,10 +83,12 @@ try {
     headless: true,
     executablePath: process.env.APPROVAL_BROWSER_EXECUTABLE_PATH || undefined,
   });
-  const context = await browser.newContext();
+  context = await browser.newContext();
+  if (failureDir) await context.tracing.start({ screenshots: true, snapshots: true });
   const firstTab = await context.newPage();
   const secondTab = await context.newPage();
   const otherClientTab = await context.newPage();
+  Object.assign(tabs, { firstTab, secondTab, otherClientTab });
   await Promise.all([firstTab, secondTab, otherClientTab].map(page => page.goto(fixtureUrl)));
 
   const sharedKey = "complytrack:contractor-approvals:7:42";
@@ -187,6 +219,7 @@ try {
   if (/Executable doesn't exist|browserType\.launch:.*executable/i.test(String(error))) {
     console.log(`Contractor approval ${browserName} browser check skipped: browser binary is unavailable.`);
   } else {
+    await recordFailure(error);
     throw error;
   }
 } finally {

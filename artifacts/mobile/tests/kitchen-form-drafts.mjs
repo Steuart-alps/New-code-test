@@ -93,6 +93,20 @@ const held = formValuesFromEntryBody({ mobileTemperatureLog: {
   hotTemperature: { item: 'Chicken', coreTemp: '80', holdSeconds: 12 },
 } });
 assert.equal(held.cooking.holdSeconds, '12', 'a restored cooking reading keeps its hold time');
+const sousVideEntry = formValuesFromEntryBody({ mobileTemperatureLog: {
+  coldFood: [], expectedColdFood: [], expectedCorrectives: null,
+  sousVide: { item: 'Duck breast', waterTemp: '58', coreTemp: '58', holdMinutes: 90 },
+} });
+assert.equal(sousVideEntry.sousVide.holdMinutes, '90', 'a restored sous vide reading keeps its hold time');
+assert.deepEqual(formValuesFromEntryBody({ sousVide: [{ item: 'Egg', coreTemp: '64', holdMinutes: '45' }], coldFood: [] }).sousVide,
+  { item: 'Egg', coreTemp: '64', holdMinutes: '45' }, 'a new-diary entry restores its sous vide row');
+
+// Drafts saved before the phone recorded sous vide still load; new ones keep it.
+await saveKitchenDraft(storage, draft(A, { recordDate: '2026-10-07', values: { ...values, sousVide: { item: 'Egg', holdMinutes: '45' } } }));
+assert.equal((await loadKitchenDraft(storage, A, 5, '2026-10-07')).values.sousVide.holdMinutes, '45');
+memory.set(kitchenFormDraftKey(A, 5, '2026-10-06'), JSON.stringify(draft(A, { recordDate: '2026-10-06', values: { ...values, sousVide: { holdMinutes: 45 } } })));
+assert.equal(await loadKitchenDraft(storage, A, 5, '2026-10-06'), null, 'a malformed sous vide row is not restored');
+await discardKitchenDraft(storage, A, 5, '2026-10-07');
 
 // Listing finds only this owner's drafts, including earlier days'.
 await saveKitchenDraft(storage, draft(A, { recordDate: '2026-10-08', siteId: null }));
@@ -108,5 +122,8 @@ const form = await readFile(new URL('../components/KitchenTemperatureForm.tsx', 
 assert.match(form, /saveKitchenDraft\(/);
 assert.match(form, /loadKitchenDraft\(kitchenDraftStorage, owner, siteId, date\)/);
 assert.match(form, /Discard unsaved readings\?/, 'discarding asks first');
+assert.match(form, /\.\.\.\(sousVideRow \? \{ sousVide: sousVideRow \} : \{\}\)/, 'a sous vide reading is sent with the device entry');
+assert.match(form, /kitchenHoldRequirement\(temperatureAssessment\.rules, 'sousVide', sousVide\.item\)/, 'the sous vide hold minimum comes from the site plan');
+assert.match(form, /sousVide: \{ \.\.\.sousVide \}/, 'unsaved sous vide readings are kept in the draft');
 assert.match(form, /discardKitchenDraft\(kitchenDraftStorage, owner, siteId, date\)/, 'saving or discarding clears the draft');
 console.log('KitchenTrack unfinished-form draft regressions passed.');

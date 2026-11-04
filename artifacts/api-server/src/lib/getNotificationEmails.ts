@@ -15,6 +15,7 @@
 import { db } from "@workspace/db";
 import { appSettingsTable, usersTable } from "@workspace/db/schema";
 import { and, eq, or } from "drizzle-orm";
+import { ownersOfClient } from "./ownerBusinesses";
 
 export interface NotificationRecipients {
   /** De-duplicated list of email addresses to notify. */
@@ -24,6 +25,8 @@ export interface NotificationRecipients {
    * Empty when a client-level notificationEmail overrides the user lookup.
    */
   userIds: number[];
+  /** Where the addresses came from: the account's notification email or its user accounts. */
+  source: "notification_email" | "users";
 }
 
 export async function getNotificationEmails(
@@ -44,23 +47,21 @@ export async function getNotificationEmails(
 
   const notifEmail = notifRow?.value?.trim();
   if (notifEmail) {
-    return { emails: [notifEmail], userIds: [] };
+    return { emails: [notifEmail], userIds: [], source: "notification_email" };
   }
 
   // 2. Fall back to admin (and optionally maintenance manager) user accounts.
   const whereClause = options.includeMaintenanceManagers
     ? and(
-        eq(usersTable.clientId, clientId),
         eq(usersTable.active, true),
         or(
-          eq(usersTable.role, "client_admin"),
-          eq(usersTable.isMaintenanceManager, true),
+          ownersOfClient(clientId),
+          and(eq(usersTable.clientId, clientId), eq(usersTable.isMaintenanceManager, true)),
         ),
       )
     : and(
-        eq(usersTable.clientId, clientId),
         eq(usersTable.active, true),
-        eq(usersTable.role, "client_admin"),
+        ownersOfClient(clientId),
       );
 
   const admins = await db
@@ -74,5 +75,5 @@ export async function getNotificationEmails(
   ];
   const userIds = [...new Set(admins.map((a) => a.id))];
 
-  return { emails, userIds };
+  return { emails, userIds, source: "users" };
 }

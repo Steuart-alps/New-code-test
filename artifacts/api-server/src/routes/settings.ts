@@ -18,7 +18,19 @@ import {
 import {
   SAFE_TRACK_REMINDER_FREQUENCY_SETTING,
   SAFE_TRACK_REMINDER_TIME_SETTING,
+  getSafeTrackReminderLastSentAt,
 } from "../lib/safeTrackAckReminders";
+import { REQUIRE_TWO_FACTOR_SETTING } from "../lib/twoFactorPolicy";
+import { OWNER_UPDATE_FREQUENCIES, OWNER_UPDATE_FREQUENCY_SETTING } from "../lib/personalReminders";
+import { REMINDER_TIMINGS_SETTING, validateReminderTimings } from "@workspace/api-zod/reminder-timings";
+import { isAllowedTenantSender, sanitizeSenderName } from "../lib/email";
+import {
+  buildTrackSummaryPreview,
+  loadTrackSummaryRoutingContext,
+  parseTrackSummaryRouting,
+} from "../lib/trackActionReminders";
+import { STORAGE_AUTO_TOP_UP_SETTING } from "../lib/storageFull";
+import { TODAY_BY_DEPARTMENT_ROLES_SETTING, normalizeTodayByDepartmentRoles } from "../lib/todayByDepartment";
 
 const router: IRouter = Router();
 
@@ -50,10 +62,82 @@ const SETTING_KEYS = [
   // JSON map of operational module keys to the active manager user IDs who
   // should receive that track's daily action summary.
   "trackSummaryRouting",
-  // Account-level warning only; reaching it never blocks or deletes uploads.
+  // Account-level warning level for the storage email; the hard stop is the
+  // paid capacity (lib/storageLimit.ts), whichever is lower warns first.
   "storageWarningThresholdBytes",
+  // "true" buys 10 GB of storage automatically when the paid capacity is full;
+  // otherwise new uploads stop there. Owners and consultants only.
+  STORAGE_AUTO_TOP_UP_SETTING,
   ACCOUNT_TIMEZONE_SETTING,
+  // "false" lets login accounts in this business skip the authenticator app;
+  // absent or "true" keeps two-factor authentication mandatory.
+  REQUIRE_TWO_FACTOR_SETTING,
+  // JSON {managers, maintenance, staff}: who besides Owners sees the
+  // dashboard's "Today by department" card (lib/todayByDepartment.ts).
+  TODAY_BY_DEPARTMENT_ROLES_SETTING,
+  // "weekly" (default) or "daily": when Owners get their update email
+  // (lib/personalReminders.ts).
+  OWNER_UPDATE_FREQUENCY_SETTING,
+  // JSON: per type, how many days before and how often when overdue the
+  // personal reminder email lists it (@workspace/api-zod/reminder-timings).
+  REMINDER_TIMINGS_SETTING,
 ] as const;
+
+// Secrets are write-only: GET /settings reports only whether one is set.
+const SECRET_SETTING_KEYS = new Set<string>(["resendApiKey"]);
+
+// What staff and viewers may read. Managers (client admins and consultants)
+// read every non-secret setting; everyone else only needs these to work.
+const STAFF_READABLE_SETTING_KEYS = new Set<string>([
+  "companyName",
+  "defaultLeadTimeDays",
+  CONTRACTOR_COMPLIANCE_LEAD_TIME_SETTING,
+  "maintenanceEmail",
+  "notificationEmail",
+  "fixTrackStaleDays",
+  SAFE_TRACK_REMINDER_FREQUENCY_SETTING,
+  SAFE_TRACK_REMINDER_TIME_SETTING,
+  ACCOUNT_TIMEZONE_SETTING,
+  REQUIRE_TWO_FACTOR_SETTING,
+]);
+
+/**
+ * The settings response: only the known keys (other app_settings rows such as
+ * provider domain ids and per-site overrides are served by their own routes),
+ * never a secret value, and a reduced set for staff and viewers.
+ */
+function settingsResponse(
+  rows: Array<{ key: string; value: string | null }>,
+  role: string,
+): Record<string, string | boolean | null> {
+  const manager = role === "client_admin" || role === "consultant";
+  const stored = new Map(rows.map((row) => [row.key, row.value ?? null]));
+  const settings: Record<string, string | boolean | null> = {};
+  for (const key of SETTING_KEYS) {
+    if (SECRET_SETTING_KEYS.has(key)) continue;
+    settings[key] = manager || STAFF_READABLE_SETTING_KEYS.has(key) ? stored.get(key) ?? null : null;
+  }
+  settings.resendApiKey = null;
+  settings.resendApiKeySet = manager ? !!stored.get("resendApiKey")?.trim() : false;
+  return settings;
+}
+
+/**
+ * Adds when the last SafeTrack reminder went out (managers only, read-only)
+ * so Settings can preview the next one without offering a send the scheduler
+ * would skip as already done.
+ */
+async function settingsWithReminderStatus(
+  clientId: number,
+  rows: Array<{ key: string; value: string | null }>,
+  role: string,
+): Promise<Record<string, string | boolean | null>> {
+  const settings = settingsResponse(rows, role);
+  const manager = role === "client_admin" || role === "consultant";
+  const lastSent = manager ? await getSafeTrackReminderLastSentAt(clientId).catch(() => null) : null;
+  settings.safeTrackReminderLastSentAt = lastSent?.toISOString() ?? null;
+  return settings;
+}
 
 async function validateTrackSummaryRouting(
   clientId: number,
@@ -108,7 +192,7 @@ async function validateTrackSummaryRouting(
       ));
     const eligibleIds = new Set(
       eligible
-        .filter((user) => user.role === "client_admin" || user.role === "client_staff")
+        .filter((user) => user.role === "client_admin" || user.role === "client_manager" || user.role === "client_staff")
         .map((user) => user.id),
     );
     if ([...requestedIds].some((id) => !eligibleIds.has(id))) {
@@ -138,14 +222,40 @@ router.get("/settings", requireAuth, async (req, res) => {
     .from(appSettingsTable)
     .where(eq(appSettingsTable.clientId, clientId));
 
-  const settings: Record<string, string | null> = {};
-  for (const key of SETTING_KEYS) {
-    settings[key] = null;
+  res.json(await settingsWithReminderStatus(clientId, rows, req.currentUser!.role));
+});
+
+/**
+ * Who each track's daily summary goes to, worked out by the same code the
+ * daily job sends with. `routing` (the card's unsaved choices, as JSON)
+ * replaces the saved choices for this preview only; every id in it is
+ * resolved against this client's own users and departments, so ids from
+ * another account match nobody.
+ */
+router.get("/settings/track-summary-recipients", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "clientId required" });
+    return;
   }
-  for (const row of rows) {
-    settings[row.key] = row.value ?? null;
+  const draft = req.query.routing;
+  if (draft !== undefined && typeof draft !== "string") {
+    res.status(400).json({ error: "routing must be a JSON string" });
+    return;
   }
-  res.json(settings);
+  if (draft !== undefined && draft.trim() !== "") {
+    try {
+      const parsed = JSON.parse(draft);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    } catch {
+      res.status(400).json({ error: "routing must be a JSON object" });
+      return;
+    }
+  }
+  const context = await loadTrackSummaryRoutingContext(clientId, {
+    routing: draft === undefined ? undefined : parseTrackSummaryRouting(draft),
+  });
+  res.json(buildTrackSummaryPreview(context));
 });
 
 router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
@@ -177,6 +287,20 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
     }
     rawBody.fixTrackStaleDays = String(parsed);
   }
+  if (rawBody[OWNER_UPDATE_FREQUENCY_SETTING] !== undefined && rawBody[OWNER_UPDATE_FREQUENCY_SETTING] !== null
+    && !(OWNER_UPDATE_FREQUENCIES as readonly string[]).includes(rawBody[OWNER_UPDATE_FREQUENCY_SETTING]!)) {
+    res.status(400).json({ error: "Owner update must be weekly or daily" });
+    return;
+  }
+  const rawTimings = rawBody[REMINDER_TIMINGS_SETTING];
+  if (rawTimings !== undefined && rawTimings !== null) {
+    const validated = validateReminderTimings(rawTimings);
+    if (!validated.ok) {
+      res.status(400).json({ error: validated.error });
+      return;
+    }
+    rawBody[REMINDER_TIMINGS_SETTING] = Object.keys(validated.value).length ? JSON.stringify(validated.value) : null;
+  }
   if (rawBody[CONTRACTOR_COMPLIANCE_LEAD_TIME_SETTING] !== undefined) {
     const rawLeadDays = rawBody[CONTRACTOR_COMPLIANCE_LEAD_TIME_SETTING];
     if (rawLeadDays === null || rawLeadDays.trim() === "") {
@@ -206,6 +330,13 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
     rawBody.storageWarningThresholdBytes = String(threshold);
     }
   }
+  if (rawBody[STORAGE_AUTO_TOP_UP_SETTING] !== undefined) {
+    const rawTopUp = rawBody[STORAGE_AUTO_TOP_UP_SETTING];
+    if (rawTopUp !== null && rawTopUp !== "true" && rawTopUp !== "false") {
+      res.status(400).json({ error: "Automatic storage top-up must be true or false" });
+      return;
+    }
+  }
   if (rawBody[ACCOUNT_TIMEZONE_SETTING] !== undefined) {
     const rawTimezone = rawBody[ACCOUNT_TIMEZONE_SETTING];
     if (rawTimezone === null || rawTimezone.trim() === "") {
@@ -217,6 +348,79 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
       return;
     } else {
       rawBody[ACCOUNT_TIMEZONE_SETTING] = rawTimezone.trim();
+    }
+  }
+  if (rawBody[REQUIRE_TWO_FACTOR_SETTING] !== undefined) {
+    const rawRequired = rawBody[REQUIRE_TWO_FACTOR_SETTING];
+    if (rawRequired !== null && rawRequired !== "true" && rawRequired !== "false") {
+      res.status(400).json({ error: "Two-factor requirement must be true or false" });
+      return;
+    }
+    req.log.info(
+      { clientId, actorId: req.currentUser!.id, required: rawRequired === "true" },
+      "Two-factor requirement changed",
+    );
+  }
+  // The provider key is never sent back to the browser, so the settings form
+  // submits an empty value when it is left untouched: keep the stored key.
+  // null removes it.
+  if (rawBody.resendApiKey === "" || (typeof rawBody.resendApiKey === "string" && rawBody.resendApiKey.trim() === "")) {
+    delete rawBody.resendApiKey;
+  }
+  if (rawBody.smtpFromName !== undefined) {
+    const rawName = rawBody.smtpFromName;
+    if (rawName === null || rawName.trim() === "") {
+      rawBody.smtpFromName = null;
+    } else if (/[\r\n"<>\\]/.test(rawName) || rawName.trim().length > 100) {
+      res.status(400).json({ error: "Sender name must be up to 100 characters without quotes, angle brackets or line breaks" });
+      return;
+    } else {
+      rawBody.smtpFromName = sanitizeSenderName(rawName);
+    }
+  }
+  if (rawBody.smtpFrom !== undefined) {
+    const rawFrom = rawBody.smtpFrom;
+    if (rawFrom === null || rawFrom.trim() === "") {
+      rawBody.smtpFrom = null;
+    } else {
+      // Only the business's own registered sending domain may be used (see
+      // isAllowedTenantSender), so it can never send as another business or
+      // as the platform. Checked against what is stored plus this request.
+      const current = await db
+        .select({ key: appSettingsTable.key, value: appSettingsTable.value })
+        .from(appSettingsTable)
+        .where(and(
+          eq(appSettingsTable.clientId, clientId),
+          inArray(appSettingsTable.key, ["resendDomainName", "resendApiKey", "smtpFrom"]),
+        ));
+      const senderSettings: Record<string, string | null> = {};
+      for (const row of current) senderSettings[row.key] = row.value ?? null;
+      if (rawBody.resendApiKey !== undefined) senderSettings.resendApiKey = rawBody.resendApiKey ?? null;
+      // The settings form re-submits the stored address with every save; an
+      // unchanged legacy value is kept (sending falls back to the platform
+      // address for it) rather than blocking unrelated changes.
+      const unchanged = rawFrom.trim() === (senderSettings.smtpFrom ?? "").trim();
+      if (!unchanged && !isAllowedTenantSender(rawFrom, senderSettings)) {
+        const domain = senderSettings.resendDomainName?.trim();
+        res.status(400).json({
+          error: domain
+            ? `The sender email address must be on your sending domain (${domain})`
+            : "Add your sending domain under Sender domain before choosing a sender email address",
+        });
+        return;
+      }
+      rawBody.smtpFrom = rawFrom.trim();
+    }
+  }
+  if (rawBody[TODAY_BY_DEPARTMENT_ROLES_SETTING] !== undefined) {
+    const rawRoles = rawBody[TODAY_BY_DEPARTMENT_ROLES_SETTING];
+    if (rawRoles !== null) {
+      const normalized = normalizeTodayByDepartmentRoles(rawRoles);
+      if (normalized === null) {
+        res.status(400).json({ error: "Today by department roles must be managers, maintenance and staff set to true or false" });
+        return;
+      }
+      rawBody[TODAY_BY_DEPARTMENT_ROLES_SETTING] = normalized;
     }
   }
   if (rawBody[SAFE_TRACK_REMINDER_FREQUENCY_SETTING] !== undefined) {
@@ -256,10 +460,7 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
     .from(appSettingsTable)
     .where(eq(appSettingsTable.clientId, clientId));
 
-  const settings: Record<string, string | null> = {};
-  for (const k of SETTING_KEYS) settings[k] = null;
-  for (const row of rows) settings[row.key] = row.value ?? null;
-  res.json(settings);
+  res.json(await settingsWithReminderStatus(clientId, rows, req.currentUser!.role));
 });
 
 export default router;

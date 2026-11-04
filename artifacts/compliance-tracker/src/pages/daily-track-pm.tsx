@@ -1,23 +1,33 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { format } from "date-fns";
 import { AppLayout } from "@/components/layout";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
+import { ChecklistItemRow } from "@/components/checklist-item-row";
+import { PassAllButton } from "@/components/pass-all-button";
+import { checklistProgress, submitHint, withResult, itemResult, type ChecklistResult } from "@/lib/checklist-results";
+import { fetchMobileChecklistSubmission, MobileChecklistSubmissionCard, type MobileChecklistSubmission } from "@/components/mobile-checklist-submission-card";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
-import { useListSites } from "@workspace/api-client-react";
+import { useChecklistSite } from "@/hooks/use-checklist-site";
+import { ChecklistSiteSelect } from "@/components/checklist-site-select";
+import { ChecklistDueTime } from "@/components/checklist-due-time";
+import { carryAnswers, createChecklistDraftStore, hasAnswers, type ChecklistDraftSlot } from "@/lib/checklist-carry";
+import { useFireWalkChecklistItems, withFireWalkItems } from "@/components/fire-night-walks";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CheckSquare, Square, Sunset, UtensilsCrossed, Building2, Loader2, Lock, RotateCcw, PenLine, Settings2 } from "lucide-react";
+import { Sunset, UtensilsCrossed, Building2, Loader2, Lock, RotateCcw, PenLine, Settings2 } from "lucide-react";
 import { ChecklistTemplateEditor, type TemplateItem } from "./checklist-template-editor";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface ChecklistItem { label: string; checked: boolean; notes?: string; section?: string; }
+interface ChecklistItem { label: string; checked: boolean; notes?: string; section?: string; result?: ChecklistResult; }
 
 interface Checklist {
   id: number; checklistType: string; checkDate: string;
@@ -42,7 +52,8 @@ const KITCHEN_CLOSING_ITEMS: ChecklistItem[] = [
   { label: "Cooling foods placed into refrigeration correctly", checked: false },
   { label: "Walk-in fridge temperature recorded on All In One Record", checked: false },
   { label: "Under-counter fridge temperature recorded on All In One Record", checked: false },
-  { label: "Freezer temperature recorded on All In One Record", checked: false },
+  { label: "Standalone fridges temperature recorded on All In One Record", checked: false },
+  { label: "Freezers temperature recorded on All In One Record", checked: false },
   // 2. Equipment
   { section: "Equipment", label: "Ovens switched off (unless required overnight)", checked: false },
   { label: "Hobs and grills cleaned and turned off", checked: false },
@@ -113,6 +124,9 @@ const PREMISES_CLOSING_ITEMS: ChecklistItem[] = [
   { label: "External escape routes are clear", checked: false },
   { label: "Fire extinguishers are unobstructed and clearly visible", checked: false },
   { label: "Manual break glass call points are unobstructed and clearly visible", checked: false },
+  // The alarm panel is checked here, not as a separate FireTrack check; saved
+  // lists got this item once (addFireAlarmPanelToSavedPremisesChecks, api-server).
+  { label: "Fire alarm panel shows normal: no fault, fire or disabled zone lights (report any fault at once)", checked: false },
   { label: "Emergency lights are in working order", checked: false },
   { label: "All access to and egress from the premises are free from obstructions or hazards", checked: false },
   { label: "Internal public areas are safe and well maintained", checked: false },
@@ -160,9 +174,9 @@ const CHECKLIST_LABELS: Record<string, string> = {
 
 // ── Checklist card ────────────────────────────────────────────────────────────
 
-function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdmin }: {
+function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdmin, draft }: {
   type: string; siteId: number | null; siteName?: string; date: string;
-  existing?: Checklist; onSaved: () => void; canAdmin: boolean;
+  existing?: Checklist; onSaved: () => void; canAdmin: boolean; draft?: ChecklistDraftSlot<ChecklistItem>;
 }) {
   const [templateItems, setTemplateItems] = useState<ChecklistItem[] | null>(null);
   const [templateLoading, setTemplateLoading] = useState(true);
@@ -183,39 +197,73 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
     })();
   }, [type, siteId, existing]);
 
-  const effectiveDefault = templateItems
+  // Sites with sleeping accommodation and no night porter walk for fire here.
+  const fireWalkItems = useFireWalkChecklistItems(type, siteId, !existing);
+  const effectiveDefault = withFireWalkItems(templateItems
     ? templateItems.map(i => ({ ...i, checked: false }))
-    : (TEMPLATES[type] ?? []);
+    : (TEMPLATES[type] ?? []), fireWalkItems);
 
   const { user } = useAuth();
-  const [items, setItems] = useState<ChecklistItem[]>(existing?.items ?? effectiveDefault);
-  const [completedBy, setCompletedBy] = useState(existing?.completedBy ?? user?.name ?? "");
-  const [staffRosterId, setStaffRosterId] = useState<number | null>((existing as any)?.staffRosterId ?? null);
-  const [managerNote, setManagerNote] = useState(existing?.managerNote ?? "");
-  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
   const submitted = !!existing?.submittedAt;
+  // Ticks made before the site or date was changed (or before a reload) are
+  // carried onto this card, unless this one is already submitted.
+  const carried = submitted ? undefined : draft?.get();
+  const startItems = () => {
+    const base = existing?.items ?? effectiveDefault;
+    return carried ? carryAnswers(base, carried.items, item => item.label) : base;
+  };
+  const [items, setItems] = useState<ChecklistItem[]>(startItems);
+  const [completedBy, setCompletedBy] = useState(carried?.completedBy || (existing?.completedBy ?? user?.name ?? ""));
+  const [staffRosterId, setStaffRosterId] = useState<number | null>(carried ? carried.staffRosterId : (existing as any)?.staffRosterId ?? null);
+  const [managerNote, setManagerNote] = useState(carried?.managerNote || (existing?.managerNote ?? ""));
+  const [saving, setSaving] = useState(false);
+  const touched = useRef(false);
 
   useEffect(() => {
-    setItems(existing?.items ?? effectiveDefault);
-    setCompletedBy(existing?.completedBy ?? user?.name ?? "");
-    setManagerNote(existing?.managerNote ?? "");
-  }, [existing, type, templateItems]);
+    setItems(startItems());
+    setCompletedBy(carried?.completedBy || (existing?.completedBy ?? user?.name ?? ""));
+    setStaffRosterId(carried ? carried.staffRosterId : (existing as any)?.staffRosterId ?? null);
+    setManagerNote(carried?.managerNote || (existing?.managerNote ?? ""));
+  }, [existing, type, templateItems, fireWalkItems.map(item => item.label).join("\n")]);
 
-  const toggle = (i: number) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? { ...item, checked: !item.checked } : item)); };
-  const setNote = (i: number, note: string) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? { ...item, notes: note } : item)); };
+  useEffect(() => {
+    if (touched.current && !submitted) draft?.set({ items, completedBy, staffRosterId, managerNote });
+  }, [items, completedBy, staffRosterId, managerNote]);
+
+  const edit = <T,>(set: (value: T) => void) => (value: T) => { touched.current = true; set(value); };
+  const setResult = (i: number, result: ChecklistResult) => { if (submitted) return; touched.current = true; setItems(prev => prev.map((item, idx) => idx === i ? withResult(item, result) : item)); };
+  const passRemaining = () => { if (submitted) return; touched.current = true; setItems(prev => prev.map(item => itemResult(item) ? item : withResult(item, "pass"))); };
+
+  const setNote = (i: number, note: string) => { if (submitted) return; touched.current = true; setItems(prev => prev.map((item, idx) => idx === i ? { ...item, notes: note } : item)); };
 
   async function save(submit: boolean) {
     setSaving(true);
     const payload: any = { checklistType: type, checkDate: date, siteId: siteId ?? null, items, completedBy: completedBy || null, staffRosterId, managerNote: managerNote || null };
     if (submit) payload.submittedAt = new Date().toISOString();
+    const failedTitle = submit ? "Checklist not submitted" : "Draft not saved";
     try {
-      if (existing) { await apiFetch(`/daily-track-pm/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) }); }
-      else { await apiFetch(`/daily-track-pm`, { method: "POST", body: JSON.stringify(payload) }); }
+      const res = existing
+        ? await apiFetch(`/daily-track-pm/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) })
+        : await apiFetch(`/daily-track-pm`, { method: "POST", body: JSON.stringify(payload) });
+      if (!res.ok) {
+        // Keep the user's ticks; only a 409 (already submitted elsewhere)
+        // reloads, to show the stored submitted copy.
+        toast({ title: failedTitle, description: await getApiErrorMessage(res, "Please try again."), variant: "destructive" });
+        if (res.status === 409) onSaved();
+        return;
+      }
+      toast({ title: submit ? "Checklist submitted" : "Draft saved" });
+      touched.current = false;
+      draft?.set(undefined);
       onSaved();
+    } catch {
+      toast({ title: failedTitle, description: "Check your connection and try again.", variant: "destructive" });
     } finally { setSaving(false); }
   }
 
-  const checkedCount = items.filter(i => i.checked).length;
+  const progress = checklistProgress(items);
+  const hint = submitHint(progress);
   const Icon = type === "kitchen_closing" ? UtensilsCrossed : Building2;
 
   return (
@@ -224,7 +272,7 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Icon className="w-4 h-4 text-primary opacity-80" />
-            <h3 className="font-semibold font-display">{CHECKLIST_LABELS[type]}</h3>
+            <h3 className="font-bold font-display">{CHECKLIST_LABELS[type]}</h3>
           </div>
           <div className="flex items-center gap-2">
             {canAdmin && !submitted && (
@@ -232,14 +280,18 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
                 <Settings2 className="w-3.5 h-3.5" />
               </Button>
             )}
-            <span className="text-xs text-muted-foreground">{checkedCount}/{items.length}</span>
+            <span className="text-xs text-muted-foreground">{progress.answered}/{items.length}{progress.failed > 0 && <span className="text-red-600 font-medium"> · {progress.failed} failed</span>}</span>
             {submitted
               ? <Badge className="bg-emerald-100 text-emerald-800 text-xs"><Lock className="w-3 h-3 mr-1" />Submitted</Badge>
-              : checkedCount === items.length && items.length > 0
+              : progress.ready
               ? <Badge className="bg-blue-100 text-blue-800 text-xs">Ready to submit</Badge>
               : <Badge variant="secondary" className="text-xs">In progress</Badge>}
           </div>
         </div>
+
+        {carried && hasAnswers(carried.items) && !touched.current && (
+          <p className="text-xs text-blue-700 mb-3">Your unsaved ticks are filled in below. Save or submit to keep them.</p>
+        )}
 
         {templateLoading && !existing ? (
           <div className="flex items-center justify-center py-8">
@@ -254,38 +306,39 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
                     {item.section}
                   </p>
                 )}
-                <div className={`rounded-lg border p-3 transition-colors ${submitted ? "bg-muted/20 opacity-80" : "hover:bg-muted/20 cursor-pointer"} ${item.checked ? "border-emerald-200 bg-emerald-50/50" : "border-border"}`}>
-                  <div className="flex items-start gap-3" onClick={() => toggle(i)}>
-                    {item.checked ? <CheckSquare className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" /> : <Square className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />}
-                    <span className={`text-sm ${item.checked ? "text-emerald-800 line-through decoration-emerald-400" : ""}`}>{item.label}</span>
-                  </div>
-                  {!submitted && item.checked && (
-                    <div className="mt-2 ml-7">
-                      <Input value={item.notes ?? ""} onChange={e => setNote(i, e.target.value)} placeholder="Optional note…" className="h-7 text-xs bg-white" onClick={e => e.stopPropagation()} />
-                    </div>
-                  )}
-                  {submitted && item.notes && <p className="ml-7 mt-1 text-xs text-muted-foreground italic">{item.notes}</p>}
-                </div>
+                <ChecklistItemRow item={item} submitted={submitted} onResult={result => setResult(i, result)} onNote={note => setNote(i, note)} />
               </div>
             ))}
+          </div>
+        )}
+
+        {!submitted && !(templateLoading && !existing) && (
+          <div className="mb-4">
+            <PassAllButton remaining={progress.remaining} total={items.length} onPassAll={passRemaining} />
           </div>
         )}
 
         {!submitted && (
           <div className="space-y-3 border-t pt-3">
             <div className="grid grid-cols-2 gap-3">
-              <StaffPerformerSelect label="Completed by" value={completedBy} onChange={setCompletedBy} onRosterIdChange={setStaffRosterId} />
-              {canAdmin && <div className="space-y-1"><Label className="text-xs">Manager note</Label><Input value={managerNote} onChange={e => setManagerNote(e.target.value)} placeholder="Optional" className="h-8 text-sm" /></div>}
+              <StaffPerformerSelect label="Completed by" value={completedBy} onChange={edit(setCompletedBy)} onRosterIdChange={edit(setStaffRosterId)} />
+              {canAdmin && <div className="space-y-1"><Label className="text-xs">Manager note</Label><Input value={managerNote} onChange={e => edit(setManagerNote)(e.target.value)} placeholder="Optional" className="h-8 text-sm" /></div>}
             </div>
+            {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => save(false)} disabled={saving} className="flex-1">{saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save draft"}</Button>
-              <Button size="sm" onClick={() => save(true)} disabled={saving || checkedCount === 0} className="flex-1">Submit checklist</Button>
+              <Button size="sm" onClick={() => save(true)} disabled={saving || !progress.ready} className="flex-1">Submit checklist</Button>
             </div>
+            {!existing?.id && <p className="text-xs text-muted-foreground">Save a draft to add photos or videos.</p>}
           </div>
+        )}
+        {submitted && draft?.get() && hasAnswers(draft.get()!.items) && (
+          <p className="text-xs text-amber-700 mb-3">This checklist is already submitted. Your unsaved ticks are kept: choose another site or date to use them.</p>
         )}
         {submitted && existing?.completedBy && <div className="border-t pt-3"><p className="text-xs text-muted-foreground">Completed by: <span className="font-medium">{existing.completedBy}</span></p></div>}
         {existing?.id && (
           <div className="border-t mt-3 pt-3">
+            <RecordSignedBy recordType="daily_checklist" recordId={existing.id} className="mb-2" />
             <CheckPhotoUploader entityType="daily_checklist_pm" entityId={existing.id} compact />
           </div>
         )}
@@ -319,6 +372,7 @@ function ManagerSignoffCard({ siteId, date, existing, onSaved }: {
   const [managerName, setManagerName] = useState(existing?.managerName ?? "");
   const [notes, setNotes] = useState(existing?.notes ?? "");
   const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
   const submitted = !!existing?.submittedAt;
 
   useEffect(() => { setManagerName(existing?.managerName ?? ""); setNotes(existing?.notes ?? ""); }, [existing]);
@@ -328,9 +382,18 @@ function ManagerSignoffCard({ siteId, date, existing, onSaved }: {
     const payload: any = { signoffDate: date, siteId: siteId ?? null, managerName: managerName || "Manager", notes: notes || null };
     if (submit) payload.submittedAt = new Date().toISOString();
     try {
-      if (existing) { await apiFetch(`/daily-track-pm/signoffs/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) }); }
-      else { await apiFetch(`/daily-track-pm/signoffs`, { method: "POST", body: JSON.stringify(payload) }); }
+      const res = existing
+        ? await apiFetch(`/daily-track-pm/signoffs/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) })
+        : await apiFetch(`/daily-track-pm/signoffs`, { method: "POST", body: JSON.stringify(payload) });
+      if (!res.ok) {
+        toast({ title: "Sign-off not saved", description: await getApiErrorMessage(res, "Please try again."), variant: "destructive" });
+        if (res.status === 409) onSaved();
+        return;
+      }
+      toast({ title: submit ? "End of day signed off" : "Sign-off saved" });
       onSaved();
+    } catch {
+      toast({ title: "Sign-off not saved", description: "Check your connection and try again.", variant: "destructive" });
     } finally { setSaving(false); }
   }
 
@@ -339,7 +402,7 @@ function ManagerSignoffCard({ siteId, date, existing, onSaved }: {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <PenLine className="w-4 h-4 text-primary opacity-80" />
-          <h3 className="font-semibold font-display">Manager Daily Sign-off</h3>
+          <h3 className="font-bold font-display">Manager Daily Sign-off</h3>
         </div>
         {submitted
           ? <Badge className="bg-emerald-100 text-emerald-800 text-xs"><Lock className="w-3 h-3 mr-1" />Signed off</Badge>
@@ -351,6 +414,7 @@ function ManagerSignoffCard({ siteId, date, existing, onSaved }: {
           <p>Manager: <span className="font-medium text-foreground">{existing?.managerName}</span></p>
           {existing?.notes && <p className="italic">{existing.notes}</p>}
           <p className="text-xs">Signed off at {new Date(existing!.submittedAt!).toLocaleString()}</p>
+          <RecordSignedBy recordType="daily_manager_signoff" recordId={existing!.id} />
         </div>
       ) : (
         <div className="space-y-3">
@@ -374,17 +438,19 @@ function ManagerSignoffCard({ siteId, date, existing, onSaved }: {
 export default function DailyTrackPmPage() {
   const { activeClientId, hasService } = useAuth();
   const canAdmin = useCanAdmin();
-  const { data: sites = [] } = useListSites();
+  const { sites, siteId: selectedSiteId, setSiteId, ready: siteReady } = useChecklistSite();
+  // Unsaved ticks per checklist, kept while the site or date changes.
+  const [drafts] = useState(createChecklistDraftStore);
+  const loadSeq = useRef(0);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = format(new Date(), "yyyy-MM-dd");
   const _qs = new URLSearchParams(window.location.search);
   const [date, setDate] = useState(_qs.get("date") ?? today);
-  const [siteId, setSiteId] = useState<string>(_qs.get("siteId") ?? "__none__");
   const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [signoff, setSignoff] = useState<ManagerSignoff | undefined>(undefined);
+  const [mobileSubmission, setMobileSubmission] = useState<MobileChecklistSubmission | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const selectedSiteId = siteId === "__none__" ? null : Number(siteId);
   const selectedSiteName = sites.find(s => s.id === selectedSiteId)?.name;
   const hasStandaloneDailyTrack = hasService("dailytrack_pm");
   const visibleTypes = [
@@ -393,21 +459,35 @@ export default function DailyTrackPmPage() {
   ];
 
   const load = useCallback(async () => {
+    if (!siteReady) return;
+    // A slower answer for the previous site or date must not replace this one.
+    const seq = ++loadSeq.current;
     setLoading(true);
     const params = new URLSearchParams({ date });
     if (selectedSiteId) params.set("siteId", String(selectedSiteId));
-    const [clRes, soRes] = await Promise.all([
+    const [clRes, soRes, mobile] = await Promise.all([
       apiFetch(`/daily-track-pm?${params}`),
       apiFetch(`/daily-track-pm/signoffs?${params}`),
+      hasStandaloneDailyTrack ? fetchMobileChecklistSubmission(selectedSiteId, date, "pm") : Promise.resolve(null),
     ]);
-    if (clRes.ok) setChecklists(await clRes.json());
-    if (soRes.ok) { const rows: ManagerSignoff[] = await soRes.json(); setSignoff(rows[0]); }
+    const checklistRows = clRes.ok ? await clRes.json() : null;
+    const signoffRows = soRes.ok ? await soRes.json() as ManagerSignoff[] : null;
+    if (seq !== loadSeq.current) return;
+    if (checklistRows) setChecklists(checklistRows);
+    if (signoffRows) {
+      // Only this site's (or the no-site) sign-off; a submitted one wins.
+      const rows = signoffRows.filter(row => (row.siteId ?? null) === selectedSiteId);
+      setSignoff(rows.find(row => row.submittedAt) ?? rows[0]);
+    }
+    setMobileSubmission(mobile);
     setLoading(false);
-  }, [date, selectedSiteId, activeClientId]);
+  }, [date, selectedSiteId, siteReady, activeClientId, hasStandaloneDailyTrack]);
 
   useEffect(() => { load(); }, [load]);
 
-  const getChecklist = (type: string) => checklists.find(c => c.checklistType === type);
+  // Without a site filter the list holds every site's rows; match the card's
+  // own slot so it never edits another site's checklist.
+  const getChecklist = (type: string) => checklists.find(c => c.checklistType === type && (c.siteId ?? null) === selectedSiteId);
 
   return (
     <AppLayout title="DailyTrack PM">
@@ -424,16 +504,7 @@ export default function DailyTrackPmPage() {
           <Label className="text-xs">Date</Label>
           <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="h-9" />
         </div>
-        <div className="space-y-1 flex-1 min-w-[180px]">
-          <Label className="text-xs">Site</Label>
-          <Select value={siteId} onValueChange={setSiteId}>
-            <SelectTrigger className="h-9"><SelectValue placeholder="Select site…" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">No site filter</SelectItem>
-              {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+        <ChecklistSiteSelect sites={sites} value={selectedSiteId} onChange={setSiteId} />
         <div className="flex items-end">
           <Button variant="outline" size="sm" onClick={load} className="h-9 gap-1.5">
             <RotateCcw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
@@ -441,12 +512,25 @@ export default function DailyTrackPmPage() {
         </div>
       </div>
 
-      {loading ? (
+      {!loading && siteReady && (
+        <ChecklistDueTime
+          site={sites.find(s => s.id === selectedSiteId)}
+          period="closing"
+          date={date}
+          done={Boolean(mobileSubmission) || visibleTypes.some(type => getChecklist(type)?.submittedAt)}
+          className="mb-4"
+        />
+      )}
+
+      {loading || !siteReady ? (
         <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        // One checklist per row: the kitchen and premises checks are separate
+        // checks, often by different teams, so they are not shown side by side.
+        <div className="grid grid-cols-1 gap-4 max-w-4xl">
+          {mobileSubmission && <MobileChecklistSubmissionCard submission={mobileSubmission} />}
           {visibleTypes.map(type => (
-            <ChecklistCard key={type} type={type} siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getChecklist(type)} onSaved={load} canAdmin={canAdmin} />
+            <ChecklistCard key={type} type={type} siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getChecklist(type)} onSaved={load} canAdmin={canAdmin} draft={drafts.slot(type)} />
           ))}
           <ManagerSignoffCard siteId={selectedSiteId} date={date} existing={signoff} onSaved={load} />
         </div>

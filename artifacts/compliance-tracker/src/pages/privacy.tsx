@@ -2,11 +2,11 @@ import { LegalLayout } from "./legal-layout";
 
 export default function PrivacyPage() {
   return (
-    <LegalLayout title="Privacy Policy" updated="17 July 2026">
+    <LegalLayout title="Privacy Policy" updated="27 October 2026">
       <section>
         <h2>1. Who we are</h2>
         <p>
-          ComplyTrack is operated by ALPS Consulting Ltd, a company registered in England and Wales. We are the data
+          ComplyTrack is operated by ALPS Consulting Ltd, trading as ALPS Consultancy, a company registered in Scotland (company number SC739043, registered office 31 De Walden Drive, Kilmarnock, KA3 6AA). We are the data
           controller for account information, and a data processor for the compliance records you and your team store
           in the service. This policy explains what we collect, why, and your rights.
         </p>
@@ -16,6 +16,9 @@ export default function PrivacyPage() {
         <ul>
           <li><strong>Account details</strong> — your name, email address, business name, and password (stored securely hashed, never in plain text).</li>
           <li><strong>Your compliance data</strong> — sites, compliance items, documents, contractor details, and other records you choose to enter.</li>
+          <li><strong>Photos</strong> — photos you or your team attach as evidence to checks, issues and other records, from the camera or the photo library.</li>
+          <li><strong>Incident reports</strong> — details of people involved in accidents and incidents, which can include health information such as injuries sustained and first aid given. Only users your business allows can see these health details.</li>
+          <li><strong>Phone notification tokens</strong> — if you allow notifications in the ComplyTrack mobile app, a token identifying your device for push notifications, stored against your account and deleted when you sign out.</li>
           <li><strong>Billing information</strong> — handled by our payment provider, Stripe. We never see or store your full card details.</li>
           <li><strong>Usage information</strong> — basic technical logs (such as IP address and login times) used for security and troubleshooting.</li>
         </ul>
@@ -25,6 +28,7 @@ export default function PrivacyPage() {
         <ul>
           <li>To provide and operate the service (legal basis: performance of a contract).</li>
           <li>To send service emails such as password resets, trial reminders, and compliance-deadline notifications (performance of a contract).</li>
+          <li>To send notifications to your phone, such as tasks due and reminders, if you allow them in the mobile app (performance of a contract).</li>
           <li>To process subscription payments through Stripe (performance of a contract).</li>
           <li>To secure the service and prevent abuse (legitimate interests).</li>
         </ul>
@@ -36,19 +40,32 @@ export default function PrivacyPage() {
         <ul>
           <li><strong>Stripe</strong> — payment processing and subscription billing.</li>
           <li><strong>Hosting and email providers</strong> — to run the application, store data, and deliver service emails.</li>
+          <li><strong>Google Cloud Storage</strong> — to store photos and files attached to records.</li>
+          <li><strong>Sentry</strong> — to tell us when something breaks. Error reports hold technical details such as the error, the page and the browser; we remove form contents, cookies, links that grant access and email addresses before they are sent.</li>
+          <li><strong>Anthropic</strong> — the AI that reads documents and lists for ComplyTrack, used only by businesses with ComplyTrack's AI features. It reads what someone asks it to: an audit or inspection report (to suggest actions), a certificate (including certificates a contractor emails to the business's ComplyTrack address), or a photo, PDF or spreadsheet of a list such as appliances, contractors, staff, machines, rooms or supplier allergens. These can include people's names. Anthropic doesn't use them to train its AI. What it reads is shown to a person to check, and nothing is added to the business's records until they confirm it.</li>
+          <li><strong>Expo, Apple and Google</strong> — to deliver push notifications to the mobile app. They receive the device token and the notification text, not your records.</li>
         </ul>
         <p>
           These providers act under contract and may process data outside the UK/EEA; where they do, appropriate
           safeguards (such as standard contractual clauses) are in place. We may also disclose information if required
           by law.
         </p>
+        <p>
+          Our hosting provider is Render (servers and database in Frankfurt, Germany), photos and files are kept in
+          Google Cloud Storage in Frankfurt, Germany, and our email provider is Resend.
+          For the compliance records your business keeps, these providers are our sub-processors; section 5 of our{" "}
+          <a href="/terms" className="text-primary underline underline-offset-2">Terms of Service</a> sets out how we
+          act as your processor.
+        </p>
       </section>
       <section>
         <h2>5. How long we keep it</h2>
         <p>
-          We keep your data while your account is active. If your account is closed or your trial lapses, we retain
-          data for a reasonable period so you can return or request an export, after which it is deleted. You can ask
-          us to delete your account and data at any time.
+          We keep your data while your account is active, including a 5-year history of changes so records can be
+          audited. If your subscription ends or your trial lapses, we keep your data for 12 months so you can return
+          or download a full export, and we email the Owner 30 days before it is deleted. The Owner can ask for
+          earlier deletion after cancelling. Some records are kept longer where the law requires, such as the audit
+          trail and RIDDOR reports (3 years).
         </p>
       </section>
       <section>
@@ -78,11 +95,26 @@ export default function PrivacyPage() {
         </p>
       </section>
       <section>
-        <h2>9. Changes and contact</h2>
+        <h2>9. The ComplyTrack mobile app</h2>
+        <p>
+          The mobile app signs in to the same account as the website and does not create accounts. It does not collect
+          your location, contacts or microphone, and contains no advertising, third-party analytics or tracking.
+        </p>
+        <ul>
+          <li>The app asks for camera and photo library access only so you can attach evidence photos.</li>
+          <li>Your sign-in is kept in the device's secure storage. Checks recorded without a connection are kept on the device until they are sent, and are only sent for the account that recorded them.</li>
+          <li>
+            Business owners can request deletion of their business's data in the app (Profile &gt; Delete my account) or in
+            Settings on the website. Staff accounts are removed by their manager; you can also contact us to request deletion.
+          </li>
+        </ul>
+      </section>
+      <section>
+        <h2>10. Changes and contact</h2>
         <p>
           We may update this policy from time to time; material changes will be notified in the app or by email. For
           privacy questions or to exercise your rights, contact ALPS Consulting Ltd via{" "}
-          <a href="https://alpsconsultancy.co.uk" className="text-primary underline underline-offset-2" target="_blank" rel="noopener noreferrer">
+          <a href="https://www.alpsconsultancy.co.uk" className="text-primary underline underline-offset-2" target="_blank" rel="noopener noreferrer">
             alpsconsultancy.co.uk
           </a>
           .

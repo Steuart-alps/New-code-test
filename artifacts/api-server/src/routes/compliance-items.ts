@@ -16,6 +16,13 @@ import {
 import { requireAuth, requireClientAdmin, getClientId, canAccessClient, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { filterName } from "../lib/contentFilter";
 import { appendAuditEvent } from "../lib/audit";
+import { completionFields, completionDateFromDay } from "../lib/complianceCompletion";
+import { NO_ACTION, itemActionState, itemActionStates, type ItemActionState } from "../lib/certificateOutcomes";
+import { getAccountToday } from "../lib/accountClock";
+import { recordTrackCheckFromTask } from "../lib/trackTaskLink";
+import { siteVisibleToDepartment, sitesTableVisibleTo } from "../lib/departmentSites";
+import { listAssignees, resolveAssigneeChange } from "../lib/assignees";
+import { z } from "zod";
 
 const router: IRouter = Router();
 
@@ -38,16 +45,37 @@ function coerceDates<T extends Record<string, unknown>>(body: T, fields: (keyof 
 }
 const DATE_FIELDS = ["dueDate", "completedAt", "notificationSentAt"] as const;
 
+/** A real calendar date, not before 2000 (completion dates are entered by hand). */
+const CompletedDay = z.preprocess(
+  // An ISO date-time is read as its calendar date.
+  (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v) ? v.slice(0, 10) : v),
+  z.string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .refine((v) => v >= "2000-01-01" && !Number.isNaN(Date.parse(`${v}T00:00:00Z`))
+      && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v, "Invalid date")
+    .nullish(),
+);
+
+/** The competent person who did a check in house, instead of a contractor. */
+const InHouseBy = z.string().trim().min(1).max(200).nullish();
+
 function buildItemResponse(
   item: typeof complianceItemsTable.$inferSelect,
   site: typeof sitesTable.$inferSelect | null,
   category: typeof categoriesTable.$inferSelect | null,
-  contractor: typeof contractorsTable.$inferSelect | null
+  contractor: typeof contractorsTable.$inferSelect | null,
+  action: ItemActionState = NO_ACTION,
 ) {
   // Scheduling-link credentials (raw legacy token or digest) never leave the server.
   const { scheduleToken: _token, scheduleTokenHash: _digest, ...visible } = item;
   return {
     ...visible,
+    // Certificate outcome state (lib/certificateOutcomes.ts): an unsatisfactory
+    // newest certificate or open C1/C2/FI/ID/AR defects mean "needs action"
+    // whatever the due date says.
+    needsAction: action.needsAction,
+    needsActionReason: action.needsActionReason,
+    openDefectCount: action.openDefectCount,
     siteName: site?.name ?? null,
     categoryName: category?.name ?? null,
     categoryColor: category?.color ?? null,
@@ -81,7 +109,7 @@ router.get("/compliance-items", requireAuth, async (req, res) => {
       .from(sitesTable)
       .where(and(
         eq(sitesTable.clientId, clientId),
-        or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+        sitesTableVisibleTo(deptId),
       ));
     conditions.push(
       or(isNull(complianceItemsTable.siteId), inArray(complianceItemsTable.siteId, allowedSites)) as any,
@@ -139,12 +167,13 @@ router.get("/compliance-items", requireAuth, async (req, res) => {
     if (c.contractorId) trackLatest(latestExpiryByContractor, c.contractorId, d);
   }
 
+  const actionStates = await itemActionStates(clientId, items.map(({ item }) => item.id));
   res.json(items.map(({ item, site, category, contractor }) => {
     const direct = latestExpiryByItem.get(item.id);
     const viaContractor = item.contractorId ? latestExpiryByContractor.get(item.contractorId) : undefined;
     const latest = [direct, viaContractor].filter(Boolean).sort((a, b) => (b!.getTime() - a!.getTime()))[0];
     return {
-      ...buildItemResponse(item, site, category, contractor),
+      ...buildItemResponse(item, site, category, contractor, actionStates.get(item.id) ?? NO_ACTION),
       latestCertExpiryDate: latest?.toISOString() ?? null,
     };
   }));
@@ -161,7 +190,7 @@ async function fetchJoinedItem(itemId: number) {
   return rows[0] ?? null;
 }
 
-router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, res) => {
+router.post("/compliance-items", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
   const user = req.currentUser!;
   const applyToAllSites = req.body?.applyToAllSites === true;
   const body = CreateComplianceItemBody.parse(coerceDates(req.body, [...DATE_FIELDS]));
@@ -171,6 +200,10 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
     return;
   }
 
+  if (body.frequencyMonths != null && !Number.isInteger(body.frequencyMonths)) {
+    res.status(400).json({ error: "Repeat interval must be a whole number of months" });
+    return;
+  }
   const titleCheck = filterName(body.title);
   if (!titleCheck.ok) {
     res.status(400).json({ error: titleCheck.message });
@@ -206,6 +239,28 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
     }
   }
 
+  // The person responsible: for "All Sites" they must be able to see every site.
+  if (body.assigneeUserId != null) {
+    if (applyToAllSites) {
+      const sites = await db.select({ id: sitesTable.id }).from(sitesTable).where(eq(sitesTable.clientId, clientId));
+      for (const site of sites) {
+        if (!(await listAssignees(clientId, site.id)).some((person) => person.id === body.assigneeUserId)) {
+          res.status(400).json({ error: "The person assigned can't access every site; choose someone who can, or assign each site's check separately" });
+          return;
+        }
+      }
+    }
+    const assignee = await resolveAssigneeChange(clientId, applyToAllSites ? null : body.siteId ?? null, { assigneeUserId: body.assigneeUserId });
+    if (!assignee.ok) {
+      res.status(400).json({ error: assignee.error });
+      return;
+    }
+    body.assignedTo = assignee.name ?? null;
+  }
+
+  // A check created as already completed is a completion like any other.
+  const createCompletion = body.status === "completed" ? completionFields(body.frequencyMonths, new Date()).fields : {};
+
   // "All Sites" mode: create one independent compliance check per site so each
   // can have its own certificate, due date, contractor etc.
   if (applyToAllSites) {
@@ -217,7 +272,7 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
     const { siteId: _ignored, ...rest } = body;
     const inserted = await db
       .insert(complianceItemsTable)
-      .values(sites.map(s => ({ ...rest, siteId: s.id, clientId, updatedAt: new Date() })))
+      .values(sites.map(s => ({ ...rest, ...createCompletion, siteId: s.id, clientId, updatedAt: new Date() })))
       .returning();
 
     const joined = await Promise.all(inserted.map(i => fetchJoinedItem(i.id)));
@@ -233,7 +288,7 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
 
   const [item] = await db
     .insert(complianceItemsTable)
-    .values({ ...body, clientId, updatedAt: new Date() })
+    .values({ ...body, ...createCompletion, clientId, updatedAt: new Date() })
     .returning();
 
   const joined = await fetchJoinedItem(item.id);
@@ -261,23 +316,34 @@ router.get("/compliance-items/:id", requireAuth, async (req, res) => {
   const deptId = getActiveDepartmentId(req);
   if (deptId !== null && joined.item.siteId != null) {
     const [itemSite] = await db
-      .select({ departmentId: sitesTable.departmentId })
+      .select({ id: sitesTable.id, departmentId: sitesTable.departmentId })
       .from(sitesTable)
       .where(eq(sitesTable.id, joined.item.siteId))
       .limit(1);
-    if (itemSite && itemSite.departmentId !== null && itemSite.departmentId !== deptId) {
+    if (itemSite && !(await siteVisibleToDepartment(itemSite, deptId))) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }
   }
-  res.json(buildItemResponse(joined.item, joined.site, joined.category, joined.contractor));
+  res.json(buildItemResponse(joined.item, joined.site, joined.category, joined.contractor,
+    await itemActionState(joined.item.clientId, joined.item.id)));
 });
 
-router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req, res) => {
+router.put("/compliance-items/:id", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
   const { id } = UpdateComplianceItemParams.parse({ id: Number(req.params.id) });
+  // Read the date done before the generic date coercion turns it into a Date.
+  const completedDay = CompletedDay.safeParse(req.body?.completedAt);
+  if (!completedDay.success) {
+    res.status(400).json({ error: "completedAt must be a date (YYYY-MM-DD)" });
+    return;
+  }
   const body = UpdateComplianceItemBody.parse(coerceDates(req.body, [...DATE_FIELDS]));
   const user = req.currentUser!;
 
+  if (body.frequencyMonths != null && !Number.isInteger(body.frequencyMonths)) {
+    res.status(400).json({ error: "Repeat interval must be a whole number of months" });
+    return;
+  }
   if (body.title !== undefined) {
     const titleCheck = filterName(body.title);
     if (!titleCheck.ok) {
@@ -322,12 +388,56 @@ router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req,
   }
 
   const updateData: Record<string, unknown> = { ...body, updatedAt: new Date() };
-  if (body.status === "completed") updateData.completedAt = new Date();
-  else if (body.status) updateData.completedAt = null;
+  if ("assigneeUserId" in body || "assignedTo" in body || "siteId" in body) {
+    const assignee = await resolveAssigneeChange(existing[0].clientId,
+      "siteId" in body ? body.siteId ?? null : existing[0].siteId, {
+        assigneeUserId: body.assigneeUserId,
+        name: body.assignedTo,
+      }, { assigneeUserId: existing[0].assigneeUserId, name: existing[0].assignedTo, siteId: existing[0].siteId });
+    if (!assignee.ok) {
+      res.status(400).json({ error: assignee.error });
+      return;
+    }
+    delete updateData.assigneeUserId;
+    delete updateData.assignedTo;
+    if (assignee.assigneeUserId !== undefined) updateData.assigneeUserId = assignee.assigneeUserId;
+    if (assignee.name !== undefined) updateData.assignedTo = assignee.name;
+  }
+  let recurrence: { completedAt: Date; nextDueDate: Date } | null = null;
+  if (body.status === "completed") {
+    // An explicit date done (YYYY-MM-DD, never in the future) wins. Otherwise
+    // setting an interval on an already-completed check counts from its
+    // recorded completion rather than from today.
+    let completedAt = existing[0].status === "completed" && existing[0].completedAt
+      ? new Date(existing[0].completedAt) : new Date();
+    if (completedDay.data) {
+      const today = await getAccountToday(existing[0].clientId);
+      if (completedDay.data > today) {
+        res.status(400).json({ error: "The date done cannot be in the future", code: "CHECK_DATE_IN_FUTURE", today });
+        return;
+      }
+      completedAt = completionDateFromDay(completedDay.data);
+    }
+    const frequency = body.frequencyMonths !== undefined ? body.frequencyMonths : existing[0].frequencyMonths;
+    const completion = completionFields(frequency, completedAt);
+    Object.assign(updateData, completion.fields);
+    if (completion.recurring) recurrence = { completedAt, nextDueDate: completion.fields.dueDate };
+    // A new completion from the edit form says nothing about who did it.
+    if (String(completion.fields.completedAt) !== String(existing[0].completedAt)) updateData.completedInHouseBy = null;
+  }
+  // The edit form always re-sends the status. Only reopening a completed
+  // one-off check clears its completion; a repeating check keeps its "last
+  // completed" date.
+  else if (body.status && existing[0].status === "completed"
+    && !((body.frequencyMonths !== undefined ? body.frequencyMonths : existing[0].frequencyMonths) ?? 0)) {
+    updateData.completedAt = null;
+    updateData.completedInHouseBy = null;
+  }
   // A reminder delivered for the old due date does not cover the new one, so
   // the scheduler may remind again for the new cycle.
+  const nextDueDate = updateData.dueDate as Date | null | undefined;
   const previousCycle = existing[0].dueDate ? reminderCycleOf(new Date(existing[0].dueDate)) : null;
-  const nextCycle = body.dueDate === undefined ? previousCycle : body.dueDate ? reminderCycleOf(new Date(body.dueDate)) : null;
+  const nextCycle = nextDueDate === undefined ? previousCycle : nextDueDate ? reminderCycleOf(new Date(nextDueDate)) : null;
   if (nextCycle !== previousCycle) updateData.notificationSentAt = null;
 
   // The item row is updated (and locked) first, then obsolete pending
@@ -341,11 +451,18 @@ router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req,
   await appendAuditEvent(req, {
     clientId: existing[0].clientId, entityType: "compliance_item", entityId: id,
     action: "updated", before: existing[0], after: joined!.item,
+    ...(recurrence ? { metadata: { recurringCompletion: recurrence } } : {}),
   });
-  res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor));
+  // Completing a task a track also keeps (emergency lighting, fire alarm and
+  // extinguisher servicing, cleaning the water tanks) records it in that track.
+  if (recurrence || (body.status === "completed" && String(joined!.item.completedAt) !== String(existing[0].completedAt))) {
+    await recordTrackCheckFromTask(req, joined!.item, joined!.item.completedAt);
+  }
+  res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor,
+    await itemActionState(existing[0].clientId, id)));
 });
 
-router.delete("/compliance-items/:id", requireAuth, requireClientAdmin, async (req, res) => {
+router.delete("/compliance-items/:id", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
   const { id } = DeleteComplianceItemParams.parse({ id: Number(req.params.id) });
   const user = req.currentUser!;
 
@@ -375,6 +492,29 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
   const { id } = UpdateComplianceItemStatusParams.parse({ id: Number(req.params.id) });
   const { status } = UpdateComplianceItemStatusBody.parse(req.body);
   const user = req.currentUser!;
+  // The date the check was actually done (YYYY-MM-DD). Optional for older
+  // clients, which complete "today".
+  const completedDay = CompletedDay.safeParse(req.body?.completedAt);
+  if (!completedDay.success) {
+    res.status(400).json({ error: "completedAt must be a date (YYYY-MM-DD)" });
+    return;
+  }
+  if (completedDay.data && status !== "completed") {
+    res.status(400).json({ error: "completedAt can only be sent when completing a check" });
+    return;
+  }
+  // Done in house by a competent person (e.g. the annual emergency lighting
+  // test): the name is kept with the completion, and no contractor
+  // certificate is then due for it (lib/certificateOutcomes.ts).
+  const inHouseBy = InHouseBy.safeParse(req.body?.completedInHouseBy);
+  if (!inHouseBy.success) {
+    res.status(400).json({ error: "Enter the name of the competent person who did the check" });
+    return;
+  }
+  if (inHouseBy.data && status !== "completed") {
+    res.status(400).json({ error: "completedInHouseBy can only be sent when completing a check" });
+    return;
+  }
 
   if (user.role === "client_viewer") {
     res.status(403).json({ error: "Forbidden" });
@@ -391,20 +531,44 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
   const deptId = getActiveDepartmentId(req);
   if (deptId !== null && existing[0].siteId != null) {
     const [itemSite] = await db
-      .select({ departmentId: sitesTable.departmentId })
+      .select({ id: sitesTable.id, departmentId: sitesTable.departmentId })
       .from(sitesTable)
       .where(eq(sitesTable.id, existing[0].siteId))
       .limit(1);
-    if (itemSite && itemSite.departmentId !== null && itemSite.departmentId !== deptId) {
+    if (itemSite && !(await siteVisibleToDepartment(itemSite, deptId))) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }
   }
 
+  let completedAt = new Date();
+  if (status === "completed" && completedDay.data) {
+    // No future completion dates, judged on the account's own calendar.
+    const today = await getAccountToday(existing[0].clientId);
+    if (completedDay.data > today) {
+      res.status(400).json({ error: "The date done cannot be in the future", code: "CHECK_DATE_IN_FUTURE", today });
+      return;
+    }
+    completedAt = completionDateFromDay(completedDay.data);
+  }
+  const completion = status === "completed" ? completionFields(existing[0].frequencyMonths, completedAt) : null;
+  const statusFields = completion
+    ? {
+        ...completion.fields,
+        completedInHouseBy: inHouseBy.data ?? null,
+        // The next due date starts a new reminder cycle.
+        ...(completion.recurring ? { notificationSentAt: null } : {}),
+      }
+    : {
+        status,
+        // Reopening a completed one-off check clears its completion; a
+        // repeating check keeps its "last completed" date.
+        ...(existing[0].status === "completed" && !existing[0].frequencyMonths ? { completedAt: null, completedInHouseBy: null } : {}),
+      };
   await db.transaction(async (tx) => {
     await tx
       .update(complianceItemsTable)
-      .set({ status, updatedAt: new Date(), completedAt: status === "completed" ? new Date() : null })
+      .set({ ...statusFields, updatedAt: new Date() })
       .where(eq(complianceItemsTable.id, id));
     await supersedeStaleReminderCycles(tx, existing[0].clientId, id);
   });
@@ -413,8 +577,13 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
   await appendAuditEvent(req, {
     clientId: existing[0].clientId, entityType: "compliance_item", entityId: id,
     action: "status_changed", before: existing[0], after: joined!.item,
+    ...(completion?.recurring
+      ? { metadata: { recurringCompletion: { completedAt: completion.fields.completedAt, nextDueDate: completion.fields.dueDate } } }
+      : {}),
   });
-  res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor));
+  if (completion) await recordTrackCheckFromTask(req, joined!.item, completion.fields.completedAt);
+  res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor,
+    await itemActionState(existing[0].clientId, id)));
 });
 
 router.get("/dashboard/stats", requireAuth, async (req, res) => {
@@ -440,7 +609,7 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
       .from(sitesTable)
       .where(and(
         eq(sitesTable.clientId, clientId),
-        or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+        sitesTableVisibleTo(deptId),
       ));
     itemConditions.push(
       or(isNull(complianceItemsTable.siteId), inArray(complianceItemsTable.siteId, allowedSites)) as any,
@@ -454,7 +623,7 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
   // Also scope the site breakdown to the user's accessible sites
   const siteConditions: ReturnType<typeof eq>[] = [eq(sitesTable.clientId, clientId)];
   if (deptId !== null) {
-    siteConditions.push(or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)) as any);
+    siteConditions.push(sitesTableVisibleTo(deptId) as any);
   }
 
   const [items, contractors, certificates, sites] = await Promise.all([
@@ -476,6 +645,10 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
       ),
     db.select({ id: sitesTable.id, name: sitesTable.name }).from(sitesTable).where(and(...siteConditions)),
   ]);
+
+  const actionStates = await itemActionStates(clientId, items.map((i) => i.id));
+  const needsAction = (i: typeof items[number]) => actionStates.get(i.id)?.needsAction === true;
+  const actionRequired = items.filter(needsAction).length;
 
   const total = items.length;
   const pending = items.filter(i => i.status === "pending").length;
@@ -504,7 +677,10 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
   // Compliance rate: a check counts as "in date" when it is completed, has no
   // due date, or its due date is more than 7 days away. Anything overdue or
   // due within the next 7 days is treated as out of compliance.
+  // A check whose newest certificate is unsatisfactory or has open remedial
+  // defects is out of compliance whatever its due date.
   const isInDate = (i: typeof items[number]) => {
+    if (needsAction(i)) return false;
     if (i.status === "completed") return true;
     if (!i.dueDate) return true;
     return new Date(i.dueDate) > sevenDaysFromNow;
@@ -540,7 +716,7 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
 
   res.json({
     total, pending, inProgress, completed, overdue, criticalItems, dueSoon, completionRate,
-    complianceRate, complianceRateBySite,
+    complianceRate, complianceRateBySite, actionRequired,
     contractorsCount, certificatesExpiringSoon, certificatesExpired,
   });
 });

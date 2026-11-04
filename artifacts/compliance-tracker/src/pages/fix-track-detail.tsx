@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, type ChangeEvent } from "react";
 import { useRoute, useLocation } from "wouter";
 import { AppLayout } from "@/components/layout";
-import { useAuth } from "@/context/auth-context";
+import { useAuth, useCanAdmin, useIsMaintenanceManager } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,10 +9,16 @@ import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import {
   ArrowLeft, CheckCircle2, AlertTriangle, Loader2, Clock,
-  MapPin, User, FileText, Send, Camera, Wrench, ImagePlus
+  MapPin, User, FileText, Send, Camera, Wrench, ImagePlus, Trash2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
+import { AssignContractorDialog } from "@/components/assign-contractor-dialog";
+import { MediaGallery } from "@/components/media-gallery";
+import { MEDIA_INPUT_ACCEPT, mediaContentType, mediaFileProblem, privateObjectUrl, putFileWithProgress } from "@/lib/media-upload";
+import { useFileDrop } from "@/hooks/use-file-drop";
+import { useCameraCapture } from "@/components/camera-capture";
 
 // ── Types & Constants ─────────────────────────────────────────────────────────
 
@@ -47,6 +53,10 @@ interface Issue {
   emailRequestMode?: string | null;
   emailRequestStatus?: string | null;
   emailRequestedAt?: string | null;
+  emailSentAt?: string | null;
+  contractorVisitDate?: string | null;
+  contractorCompletedAt?: string | null;
+  quote?: { id: number; status: string; pricePence: number; notes: string | null; submittedAt: string | null } | null;
   mediaUrls: string[];
   siteId?: number | null;
   siteName?: string | null;
@@ -63,56 +73,6 @@ type MediaUploadProgress = {
   percent: number;
   stage: "preparing" | "uploading" | "saving";
 };
-
-const API_BASE = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
-const MEDIA_TYPE_BY_EXTENSION: Record<string, string> = {
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  png: "image/png",
-  webp: "image/webp",
-  heic: "image/heic",
-  heif: "image/heif",
-  avif: "image/avif",
-  mp4: "video/mp4",
-  mov: "video/quicktime",
-  webm: "video/webm",
-};
-
-function mediaContentType(file: File): string {
-  if (file.type) return file.type.toLowerCase();
-  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-  return MEDIA_TYPE_BY_EXTENSION[extension] ?? "";
-}
-
-function privateObjectUrl(objectPath: string): string {
-  const normalizedPath = objectPath.startsWith("/objects/")
-    ? objectPath
-    : `/objects/${objectPath.replace(/^\/+/, "")}`;
-  return `${API_BASE}/storage${normalizedPath}`;
-}
-
-function putFileWithProgress(
-  uploadUrl: string,
-  file: File,
-  contentType: string,
-  onProgress: (percent: number) => void,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const request = new XMLHttpRequest();
-    request.open("PUT", uploadUrl);
-    request.setRequestHeader("Content-Type", contentType);
-    request.upload.addEventListener("progress", (event) => {
-      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
-    });
-    request.addEventListener("load", () => {
-      if (request.status >= 200 && request.status < 300) resolve();
-      else reject(new Error(`Storage upload failed (${request.status}).`));
-    });
-    request.addEventListener("error", () => reject(new Error("Network error while uploading the file.")));
-    request.addEventListener("abort", () => reject(new Error("Upload was cancelled.")));
-    request.send(file);
-  });
-}
 
 const ISSUE_TYPES: Record<string, { label: string; color: string }> = {
   electrical:    { label: "Electrical",    color: "bg-yellow-100 text-yellow-800 border-yellow-200" },
@@ -218,72 +178,70 @@ function StatusTimeline({ issue }: { issue: Issue }) {
 
 // ── Media Viewer Component ────────────────────────────────────────────────────
 
-function MediaGallery({ urls }: { urls: string[] }) {
-  const [viewerOpen, setViewerOpen] = useState(false);
-  const [initialIndex, setInitialIndex] = useState(0);
+// ── Contractor job ────────────────────────────────────────────────────────────
 
-  if (!urls || urls.length === 0) return null;
+/** Who has the job outside the business: the contractor, their visit date and whether they finished. */
+function ContractorJobCard({ issue, canAssign, onAssign }: { issue: Issue; canAssign: boolean; onAssign: () => void }) {
+  const day = (value: string) => format(new Date(value), "d MMM yyyy");
+  const jobSent = issue.emailRequestStatus === "sent" && issue.emailRequestMode !== "quote";
+  const quoteSent = issue.emailRequestStatus === "sent" && issue.emailRequestMode === "quote";
+  const waitingApproval = issue.emailRequestStatus === "pending" || issue.emailRequestStatus === "approved";
+  if (!jobSent && !quoteSent && !waitingApproval && !canAssign) return null;
 
   return (
-    <>
-      <div className="flex gap-3 overflow-x-auto pb-2 snap-x">
-        {urls.map((url, idx) => {
-          const isVideo = /\.(mp4|mov|webm|avi|m4v|3gp|ogv|mkv|mpeg|mpg|ts)$/i.test(url);
-          const src = privateObjectUrl(url);
-          
-          return (
-            <button
-              key={url}
-              type="button"
-              onClick={() => { setInitialIndex(idx); setViewerOpen(true); }}
-              aria-label={`Open issue media ${idx + 1}`}
-              data-testid={`button-open-issue-media-${idx}`}
-              className="relative w-28 h-28 flex-shrink-0 rounded-xl overflow-hidden border border-border bg-muted/30 snap-start active:scale-95 transition-transform"
-            >
-              {isVideo ? (
-                <div className="w-full h-full bg-black/10 flex items-center justify-center">
-                  <div className="w-8 h-8 rounded-full bg-background/80 flex items-center justify-center backdrop-blur-sm">
-                    <div className="w-0 h-0 border-t-4 border-t-transparent border-l-6 border-l-foreground border-b-4 border-b-transparent ml-1" />
-                  </div>
-                </div>
-              ) : (
-                <img src={src} alt="Issue media" className="w-full h-full object-cover" />
-              )}
-            </button>
-          );
-        })}
+    <div className="bg-card border rounded-2xl p-5 shadow-sm space-y-3" data-testid="card-contractor-job">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-bold flex items-center gap-2">
+          <Wrench className="w-4 h-4 text-muted-foreground" /> Contractor
+        </h3>
+        {canAssign && !waitingApproval && issue.emailRequestStatus !== "sending" && (
+          <Button size="sm" variant={jobSent ? "outline" : "default"} onClick={onAssign} className="gap-1.5" data-testid="button-open-assign-contractor">
+            <Send className="w-3.5 h-3.5" /> {jobSent ? "Assign a different contractor" : "Assign a contractor"}
+          </Button>
+        )}
       </div>
-
-      {viewerOpen && (
-        <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex flex-col animate-in fade-in duration-200">
-          <div className="p-4 flex justify-between items-center bg-background/50 border-b absolute top-0 left-0 right-0 z-10">
-            <p className="font-medium text-sm">Media Viewer</p>
-            <Button variant="ghost" size="sm" onClick={() => setViewerOpen(false)}>Close</Button>
-          </div>
-          
-          <div className="flex-1 flex overflow-x-auto snap-x snap-mandatory pt-16">
-            {urls.map((url, idx) => {
-              const isVideo = /\.(mp4|mov|webm|avi|m4v|3gp|ogv|mkv|mpeg|mpg|ts)$/i.test(url);
-              const src = privateObjectUrl(url);
-              
-              return (
-                <div 
-                  key={url} 
-                  className="w-full flex-shrink-0 flex items-center justify-center p-4 snap-center"
-                  ref={el => { if (el && idx === initialIndex) el.scrollIntoView(); }}
-                >
-                  {isVideo ? (
-                    <video src={src} controls className="max-w-full max-h-full rounded-lg" autoPlay={idx === initialIndex} />
-                  ) : (
-                    <img src={src} alt="Full view" className="max-w-full max-h-full object-contain rounded-lg shadow-xl" />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+      {jobSent ? (
+        <ul className="text-sm space-y-1.5">
+          <li>
+            Assigned to <span className="font-medium">{issue.contractorName ?? "a contractor"}</span>
+            {issue.emailSentAt && <span className="text-muted-foreground"> · emailed {day(issue.emailSentAt)}</span>}
+          </li>
+          <li className="flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+            {issue.contractorVisitDate
+              ? <>Visit date: <span className="font-medium">{day(issue.contractorVisitDate)}</span></>
+              : <span className="text-muted-foreground">Waiting for the contractor to pick a visit date</span>}
+          </li>
+          {issue.contractorCompletedAt && (
+            <li className="flex items-center gap-1.5 text-emerald-700">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Contractor marked it done on {day(issue.contractorCompletedAt)}
+            </li>
+          )}
+        </ul>
+      ) : quoteSent ? (
+        <ul className="text-sm space-y-1.5">
+          <li>
+            Quote asked of <span className="font-medium">{issue.contractorName ?? "a contractor"}</span>
+            {issue.emailSentAt && <span className="text-muted-foreground"> · emailed {day(issue.emailSentAt)}</span>}
+          </li>
+          <li className="text-muted-foreground">
+            {issue.quote?.pricePence != null
+              ? <>Quote received: <span className="font-medium text-foreground">£{(issue.quote.pricePence / 100).toFixed(2)}</span>. Accept or decline it on the FixTrack list.</>
+              : "Waiting for their price. Assign the job once you are happy with it."}
+          </li>
+        </ul>
+      ) : waitingApproval ? (
+        <p className="text-sm text-muted-foreground">
+          The email to {issue.contractorName ?? "the contractor"} is waiting for a manager in Contractor Approvals.
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {issue.contractorName
+            ? `${issue.contractorName} is chosen for this job but hasn't been sent it yet.`
+            : "No contractor has this job yet."} Assign one and they get it by email, with a link to pick their visit date.
+        </p>
       )}
-    </>
+    </div>
   );
 }
 
@@ -295,6 +253,13 @@ export default function FixTrackDetailPage() {
   const clientApiFetch = useActiveClientApi();
   const hasFixtrack = hasService("fixtrack");
   const canEdit = user?.role !== "client_viewer";
+  // Owners and admins can delete photos and videos once an issue is finished.
+  const canDeleteMedia = user?.role === "consultant" || user?.role === "client_admin";
+  // Owners, Managers and Maintenance managers give jobs to contractors.
+  const isOwner = useCanAdmin();
+  const isMaintenance = useIsMaintenanceManager();
+  const canAssignContractor = (isOwner || isMaintenance) && canEdit;
+  const [assignOpen, setAssignOpen] = useState(false);
   const { toast } = useToast();
   const [, setLocation] = useLocation();
 
@@ -313,6 +278,28 @@ export default function FixTrackDetailPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
+  const mediaDrop = useFileDrop((files) => { void uploadIssueMedia(files); }, canEdit && !mediaUploading);
+  const camera = useCameraCapture((files) => { void uploadIssueMedia(files); }, { video: true, fileInput: () => cameraInputRef.current });
+
+  async function deleteMedia(objectPath: string) {
+    if (!issue) return;
+    const issueId = issue.id;
+    try {
+      const res = await clientApiFetch(`/fix-track/issues/${issueId}/media/delete`, {
+        method: "POST",
+        body: JSON.stringify({ objectPath }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error ?? "The file could not be deleted.");
+      setIssue((current) => current?.id === issueId && Array.isArray(body?.mediaUrls)
+        ? { ...current, mediaUrls: body.mediaUrls }
+        : current);
+      toast({ title: "Deleted", description: "The file is gone and the issue history records it." });
+      void loadIssue();
+    } catch (err) {
+      toast({ title: "Couldn't delete the file", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    }
+  }
 
   async function loadIssue() {
     try {
@@ -341,15 +328,9 @@ export default function FixTrackDetailPage() {
       for (const [index, file] of files.entries()) {
         try {
           const contentType = mediaContentType(file);
-          if (!Object.values(MEDIA_TYPE_BY_EXTENSION).includes(contentType)) {
-            throw new Error("Use a JPEG, PNG, WebP, MP4, MOV, or WebM file.");
-          }
-          if (contentType.startsWith("image/") && file.size > 10 * 1024 * 1024) {
-            throw new Error("Photos must be 10 MB or smaller.");
-          }
-          if (contentType.startsWith("video/") && file.size > 250 * 1024 * 1024) {
-            throw new Error("Videos must be 250 MB or smaller.");
-          }
+          const problem = mediaFileProblem(file);
+          if (problem) throw new Error(problem);
+          assertWithinUploadLimit(file);
 
           setMediaUploadProgress({
             fileName: file.name,
@@ -518,7 +499,7 @@ export default function FixTrackDetailPage() {
             <AlertTriangle className="w-8 h-8 text-muted-foreground" />
           </div>
           <div>
-            <h2 className="text-lg font-medium">Issue Not Found</h2>
+            <h2 className="text-lg font-bold">Issue Not Found</h2>
             <p className="text-muted-foreground text-sm">The maintenance issue could not be loaded or doesn't exist.</p>
           </div>
           <Button variant="outline" onClick={() => setLocation("/fix-track")}>
@@ -565,7 +546,7 @@ export default function FixTrackDetailPage() {
               <span className={cn("text-xs px-2.5 py-1 rounded-md border font-medium shadow-sm", priorityMeta.color)}>{priorityMeta.label}</span>
             </div>
 
-            <h1 className="text-2xl sm:text-3xl font-display font-medium text-foreground tracking-tight leading-tight flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-display font-bold text-foreground tracking-tight leading-tight flex items-center gap-3">
               <span>{issue.title}</span>
               <span className="text-lg text-muted-foreground font-sans">#{issue.id}</span>
             </h1>
@@ -604,11 +585,18 @@ export default function FixTrackDetailPage() {
           </div>
         </div>
 
+        <ContractorJobCard
+          issue={issue}
+          canAssign={canAssignContractor && (issue.status === "reported" || issue.status === "in_progress")}
+          onAssign={() => setAssignOpen(true)}
+        />
+        <AssignContractorDialog issue={issue} open={assignOpen} onOpenChange={setAssignOpen} onAssigned={loadIssue} />
+
         {/* Description & Media */}
         <div className="space-y-6">
           {issue.description && (
             <div className="space-y-3">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
+              <h3 className="text-sm font-bold flex items-center gap-2">
                 <FileText className="w-4 h-4 text-muted-foreground" /> Details
               </h3>
               <div className="bg-card border rounded-xl p-5 text-sm leading-relaxed whitespace-pre-wrap shadow-sm">
@@ -619,16 +607,31 @@ export default function FixTrackDetailPage() {
 
           {((issue.mediaUrls && issue.mediaUrls.length > 0) || issue.completionDocumentPath || canEdit) && (
             <div className="space-y-3">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
+              <h3 className="text-sm font-bold flex items-center gap-2">
                 <Camera className="w-4 h-4 text-muted-foreground" /> Attachments
               </h3>
-              {issue.mediaUrls && issue.mediaUrls.length > 0 && <MediaGallery urls={issue.mediaUrls} />}
+              {issue.mediaUrls && issue.mediaUrls.length > 0 && (
+                <MediaGallery
+                  urls={issue.mediaUrls}
+                  clientId={activeClientId}
+                  onDelete={canDeleteMedia && (issue.status === "resolved" || issue.status === "closed") ? deleteMedia : undefined}
+                />
+              )}
+              {canDeleteMedia && issue.mediaUrls && issue.mediaUrls.length > 0 && issue.status !== "resolved" && issue.status !== "closed" && (
+                <p className="text-xs text-muted-foreground">Photos and videos can be deleted to free up storage once the issue is resolved.</p>
+              )}
               {canEdit && (
-                <div className="space-y-3">
+                <div
+                  {...mediaDrop.dropZoneProps}
+                  className={cn("space-y-3 rounded-lg border border-dashed p-3 transition-colors", mediaDrop.isDragging ? "border-primary bg-primary/5" : "border-border")}
+                  data-testid="dropzone-issue-media"
+                >
+                  <p className="hidden text-xs text-muted-foreground sm:block">Drag photos or videos here, or use the buttons.</p>
+                  {camera.dialog}
                   <input
                     ref={cameraInputRef}
                     type="file"
-                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,video/mp4,video/quicktime,video/webm"
+                    accept={MEDIA_INPUT_ACCEPT}
                     capture="environment"
                     className="hidden"
                     onChange={handleMediaSelection}
@@ -637,7 +640,7 @@ export default function FixTrackDetailPage() {
                   <input
                     ref={mediaInputRef}
                     type="file"
-                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,video/mp4,video/quicktime,video/webm"
+                    accept={MEDIA_INPUT_ACCEPT}
                     multiple
                     className="hidden"
                     onChange={handleMediaSelection}
@@ -649,7 +652,7 @@ export default function FixTrackDetailPage() {
                       variant="outline"
                       size="sm"
                       disabled={mediaUploading}
-                      onClick={() => cameraInputRef.current?.click()}
+                      onClick={camera.open}
                       data-testid="button-capture-issue-media"
                     >
                       <Camera className="mr-2 h-4 w-4" />
@@ -699,7 +702,7 @@ export default function FixTrackDetailPage() {
               )}
               {issue.completionDocumentPath && (
                 <a
-                  href={privateObjectUrl(issue.completionDocumentPath)}
+                  href={privateObjectUrl(issue.completionDocumentPath, activeClientId)}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-2 mt-2 px-3 py-2 text-sm text-blue-700 bg-blue-50 border border-blue-100 rounded-lg hover:underline transition-all hover:bg-blue-100"
@@ -714,7 +717,7 @@ export default function FixTrackDetailPage() {
 
         {/* Activity & Notes */}
         <div className="space-y-4 pt-6">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
+          <h3 className="text-sm font-bold flex items-center gap-2">
             <Clock className="w-4 h-4 text-muted-foreground" /> Activity & Notes
           </h3>
           

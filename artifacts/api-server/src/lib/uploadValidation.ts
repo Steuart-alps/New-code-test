@@ -10,7 +10,53 @@ export class ObjectContentError extends Error {
 }
 
 export const MAX_RESTRICTED_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+const DEFAULT_MAX_UPLOAD_MB = 250;
+/**
+ * Largest single file any upload may store, videos included: MAX_UPLOAD_MB
+ * (whole MB, 1–5120), default 250 MB. Photos keep their own 10 MB limit.
+ */
+export function maxUploadBytes(): number {
+  const raw = process.env.MAX_UPLOAD_MB?.trim();
+  const mb = raw ? Number(raw) : DEFAULT_MAX_UPLOAD_MB;
+  return (Number.isInteger(mb) && mb >= 1 && mb <= 5120 ? mb : DEFAULT_MAX_UPLOAD_MB) * 1024 * 1024;
+}
+
+export class UploadTooLargeError extends ObjectContentError {
+  constructor(limitBytes = maxUploadBytes()) {
+    super(`Files can be up to ${Math.round(limitBytes / (1024 * 1024))} MB. Trim or compress it (for a video, record a shorter clip or at a lower resolution) and try again.`);
+    this.name = "UploadTooLargeError";
+    Object.setPrototypeOf(this, UploadTooLargeError.prototype);
+  }
+}
 const MAX_IMAGE_DIMENSION = 12_000;
+// ~50 megapixels: well above any phone camera (48 MP), but a full decode stays
+// around 200 MB, which a 512 MB instance can afford one at a time.
+export const MAX_IMAGE_PIXELS = 50_000_000;
+export const HEVC_HEIC_UNSUPPORTED_MESSAGE =
+  "HEIC photos can't be read. Save the photo as JPEG and upload it again.";
+
+// One libvips worker thread, and at most one image decode / two PDF workers at
+// a time, so concurrent uploads queue instead of exhausting memory.
+sharp.concurrency(1);
+
+function createSemaphore(limit: number) {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  return async function withPermit<T>(task: () => Promise<T>): Promise<T> {
+    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+    else active++;
+    try {
+      return await task();
+    } finally {
+      const next = waiting.shift();
+      if (next) next();
+      else active--;
+    }
+  };
+}
+const withImagePermit = createSemaphore(1);
+const withPdfPermit = createSemaphore(2);
 
 export type AllowedUploadType =
   | "application/pdf"
@@ -104,39 +150,47 @@ export async function validateUploadContent(
   if (!type || !allowed.has(type)) throw new ObjectContentError();
   try {
     if (type === "application/pdf") {
-      await validatePdf(bytes);
+      await withPdfPermit(() => validatePdf(bytes));
       return { contentType: type, sourceContentType: type };
     }
     if (type === "image/png") validatePngChunkChecksums(bytes);
-    const image = sharp(bytes, {
-      // libvips reports checksum/decompression damage as warnings for some PNG
-      // chunks. Treat warnings as fatal so a successful re-encode cannot mask
-      // corruption in attacker-supplied input.
-      failOn: "warning",
-      limitInputPixels: MAX_IMAGE_DIMENSION * MAX_IMAGE_DIMENSION,
-      pages: 1,
-      sequentialRead: true,
+    return await withImagePermit(async () => {
+      const image = sharp(bytes, {
+        // libvips reports checksum/decompression damage as warnings for some PNG
+        // chunks. Treat warnings as fatal so a successful re-encode cannot mask
+        // corruption in attacker-supplied input.
+        failOn: "warning",
+        limitInputPixels: MAX_IMAGE_PIXELS,
+        pages: 1,
+        sequentialRead: true,
+      });
+      const metadata = await image.metadata();
+      // The image library decodes AV1-coded HEIF/AVIF but has no HEVC decoder,
+      // which is what iPhone HEIC photos use. Say so instead of "invalid".
+      if (metadata.format === "heif" && metadata.compression === "hevc") {
+        throw new ObjectContentError(HEVC_HEIC_UNSUPPORTED_MESSAGE);
+      }
+      const isHeifInput = type === "image/heic" || type === "image/heif" || type === "image/avif";
+      const expectedFormat = isHeifInput
+        ? "heif"
+        : type === "image/jpeg" ? "jpeg" : type === "image/png" ? "png" : "webp";
+      if (metadata.format !== expectedFormat
+        || metadata.pages && metadata.pages !== 1
+        || !metadata.width || !metadata.height
+        || metadata.width > MAX_IMAGE_DIMENSION || metadata.height > MAX_IMAGE_DIMENSION
+        || metadata.width * metadata.height > MAX_IMAGE_PIXELS) {
+        throw new ObjectContentError("Image format, dimensions, or frame count is invalid");
+      }
+      // Full decode is forced by re-encoding, unlike metadata-only inspection.
+      const contentType: AllowedUploadType = isHeifInput ? "image/jpeg" : type;
+      const normalizedBytes = contentType === "image/jpeg"
+        ? await image.rotate().jpeg({ quality: 90, chromaSubsampling: "4:4:4" }).toBuffer()
+        : contentType === "image/png"
+          ? await image.rotate().png({ compressionLevel: 9 }).toBuffer()
+          : await image.rotate().webp({ quality: 90 }).toBuffer();
+      if (normalizedBytes.length > MAX_RESTRICTED_UPLOAD_BYTES) throw new ObjectContentError("Normalized image is too large");
+      return { contentType, sourceContentType: type, normalizedBytes };
     });
-    const metadata = await image.metadata();
-    const isHeifInput = type === "image/heic" || type === "image/heif" || type === "image/avif";
-    const expectedFormat = isHeifInput
-      ? "heif"
-      : type === "image/jpeg" ? "jpeg" : type === "image/png" ? "png" : "webp";
-    if (metadata.format !== expectedFormat
-      || metadata.pages && metadata.pages !== 1
-      || !metadata.width || !metadata.height
-      || metadata.width > MAX_IMAGE_DIMENSION || metadata.height > MAX_IMAGE_DIMENSION) {
-      throw new ObjectContentError("Image format, dimensions, or frame count is invalid");
-    }
-    // Full decode is forced by re-encoding, unlike metadata-only inspection.
-    const contentType: AllowedUploadType = isHeifInput ? "image/jpeg" : type;
-    const normalizedBytes = contentType === "image/jpeg"
-      ? await image.rotate().jpeg({ quality: 90, chromaSubsampling: "4:4:4" }).toBuffer()
-      : contentType === "image/png"
-        ? await image.rotate().png({ compressionLevel: 9 }).toBuffer()
-        : await image.rotate().webp({ quality: 90 }).toBuffer();
-    if (normalizedBytes.length > MAX_RESTRICTED_UPLOAD_BYTES) throw new ObjectContentError("Normalized image is too large");
-    return { contentType, sourceContentType: type, normalizedBytes };
   } catch (error) {
     if (error instanceof ObjectContentError) throw error;
     throw new ObjectContentError(type === "application/pdf" ? "PDF structure is invalid" : "Image data is invalid");

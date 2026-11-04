@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, ClipboardCheck, Loader2, Plus, XCircle } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -85,6 +86,8 @@ export function TrackEvidencePanel({ moduleKey, actions, sites, canMutate }: {
   const [requirements, setRequirements] = useState<EvidenceRequirement[]>([]);
   const [profileActionId, setProfileActionId] = useState("");
   const [draft, setDraft] = useState(initialDraft);
+  // New evidence starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
   const [showCreate, setShowCreate] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -181,7 +184,7 @@ export function TrackEvidencePanel({ moduleKey, actions, sites, canMutate }: {
           <CardTitle className="flex items-center gap-2 text-[#162D42]"><ClipboardCheck className="h-5 w-5 text-primary" /> Inspection evidence</CardTitle>
           <CardDescription className="mt-1">Record the observation, supporting reference and authenticated recorder for this track. Evidence cannot be edited or deleted.</CardDescription>
         </div>
-        {canMutate && <Button type="button" size="sm" className="rounded-sm self-start" onClick={() => setShowCreate(value => !value)}><Plus className="mr-1.5 h-4 w-4" />Record evidence</Button>}
+        {canMutate && <Button type="button" size="sm" className="rounded-sm self-start" onClick={() => { if (!showCreate && draft === initialDraft) setDraft({ ...initialDraft, siteId: workingSiteId ? String(workingSiteId) : "" }); setShowCreate(value => !value); }}><Plus className="mr-1.5 h-4 w-4" />Record evidence</Button>}
       </CardHeader>
       <CardContent className="space-y-4">
         {requirements.length > 0 && <div className="rounded-sm border bg-slate-50 p-4">
@@ -211,7 +214,7 @@ export function TrackEvidencePanel({ moduleKey, actions, sites, canMutate }: {
         {showCreate && canMutate && (
           <div className="grid gap-3 rounded-sm border bg-muted/30 p-4 sm:grid-cols-2">
             <div className="space-y-1.5"><Label>Requirement <span className="text-muted-foreground">(optional for general evidence)</span></Label><Select value={draft.requirementKey || "general"} onValueChange={value => { const requirement = requirements.find(item => item.requirementKey === value); setDraft({ ...draft, requirementKey: value === "general" ? "" : value, evidenceType: requirement?.evidenceType ?? draft.evidenceType }); }}><SelectTrigger><SelectValue placeholder="General evidence" /></SelectTrigger><SelectContent><SelectItem value="general">General evidence</SelectItem>{requirements.map(requirement => <SelectItem key={requirement.requirementKey} value={requirement.requirementKey}>{requirement.title}</SelectItem>)}</SelectContent></Select>{draft.requirementKey && !draft.actionId && <p className="text-xs text-amber-700">Select a related action before saving required evidence.</p>}</div>
-            <div className="space-y-1.5"><Label>Evidence type</Label><Select disabled={!!draft.requirementKey} value={draft.evidenceType} onValueChange={value => setDraft({ ...draft, evidenceType: value as EvidenceType })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(["observation", "photo", "document", "certificate", "test_result", "verification", "other"] as EvidenceType[]).map(type => <SelectItem key={type} value={type}>{type.replace("_", " ")}</SelectItem>)}</SelectContent></Select></div>
+            <div className="space-y-1.5"><Label>Evidence type</Label><Select disabled={!!draft.requirementKey} value={draft.evidenceType} onValueChange={value => setDraft({ ...draft, evidenceType: value as EvidenceType })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(["certificate", "document", "observation", "photo", "test_result", "verification", "other"] as EvidenceType[]).map(type => <SelectItem key={type} value={type}>{type.replace("_", " ")}</SelectItem>)}</SelectContent></Select></div>
             <div className="space-y-1.5"><Label>Site <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.siteId || "none"} onValueChange={value => { setDraft({ ...draft, siteId: value === "none" ? "" : value, actionId: "" }); setProfileActionId(""); }}><SelectTrigger><SelectValue placeholder="No site" /></SelectTrigger><SelectContent><SelectItem value="none">No site</SelectItem>{sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}</SelectContent></Select></div>
             <div className="space-y-1.5 sm:col-span-2"><Label>Evidence title</Label><Input value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} placeholder="What was observed or verified?" /></div>
             <div className="space-y-1.5 sm:col-span-2"><Label>Details</Label><Textarea value={draft.details} onChange={event => setDraft({ ...draft, details: event.target.value })} placeholder="Record the condition, measurement, location, decision or action taken." /></div>
@@ -222,7 +225,7 @@ export function TrackEvidencePanel({ moduleKey, actions, sites, canMutate }: {
         )}
         {loading ? <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading evidence…</div> : evidence.length === 0 ? <p className="rounded-sm border border-dashed py-4 text-center text-sm text-muted-foreground">No inspection evidence recorded for this track.</p> : <div className="space-y-3">{evidence.map(item => (
           <article key={item.id} className="rounded-sm border bg-white p-4">
-            <div className="flex flex-wrap items-start justify-between gap-2"><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-medium text-[#162D42]">{item.title}</h3><Badge variant="outline" className="capitalize">{item.evidenceType.replace("_", " ")}</Badge><Badge variant={item.reviewStatus === "verified" ? "default" : item.reviewStatus === "rejected" ? "destructive" : "secondary"}>{item.reviewStatus}</Badge></div><p className="mt-1 text-xs text-muted-foreground">Recorded by {item.recordedByName} · {new Date(item.recordedAt).toLocaleString()}</p></div>{item.actionId && <Badge variant="outline">Action #{item.actionId}</Badge>}</div>
+            <div className="flex flex-wrap items-start justify-between gap-2"><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-bold text-[#162D42]">{item.title}</h3><Badge variant="outline" className="capitalize">{item.evidenceType.replace("_", " ")}</Badge><Badge variant={item.reviewStatus === "verified" ? "default" : item.reviewStatus === "rejected" ? "destructive" : "secondary"}>{item.reviewStatus}</Badge></div><p className="mt-1 text-xs text-muted-foreground">Recorded by {item.recordedByName} · {new Date(item.recordedAt).toLocaleString()}</p></div>{item.actionId && <Badge variant="outline">Action #{item.actionId}</Badge>}</div>
             <p className="mt-3 whitespace-pre-wrap text-sm">{item.details}</p>
             {item.reference && <p className="mt-2 text-xs text-muted-foreground"><strong className="text-foreground">Reference:</strong> {item.reference}</p>}
             {item.reviewedByName && <p className="mt-2 border-t pt-2 text-xs text-muted-foreground">Reviewed by <strong className="text-foreground">{item.reviewedByName}</strong>{item.reviewNotes ? ` — ${item.reviewNotes}` : ""}</p>}

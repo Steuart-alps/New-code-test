@@ -1,7 +1,10 @@
-import { Router, type IRouter, type Request } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { db } from "@workspace/db";
 import { reminderCycleOf, supersedeStaleReminderCycles } from "../lib/reminderCycles";
-import { certificatesTable, contractorsTable, complianceItemsTable } from "@workspace/db/schema";
+import {
+  certificatesTable, certificateDefectsTable, contractorsTable, complianceItemsTable,
+} from "@workspace/db/schema";
 import { eq, and } from "drizzle-orm";
 import {
   ListCertificatesParams,
@@ -10,7 +13,25 @@ import {
   DeleteCertificateParams,
 } from "@workspace/api-zod";
 import { z } from "zod";
-import { requireAuth, requireClientAdmin, canAccessClient } from "../middleware/requireAuth";
+import {
+  requireAuth, requireClientAdmin, canAccessClient, denyViewers, getActiveDepartmentId, getClientId,
+} from "../middleware/requireAuth";
+import { AiUnavailableError, claimAiUse, getAiStatus, settleAiUse } from "../lib/aiAllowance";
+import { ReportReadingError, UnreadableReportError, reportReadingConfigured } from "../lib/reportReading";
+import {
+  CERTIFICATE_READING_MAX_BYTES, CERTIFICATE_READING_MAX_FILES, readCertificate, readCertificates, type CertificateCheckChoice,
+} from "../lib/certificateReading";
+import { certificateCheckChoicesFor } from "../lib/certificateCheckChoices";
+import { appendAuditEvent } from "../lib/audit";
+import { getAccountToday } from "../lib/accountClock";
+import { getEntitledServices, isEntitled } from "../lib/services";
+import { getEffectiveOptionList } from "../lib/formOptions";
+import { addMonthsUtc } from "../lib/complianceCompletion";
+import {
+  ACTION_DEFECT_CODES, CERTIFICATE_OUTCOMES, DEFECT_CODES, createDefect, createRemedialJob, defectsForCertificates,
+  fixTrackIssueTypeFor, outcomeMovesDueDate,
+} from "../lib/certificateOutcomes";
+import { ObjectContentError, ObjectNotFoundError, ObjectOwnershipError, ObjectStorageService } from "../lib/objectStorage";
 
 // Local schemas that coerce ISO date strings (the OpenAPI-generated zod schemas
 // use `z.date()` which does NOT coerce strings, breaking JSON request bodies).
@@ -22,90 +43,470 @@ const CreateCertificateBody = z.object({
   notes: z.string().nullish(),
 });
 
-const UpdateCertificateBody = CreateCertificateBody.partial();
+const UpdateCertificateBody = partialUpdate(CreateCertificateBody);
+
+const DefectBody = z.object({
+  code: z.enum(DEFECT_CODES),
+  description: z.string().trim().min(1).max(1000),
+  location: z.string().trim().max(300).nullish(),
+}).strict();
+type DefectBodyValue = z.infer<typeof DefectBody>;
+
+// Item certificates also record the outcome and, on creation, their defects.
+// With remedialJob (the AI certificate reader), the defects that need work
+// share one FixTrack job, so one quote request covers them, and the rest (C3s,
+// advice) open no job. needsWork defaults from the code: C1/C2/FI/ID/AR.
+const CreateItemCertificateBody = CreateCertificateBody.extend({
+  outcome: z.enum(CERTIFICATE_OUTCOMES).optional(),
+  defects: z.array(DefectBody.extend({ needsWork: z.boolean().optional() })).max(100).optional(),
+  remedialJob: z.boolean().optional(),
+  /** The details were read by ComplyTrack's AI and checked by the person saving. */
+  readByAi: z.boolean().optional(),
+});
+type ItemDefectValue = DefectBodyValue & { needsWork?: boolean };
+const UpdateItemCertificateBody = partialUpdate(CreateCertificateBody.extend({
+  outcome: z.enum(CERTIFICATE_OUTCOMES),
+}));
 
 const router: IRouter = Router();
 
-async function assertItemAccess(req: Request, itemId: number) {
+type Item = typeof complianceItemsTable.$inferSelect;
+type Cert = typeof certificatesTable.$inferSelect;
+
+async function assertItemAccess(req: Request, itemId: number): Promise<Item | null> {
+  if (!Number.isInteger(itemId) || itemId <= 0) return null;
   const [item] = await db.select().from(complianceItemsTable).where(eq(complianceItemsTable.id, itemId));
   if (!item) return null;
   if (!canAccessClient(req, item.clientId)) return null;
   return item;
 }
 
+async function withDefects(clientId: number, certs: Cert[]) {
+  const defects = await defectsForCertificates(clientId, certs.map((c) => c.id));
+  return certs.map((c) => ({ ...c, defects: defects.get(c.id) ?? [] }));
+}
+
+/**
+ * A certificate file arrives through the generic presigned upload, which only
+ * reserves a tenant path. Registering it on the certificate is what grants the
+ * tenant ACL, so the file can be viewed and included in data exports, and a
+ * caller cannot attach another tenant's object. Sends the error response and
+ * returns false when the file cannot be secured.
+ */
+async function secureCertificateFile(req: Request, res: any, fileUrl: string, clientId: number): Promise<boolean> {
+  try {
+    await new ObjectStorageService().finalizeTenantUpload(fileUrl, clientId);
+    return true;
+  } catch (err) {
+    if (err instanceof ObjectOwnershipError) {
+      res.status(403).json({ error: "File does not belong to this client" });
+    } else if (err instanceof ObjectNotFoundError) {
+      res.status(404).json({ error: "Uploaded file not found" });
+    } else if (err instanceof ObjectContentError) {
+      res.status(400).json({ error: err.message });
+    } else {
+      req.log.error({ err }, "Could not secure certificate file");
+      res.status(503).json({ error: "File storage is temporarily unavailable. Please try again later." });
+    }
+    return false;
+  }
+}
+
 // ----- Item-scoped certificates -----
 
 router.get("/items/:itemId/certificates", requireAuth, async (req, res) => {
   const itemId = Number(req.params.itemId);
-  const user = req.currentUser!;
   const item = await assertItemAccess(req, itemId);
   if (!item) return void res.status(404).json({ error: "Compliance item not found" });
   const certs = await db.select().from(certificatesTable).where(eq(certificatesTable.itemId, itemId)).orderBy(certificatesTable.createdAt);
-  res.json(certs);
+  res.json(await withDefects(item.clientId, certs));
 });
 
-async function syncItemDueDateFromCertificates(itemId: number) {
+const sameDay = (a: Date | null | undefined, b: Date | null | undefined) =>
+  !!a && !!b && a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
+
+/**
+ * Keep the item's due date in step with its certificates. Only satisfactory or
+ * legacy not-stated certificates count. "sync" (a counting certificate with an
+ * expiry was saved) moves the due date to the latest counting expiry, as
+ * before. "recalc" (a counting certificate was deleted or stopped counting)
+ * acts only when the item's due date is that certificate's old expiry, i.e.
+ * the certificate set it: it falls back to the latest remaining counting
+ * expiry, then to the last completion plus the repeat interval, else keeps it.
+ */
+async function updateItemDueDate(itemId: number, mode: { kind: "sync" } | { kind: "recalc"; previousExpiry: Date | null }) {
   const certs = await db
-    .select({ expiryDate: certificatesTable.expiryDate })
+    .select({ expiryDate: certificatesTable.expiryDate, outcome: certificatesTable.outcome })
     .from(certificatesTable)
     .where(eq(certificatesTable.itemId, itemId));
   const expiries = certs
+    .filter((c) => outcomeMovesDueDate(c.outcome))
     .map((c) => c.expiryDate)
     .filter((d): d is Date => d != null);
-  if (expiries.length === 0) return;
-  // Use the latest expiry across all certificates as the item's next due date
-  const latest = new Date(Math.max(...expiries.map((d) => d.getTime())));
+  const latestCounting = expiries.length ? new Date(Math.max(...expiries.map((d) => d.getTime()))) : null;
+  if (mode.kind === "sync" && !latestCounting) return;
+  if (mode.kind === "recalc" && !mode.previousExpiry) return;
   await db.transaction(async (tx) => {
     // Lock the item first (the reminder-cycle lock order), then move the due
     // date and retire pending reminders drafted for the old one.
-    const [item] = await tx.select({ clientId: complianceItemsTable.clientId, dueDate: complianceItemsTable.dueDate })
-      .from(complianceItemsTable).where(eq(complianceItemsTable.id, itemId)).for("update");
+    const [item] = await tx.select({
+      clientId: complianceItemsTable.clientId, dueDate: complianceItemsTable.dueDate,
+      completedAt: complianceItemsTable.completedAt, frequencyMonths: complianceItemsTable.frequencyMonths,
+    }).from(complianceItemsTable).where(eq(complianceItemsTable.id, itemId)).for("update");
     if (!item) return;
-    const cycleChanged = !item.dueDate || reminderCycleOf(new Date(item.dueDate)) !== reminderCycleOf(latest);
+    let next: Date | null = latestCounting;
+    if (mode.kind === "recalc") {
+      if (!sameDay(item.dueDate, mode.previousExpiry)) return;
+      if (!next && item.completedAt && item.frequencyMonths && item.frequencyMonths > 0) {
+        next = addMonthsUtc(new Date(item.completedAt), item.frequencyMonths);
+      }
+    }
+    if (!next || (item.dueDate && item.dueDate.getTime() === next.getTime())) return;
+    const cycleChanged = !item.dueDate || reminderCycleOf(new Date(item.dueDate)) !== reminderCycleOf(next);
     await tx
       .update(complianceItemsTable)
-      .set({ dueDate: latest, updatedAt: new Date(), ...(cycleChanged ? { notificationSentAt: null } : {}) })
+      .set({ dueDate: next, updatedAt: new Date(), ...(cycleChanged ? { notificationSentAt: null } : {}) })
       .where(eq(complianceItemsTable.id, itemId));
     await supersedeStaleReminderCycles(tx, item.clientId, itemId);
   });
 }
 
-router.post("/items/:itemId/certificates", requireAuth, requireClientAdmin, async (req, res) => {
-  const itemId = Number(req.params.itemId);
+/** FixTrack availability and the issue type to file defects under. */
+async function fixTrackSetup(clientId: number, itemTitle: string) {
+  const enabled = isEntitled(await getEntitledServices(clientId), "fixtrack");
+  if (!enabled) return { enabled };
+  const preferred = fixTrackIssueTypeFor(itemTitle);
+  const allowed = await getEffectiveOptionList(clientId, "fixtrack_issue_types");
+  return { enabled, issueType: allowed.includes(preferred) || !allowed.includes("general") ? preferred : "general" };
+}
+
+/** Record defects (and their FixTrack jobs) for the item's own client. */
+async function addDefects(req: Request, item: Item, cert: Cert, defects: ItemDefectValue[], remedialJob = false) {
+  if (!defects.length) return [];
+  const fixTrack = await fixTrackSetup(item.clientId, item.title);
+  const today = await getAccountToday(item.clientId);
   const user = req.currentUser!;
-  const body = CreateCertificateBody.parse(req.body);
-  const item = await assertItemAccess(req, itemId);
-  if (!item) return void res.status(404).json({ error: "Compliance item not found" });
-  const [cert] = await db.insert(certificatesTable).values({ ...body, itemId, contractorId: null }).returning();
-  await syncItemDueDateFromCertificates(itemId);
-  res.status(201).json(cert);
+  return db.transaction(async (tx) => {
+    let job: number | null | undefined;
+    if (remedialJob) {
+      const work = defects.filter((d) => d.needsWork ?? ACTION_DEFECT_CODES.includes(d.code));
+      job = fixTrack.enabled && work.length ? await createRemedialJob(tx, {
+        clientId: item.clientId,
+        certificate: { id: cert.id, name: cert.name },
+        item: { id: item.id, title: item.title, siteId: item.siteId },
+        defects: work,
+        issueType: fixTrack.issueType,
+        user: { id: user.id, name: user.name ?? null },
+        today,
+      }) : null;
+    }
+    const created: Array<{ id: number; fixTrackIssueId: number | null }> = [];
+    for (const { needsWork, ...defect } of defects) {
+      const inJob = needsWork ?? ACTION_DEFECT_CODES.includes(defect.code);
+      created.push(await createDefect(tx, {
+        clientId: item.clientId,
+        certificate: { id: cert.id, name: cert.name },
+        item: { id: item.id, title: item.title, siteId: item.siteId },
+        defect,
+        fixTrack,
+        user: { id: user.id, name: user.name ?? null },
+        today,
+        ...(remedialJob ? { job: inJob ? job ?? null : null } : {}),
+      }));
+    }
+    return created;
+  });
+}
+
+router.post("/items/:itemId/certificates", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const view = await saveItemCertificate(req, res, Number(req.params.itemId), req.body);
+  if (view) res.status(201).json(view);
 });
 
-router.put("/items/:itemId/certificates/:id", requireAuth, requireClientAdmin, async (req, res) => {
+/**
+ * Save a certificate (and its defects) on a compliance check. Responds itself
+ * and returns null when the request is refused. A certificate from the
+ * certificate inbox (lib/certificateInbox.ts) passes its stored file, which
+ * the business already owns, instead of a fresh upload.
+ */
+export async function saveItemCertificate(
+  req: Request, res: Response, itemId: number, input: unknown,
+  inbox?: { clientId: number; itemId: number; objectPath: string | null; release(): Promise<void> },
+) {
+  // The inbox's claim on its certificate is released before the refusal is sent.
+  const refuse = async (status: number, body: Record<string, unknown>) => {
+    await inbox?.release();
+    res.status(status).json(body);
+    return null;
+  };
+  const parsed = CreateItemCertificateBody.safeParse(input);
+  if (!parsed.success) return refuse(400, { error: "Invalid certificate", details: parsed.error.flatten() });
+  const item = await assertItemAccess(req, itemId);
+  // A certificate from the inbox is only ever filed in its own business.
+  if (!item || (inbox && item.clientId !== inbox.clientId)) return refuse(404, { error: "Compliance item not found" });
+  const { defects = [], remedialJob = false, readByAi = false, ...body } = parsed.data;
+  if (inbox) body.fileUrl = inbox.objectPath;
+  else if (body.fileUrl && !await secureCertificateFile(req, res, body.fileUrl, item.clientId)) return null;
+  const [cert] = await db.insert(certificatesTable)
+    .values({ ...body, outcome: body.outcome ?? "not_stated", itemId, contractorId: null })
+    .returning();
+  const created = await addDefects(req, item, cert!, defects, remedialJob);
+  if (outcomeMovesDueDate(cert!.outcome)) await updateItemDueDate(itemId, { kind: "sync" });
+  await appendAuditEvent(req, {
+    clientId: item.clientId, entityType: "compliance_item", entityId: itemId, action: "certificate_added",
+    after: cert,
+    metadata: {
+      certificateId: cert!.id,
+      defects: defects.map((d, i) => ({ ...d, fixTrackIssueId: created[i]?.fixTrackIssueId ?? null })),
+      ...(readByAi ? { readByAi: true } : {}),
+      ...(inbox ? { certificateInboxItemId: inbox.itemId } : {}),
+    },
+  });
+  const [view] = await withDefects(item.clientId, [cert!]);
+  return view!;
+}
+
+router.put("/items/:itemId/certificates/:id", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
   const itemId = Number(req.params.itemId);
   const id = Number(req.params.id);
-  const user = req.currentUser!;
-  const body = UpdateCertificateBody.parse(req.body);
+  const parsed = UpdateItemCertificateBody.safeParse(req.body);
+  if (!parsed.success) return void res.status(400).json({ error: "Invalid certificate", details: parsed.error.flatten() });
   const item = await assertItemAccess(req, itemId);
   if (!item) return void res.status(404).json({ error: "Compliance item not found" });
+  if (!Number.isInteger(id)) return void res.status(404).json({ error: "Certificate not found" });
+  const [before] = await db.select().from(certificatesTable)
+    .where(and(eq(certificatesTable.id, id), eq(certificatesTable.itemId, itemId)));
+  if (!before) return void res.status(404).json({ error: "Certificate not found" });
+  if (parsed.data.fileUrl && parsed.data.fileUrl !== before.fileUrl
+    && !await secureCertificateFile(req, res, parsed.data.fileUrl, item.clientId)) return;
   const [cert] = await db
     .update(certificatesTable)
-    .set(body)
+    .set(parsed.data)
     .where(and(eq(certificatesTable.id, id), eq(certificatesTable.itemId, itemId)))
     .returning();
   if (!cert) return void res.status(404).json({ error: "Certificate not found" });
-  await syncItemDueDateFromCertificates(itemId);
-  res.json(cert);
+  if (outcomeMovesDueDate(cert.outcome) && cert.expiryDate) await updateItemDueDate(itemId, { kind: "sync" });
+  else if (outcomeMovesDueDate(before.outcome)) await updateItemDueDate(itemId, { kind: "recalc", previousExpiry: before.expiryDate });
+  await appendAuditEvent(req, {
+    clientId: item.clientId, entityType: "compliance_item", entityId: itemId, action: "certificate_updated",
+    before, after: cert, metadata: { certificateId: id },
+  });
+  const [view] = await withDefects(item.clientId, [cert]);
+  res.json(view);
 });
 
-router.delete("/items/:itemId/certificates/:id", requireAuth, requireClientAdmin, async (req, res) => {
+router.delete("/items/:itemId/certificates/:id", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
   const itemId = Number(req.params.itemId);
   const id = Number(req.params.id);
-  const user = req.currentUser!;
   const item = await assertItemAccess(req, itemId);
   if (!item) return void res.status(404).json({ error: "Compliance item not found" });
+  const [before] = Number.isInteger(id) ? await db.select().from(certificatesTable)
+    .where(and(eq(certificatesTable.id, id), eq(certificatesTable.itemId, itemId))) : [];
+  if (!before) return void res.status(204).send();
+  const defects = (await defectsForCertificates(item.clientId, [id])).get(id) ?? [];
+  // FixTrack jobs raised from its defects stay in FixTrack.
   await db.delete(certificatesTable).where(and(eq(certificatesTable.id, id), eq(certificatesTable.itemId, itemId)));
+  if (outcomeMovesDueDate(before.outcome)) await updateItemDueDate(itemId, { kind: "recalc", previousExpiry: before.expiryDate });
+  await appendAuditEvent(req, {
+    clientId: item.clientId, entityType: "compliance_item", entityId: itemId, action: "certificate_deleted",
+    before: { ...before, defects }, metadata: { certificateId: id },
+  });
   res.status(204).send();
+});
+
+// ----- Defects on an item certificate -----
+
+async function itemCertificate(req: Request, itemId: number, certificateId: number) {
+  const item = await assertItemAccess(req, itemId);
+  if (!item || !Number.isInteger(certificateId)) return null;
+  const [cert] = await db.select().from(certificatesTable)
+    .where(and(eq(certificatesTable.id, certificateId), eq(certificatesTable.itemId, itemId)));
+  return cert ? { item, cert } : null;
+}
+
+async function findDefect(clientId: number, certificateId: number, defectId: number) {
+  const defects = (await defectsForCertificates(clientId, [certificateId])).get(certificateId) ?? [];
+  return defects.find((d) => d.id === defectId) ?? null;
+}
+
+router.post("/items/:itemId/certificates/:id/defects", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const parsed = DefectBody.safeParse(req.body);
+  if (!parsed.success) return void res.status(400).json({ error: "Invalid defect", details: parsed.error.flatten() });
+  const found = await itemCertificate(req, Number(req.params.itemId), Number(req.params.id));
+  if (!found) return void res.status(404).json({ error: "Certificate not found" });
+  const [created] = await addDefects(req, found.item, found.cert, [parsed.data]);
+  await appendAuditEvent(req, {
+    clientId: found.item.clientId, entityType: "compliance_item", entityId: found.item.id, action: "certificate_defect_added",
+    after: { ...parsed.data, id: created!.id, fixTrackIssueId: created!.fixTrackIssueId }, metadata: { certificateId: found.cert.id },
+  });
+  res.status(201).json(await findDefect(found.item.clientId, found.cert.id, created!.id));
+});
+
+// Mark a defect remedied (or not). Only for a defect without a FixTrack job
+// (no FixTrack, or its job was deleted): a linked job is closed in FixTrack.
+router.patch("/items/:itemId/certificates/:id/defects/:defectId", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const parsed = z.object({ resolved: z.boolean() }).strict().safeParse(req.body);
+  if (!parsed.success) return void res.status(400).json({ error: "Invalid request" });
+  const found = await itemCertificate(req, Number(req.params.itemId), Number(req.params.id));
+  if (!found) return void res.status(404).json({ error: "Certificate not found" });
+  const defectId = Number(req.params.defectId);
+  const defect = Number.isInteger(defectId) ? await findDefect(found.item.clientId, found.cert.id, defectId) : null;
+  if (!defect) return void res.status(404).json({ error: "Defect not found" });
+  if (defect.fixTrackIssueId != null) {
+    return void res.status(409).json({
+      error: "This defect has a FixTrack job: resolve or close the job in FixTrack",
+      code: "DEFECT_HAS_FIXTRACK_JOB",
+    });
+  }
+  await db.update(certificateDefectsTable)
+    .set({ resolvedAt: parsed.data.resolved ? new Date() : null })
+    .where(and(eq(certificateDefectsTable.id, defectId), eq(certificateDefectsTable.clientId, found.item.clientId)));
+  await appendAuditEvent(req, {
+    clientId: found.item.clientId, entityType: "compliance_item", entityId: found.item.id,
+    action: parsed.data.resolved ? "certificate_defect_resolved" : "certificate_defect_reopened",
+    before: defect, metadata: { certificateId: found.cert.id, defectId },
+  });
+  res.json(await findDefect(found.item.clientId, found.cert.id, defectId));
+});
+
+// Remove a defect recorded in error. Its FixTrack job, if any, stays.
+router.delete("/items/:itemId/certificates/:id/defects/:defectId", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const found = await itemCertificate(req, Number(req.params.itemId), Number(req.params.id));
+  if (!found) return void res.status(404).json({ error: "Certificate not found" });
+  const defectId = Number(req.params.defectId);
+  const defect = Number.isInteger(defectId) ? await findDefect(found.item.clientId, found.cert.id, defectId) : null;
+  if (!defect) return void res.status(404).json({ error: "Defect not found" });
+  await db.delete(certificateDefectsTable)
+    .where(and(eq(certificateDefectsTable.id, defectId), eq(certificateDefectsTable.clientId, found.item.clientId)));
+  await appendAuditEvent(req, {
+    clientId: found.item.clientId, entityType: "compliance_item", entityId: found.item.id, action: "certificate_defect_deleted",
+    before: defect, metadata: { certificateId: found.cert.id, defectId },
+  });
+  res.status(204).send();
+});
+
+// ----- Reading a certificate with ComplyTrack's AI -----
+//
+// The browser sends the file; Claude (lib/certificateReading.ts) says which
+// check it is for, its dates, outcome and defects. Nothing is saved: the
+// person checks and corrects the reading, then saves the certificate through
+// POST /items/:itemId/certificates (with remedialJob, so the work that needs
+// doing shares one FixTrack job a quote can be asked for). The file is only
+// stored when they save it.
+
+/** Held against the AI allowance while a certificate is read; a long EICR costs about this. */
+const CERTIFICATE_READING_ESTIMATE_PENCE = 15;
+
+const certificateReadBody = z.object({
+  fileName: z.string().trim().min(1).max(255),
+  mimeType: z.string().trim().min(1).max(200),
+  data: z.string().min(1).max(Math.ceil(CERTIFICATE_READING_MAX_BYTES / 3) * 4 + 4),
+  itemId: z.number().int().positive().nullable().optional(),
+}).strict();
+
+const certificateFilesBody = z.object({
+  files: z.array(z.object({
+    fileName: z.string().trim().min(1).max(255),
+    mimeType: z.string().trim().min(1).max(200),
+    data: z.string().min(1).max(Math.ceil(CERTIFICATE_READING_MAX_BYTES / 3) * 4 + 4),
+  }).strict()).min(1).max(CERTIFICATE_READING_MAX_FILES),
+  itemId: z.number().int().positive().nullable().optional(),
+}).strict();
+
+/** The checks the person can file a certificate against, described for Claude. */
+function certificateCheckChoices(req: Request, clientId: number): Promise<CertificateCheckChoice[]> {
+  return certificateCheckChoicesFor(clientId, getActiveDepartmentId(req));
+}
+
+router.get("/certificates/reading", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
+  const [ai, services] = await Promise.all([getAiStatus(clientId), getEntitledServices(clientId)]);
+  res.json({ available: reportReadingConfigured(), ai, fixTrack: isEntitled(services, "fixtrack") });
+});
+
+router.post("/certificates/read", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
+  if (!reportReadingConfigured()) {
+    return void res.status(503).json({ error: "Reading certificates is not switched on yet. Fill the certificate in by hand.", code: "CERTIFICATE_READING_UNAVAILABLE" });
+  }
+  const parsed = certificateReadBody.safeParse(req.body);
+  if (!parsed.success) return void res.status(400).json({ error: "Choose a PDF, photo or Word certificate (20 MB at most)" });
+  const checks = await certificateCheckChoices(req, clientId);
+  const itemId = parsed.data.itemId ?? null;
+  if (itemId !== null && !checks.some((check) => check.id === itemId)) {
+    return void res.status(404).json({ error: "Compliance item not found" });
+  }
+
+  let aiUseId: number | null = null;
+  try {
+    // A file Claude cannot read is turned away before it counts towards the
+    // AI allowance (lib/aiAllowance.ts).
+    const result = await readCertificate({
+      bytes: Buffer.from(parsed.data.data, "base64"), mimeType: parsed.data.mimeType, fileName: parsed.data.fileName,
+      today: await getAccountToday(clientId), checks, itemId,
+    }, async () => {
+      aiUseId = await claimAiUse({
+        clientId, userId: req.currentUser?.id ?? null, feature: "certificate_reading",
+        estimatePence: CERTIFICATE_READING_ESTIMATE_PENCE, instead: "Fill the certificate in by hand instead.",
+      });
+    });
+    if (aiUseId !== null) await settleAiUse(aiUseId, result.usage, true);
+    req.log.info({ clientId, model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens, defects: result.defects.length }, "Certificate read");
+    const { usage: _usage, model: _model, inputTokens: _in, outputTokens: _out, ...reading } = result;
+    res.json(reading);
+  } catch (err) {
+    if (aiUseId !== null) await settleAiUse(aiUseId, err instanceof ReportReadingError ? err.usage ?? null : null, false);
+    if (err instanceof AiUnavailableError) return void res.status(err.status).json({ error: err.message, code: err.code });
+    if (err instanceof UnreadableReportError) return void res.status(400).json({ error: err.message });
+    if (!(err instanceof ReportReadingError)) req.log.error({ err }, "Certificate reading failed");
+    res.status(502).json({ error: err instanceof ReportReadingError ? err.message : "ComplyTrack could not read this certificate just now. Try again later, or fill it in by hand." });
+  }
+});
+
+// Several files at once (Steuart, 2026-10-29): the pages of one certificate
+// photographed separately, or a batch of certificates for ComplyTrack's AI to
+// sort to their checks. One request reads them all; the person then checks
+// and saves each certificate found, as with a single file.
+router.post("/certificates/read-files", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
+  if (!reportReadingConfigured()) {
+    return void res.status(503).json({ error: "Reading certificates is not switched on yet. Fill the certificate in by hand.", code: "CERTIFICATE_READING_UNAVAILABLE" });
+  }
+  const parsed = certificateFilesBody.safeParse(req.body);
+  if (!parsed.success) {
+    return void res.status(400).json({ error: `Choose up to ${CERTIFICATE_READING_MAX_FILES} PDF, photo or Word certificates (20 MB at most in one go)` });
+  }
+  const checks = await certificateCheckChoices(req, clientId);
+  const itemId = parsed.data.itemId ?? null;
+  if (itemId !== null && !checks.some((check) => check.id === itemId)) {
+    return void res.status(404).json({ error: "Compliance item not found" });
+  }
+  const files = parsed.data.files.map((file) => ({ bytes: Buffer.from(file.data, "base64"), mimeType: file.mimeType, fileName: file.fileName }));
+
+  let aiUseId: number | null = null;
+  try {
+    const result = await readCertificates({ files, today: await getAccountToday(clientId), checks, itemId }, async () => {
+      aiUseId = await claimAiUse({
+        clientId, userId: req.currentUser?.id ?? null, feature: "certificate_reading",
+        estimatePence: CERTIFICATE_READING_ESTIMATE_PENCE * files.length, instead: "Fill the certificates in by hand instead.",
+      });
+    });
+    if (aiUseId !== null) await settleAiUse(aiUseId, result.usage, true);
+    req.log.info({
+      clientId, model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens,
+      files: files.length, certificates: result.certificates.length, skipped: result.skipped.length,
+    }, "Certificates read");
+    res.json({ certificates: result.certificates, skipped: result.skipped });
+  } catch (err) {
+    if (aiUseId !== null) await settleAiUse(aiUseId, err instanceof ReportReadingError ? err.usage ?? null : null, false);
+    if (err instanceof AiUnavailableError) return void res.status(err.status).json({ error: err.message, code: err.code });
+    if (err instanceof UnreadableReportError) return void res.status(400).json({ error: err.message });
+    if (!(err instanceof ReportReadingError)) req.log.error({ err }, "Certificate reading failed");
+    res.status(502).json({ error: err instanceof ReportReadingError ? err.message : "ComplyTrack could not read these certificates just now. Try again later, or fill them in by hand." });
+  }
 });
 
 async function assertContractorAccess(req: Request, contractorId: number) {
@@ -117,7 +518,6 @@ async function assertContractorAccess(req: Request, contractorId: number) {
 
 router.get("/contractors/:contractorId/certificates", requireAuth, async (req, res) => {
   const { contractorId } = ListCertificatesParams.parse({ contractorId: Number(req.params.contractorId) });
-  const user = req.currentUser!;
 
   const contractor = await assertContractorAccess(req, contractorId);
   if (!contractor) {
@@ -133,9 +533,8 @@ router.get("/contractors/:contractorId/certificates", requireAuth, async (req, r
   res.json(certs);
 });
 
-router.post("/contractors/:contractorId/certificates", requireAuth, requireClientAdmin, async (req, res) => {
+router.post("/contractors/:contractorId/certificates", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
   const { contractorId } = CreateCertificateParams.parse({ contractorId: Number(req.params.contractorId) });
-  const user = req.currentUser!;
   const body = CreateCertificateBody.parse(req.body);
 
   const contractor = await assertContractorAccess(req, contractorId);
@@ -151,12 +550,11 @@ router.post("/contractors/:contractorId/certificates", requireAuth, requireClien
   res.status(201).json(cert);
 });
 
-router.put("/contractors/:contractorId/certificates/:id", requireAuth, requireClientAdmin, async (req, res) => {
+router.put("/contractors/:contractorId/certificates/:id", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
   const { contractorId, id } = UpdateCertificateParams.parse({
     contractorId: Number(req.params.contractorId),
     id: Number(req.params.id),
   });
-  const user = req.currentUser!;
   const body = UpdateCertificateBody.parse(req.body);
 
   const contractor = await assertContractorAccess(req, contractorId);
@@ -177,12 +575,11 @@ router.put("/contractors/:contractorId/certificates/:id", requireAuth, requireCl
   res.json(cert);
 });
 
-router.delete("/contractors/:contractorId/certificates/:id", requireAuth, requireClientAdmin, async (req, res) => {
+router.delete("/contractors/:contractorId/certificates/:id", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
   const { contractorId, id } = DeleteCertificateParams.parse({
     contractorId: Number(req.params.contractorId),
     id: Number(req.params.id),
   });
-  const user = req.currentUser!;
 
   const contractor = await assertContractorAccess(req, contractorId);
   if (!contractor) {

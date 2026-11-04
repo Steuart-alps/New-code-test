@@ -450,10 +450,11 @@ async function main() {
   const certifiedItem = await request("POST", compliancePath, { title: `Fresh schema certified item ${stamp}`, siteId });
   expectStatus("POST", compliancePath, certifiedItem, 201);
   const ownCertificatesPath = `/items/${certifiedItem.data.id}/certificates`;
+  // Certificate files are secured in object storage when attached, which this
+  // storage-less run does not have; the metadata is what is checked here.
   const ownFileUrl = `/objects/uploads/tenant-${clientId}/schema-fixture.pdf`;
   const ownCertificate = await request("POST", ownCertificatesPath, {
     name: "Fresh schema EICR",
-    fileUrl: ownFileUrl,
     issueDate: "2026-01-15T00:00:00.000Z",
     expiryDate: "2031-01-15T00:00:00.000Z",
     notes: "Tenant-owned evidence",
@@ -463,7 +464,7 @@ async function main() {
     "POST", ownCertificatesPath, ownCertificate,
     ownCertificate.data?.itemId === certifiedItem.data.id
       && ownCertificate.data?.contractorId === null
-      && ownCertificate.data?.fileUrl === ownFileUrl
+      && ownCertificate.data?.fileUrl === null
       && ownCertificate.data?.notes === "Tenant-owned evidence",
     "item certificate must keep its owner and evidence metadata",
   );
@@ -472,7 +473,7 @@ async function main() {
   expect(
     "GET", ownCertificatesPath, ownCertificates,
     Array.isArray(ownCertificates.data) && ownCertificates.data.length === 1
-      && ownCertificates.data[0].fileUrl === ownFileUrl,
+      && ownCertificates.data[0].name === "Fresh schema EICR",
     "item certificate history must return the saved certificate",
   );
 
@@ -500,10 +501,13 @@ async function main() {
   const foreignItem = await request("POST", compliancePath, { title: `Fresh schema foreign item ${stamp}` });
   expectStatus("POST", compliancePath, foreignItem, 201);
   const foreignCertificatesPath = `/items/${foreignItem.data.id}/certificates`;
-  const foreignFileUrl = `/objects/uploads/tenant-${foreignClientId}/schema-fixture.pdf`;
+  // Another tenant's object path is refused before storage is touched.
+  expectStatus("POST", foreignCertificatesPath, await request("POST", foreignCertificatesPath, {
+    name: "Borrowed file",
+    fileUrl: ownFileUrl,
+  }), 403);
   const foreignCertificate = await request("POST", foreignCertificatesPath, {
     name: "Foreign tenant certificate",
-    fileUrl: foreignFileUrl,
     expiryDate: "2039-06-30T00:00:00.000Z",
     notes: "Foreign tenant evidence",
   });
@@ -546,7 +550,6 @@ async function main() {
   expect(
     "GET", compliancePath, tenantRegister,
     !serializedRegister.includes("2039-06-30")
-      && !serializedRegister.includes(foreignFileUrl)
       && !serializedRegister.includes("Foreign tenant"),
     "foreign tenant certificate metadata must not appear in the register",
   );

@@ -76,9 +76,99 @@ try {
   const after = (await owner.request('GET', `${path}&date=${date}`)).data;
   assert.equal(after.hotTemperature.find(row => row.item === 'Chicken').holdSeconds, '12', 'the failed hold stays as historical evidence');
 
+  // ── Boundaries: limits are inclusive, whole numbers only, typing slips refused ──
+  let count = (await actions()).length;
+  const ok = async (section, row, why) => assert.equal((await append(section, row)).status, 201, why);
+  const refused = async (section, row, why, pattern) => {
+    const res = await append(section, row);
+    assert.equal(res.status, 400, why);
+    if (pattern) assert.match(res.data.error, pattern, why);
+  };
+  await ok('hotTemperature', { item: 'Chicken', coreTemp: '75', holdSeconds: '30' }, 'exactly 75°C for exactly 30 seconds passes');
+  await refused('hotTemperature', { item: 'Chicken', coreTemp: '75', holdSeconds: '29' }, 'one second short needs an action', /holdSeconds \(29 seconds\)/);
+  await refused('hotTemperature', { item: 'Chicken', coreTemp: '74.9', holdSeconds: '30' }, 'just under the core minimum needs an action');
+  await refused('hotTemperature', { item: 'Chicken', coreTemp: '80', holdSeconds: '0' }, 'a zero hold is short');
+  await ok('hotTemperature', { item: 'Rare beef', coreTemp: '60', holdSeconds: '600' }, "the item's own minimums are inclusive");
+  await refused('hotTemperature', { item: 'Rare beef', coreTemp: '60', holdSeconds: '599' }, 'one second under the item hold');
+  await ok('sousVide', { item: 'Salmon', coreTemp: '75', waterTemp: '75', holdMinutes: '60' }, 'exactly the sous vide hold passes');
+  await refused('sousVide', { item: 'Salmon', coreTemp: '75', waterTemp: '75', holdMinutes: '59' }, 'one minute short', /holdMinutes \(59 minutes\)/);
+  await ok('hotTemperature', { item: 'Chicken', coreTemp: '80', holdSeconds: '86400' }, 'a 24-hour hold is the longest accepted');
+  await refused('hotTemperature', { item: 'Chicken', coreTemp: '80', holdSeconds: '86401' }, 'longer is a typing slip', /too long/);
+  await refused('sousVide', { item: 'Salmon', coreTemp: '75', waterTemp: '75', holdMinutes: '4321' }, 'over 72 hours is a typing slip', /too long/);
+  for (const holdSeconds of ['-5', '30.5', '1e3', '30 s']) {
+    await refused('hotTemperature', { item: 'Chicken', coreTemp: '80', holdSeconds }, `"${holdSeconds}" is not a whole number of seconds`, /whole number of seconds/);
+  }
+  assert.equal((await actions()).length, count, 'passing and refused readings raise no actions');
+
+  // ── Retries never duplicate a failure or its follow-up ──
+  const retryId = randomUUID();
+  const shortRow = { item: 'Chicken', coreTemp: '80', holdSeconds: '10', correctiveAction: 'Back in the oven for a full hold' };
+  const firstTry = await staff.request('POST', `/food-safety/append?siteId=${site.id}`, { recordDate: date, section: 'hotTemperature', row: shortRow, entryId: retryId });
+  assert.equal(firstTry.status, 201, JSON.stringify(firstTry.data));
+  const rowsAfterFirst = (await owner.request('GET', `${path}&date=${date}`)).data.hotTemperature.length;
+  const retry = await staff.request('POST', `/food-safety/append?siteId=${site.id}`, { recordDate: date, section: 'hotTemperature', row: shortRow, entryId: retryId });
+  assert.ok([200, 201].includes(retry.status), `append retry → ${retry.status}`);
+  assert.equal((await owner.request('GET', `${path}&date=${date}`)).data.hotTemperature.length, rowsAfterFirst, 'the retried row is stored once');
+  assert.equal((await actions()).length, ++count, 'one action for a retried append');
+
+  const current = (await owner.request('GET', `${path}&date=${date}`)).data;
+  const deviceEntry = {
+    mobileEntryId: randomUUID(), mobileRecordDate: date,
+    mobileTemperatureLog: {
+      coldFood: current.coldFood, expectedColdFood: current.coldFood,
+      sousVide: { item: 'Duck breast', waterTemp: '58', coreTemp: '58', timeStarted: '09:00', timeFinished: '12:00', holdMinutes: '100' },
+      correctives: 'Duck returned to the bath for the full 120 minutes', expectedCorrectives: current.correctives,
+    },
+  };
+  const noAction = { ...deviceEntry, mobileEntryId: randomUUID(), mobileTemperatureLog: { ...deviceEntry.mobileTemperatureLog, correctives: undefined } };
+  delete noAction.mobileTemperatureLog.correctives;
+  assert.equal((await staff.request('PUT', `/food-safety/${current.id}`, noAction)).status, 400, 'a short sous vide hold from the phone needs an action');
+  const sent = await staff.request('PUT', `/food-safety/${current.id}`, deviceEntry);
+  assert.equal(sent.status, 200, JSON.stringify(sent.data));
+  const resent = await staff.request('PUT', `/food-safety/${current.id}`, deviceEntry);
+  assert.equal(resent.status, 200, 'the phone retrying the same entry is accepted');
+  const duck = (await owner.request('GET', `${path}&date=${date}`)).data.sousVide.filter(row => row.holdMinutes === '100');
+  assert.equal(duck.length, 1, 'the retried device reading is stored once');
+  open = await actions();
+  assert.equal(open.length, ++count, 'one action for a retried device entry');
+  assert.ok(open.some(action => /Duck breast · holdMinutes: 100 minutes/.test(action.instruction) && /minimum 120; minutes/.test(action.instruction)));
+
+  // A web save that re-sends the day unchanged raises nothing new, and a
+  // recorded hold time cannot be cleared while the control applies.
+  const day = (await owner.request('GET', `${path}&date=${date}`)).data;
+  assert.equal((await owner.request('PUT', `/food-safety/${day.id}`, { hotTemperature: day.hotTemperature, sousVide: day.sousVide })).status, 200);
+  assert.equal((await actions()).length, count, 'unchanged failed rows are not raised again');
+  const cleared = day.hotTemperature.map(row => row.item === 'Chicken' && row.holdSeconds === '12' ? { ...row, holdSeconds: '' } : row);
+  const clearing = await owner.request('PUT', `/food-safety/${day.id}`, { hotTemperature: cleared });
+  assert.equal(clearing.status, 400, 'clearing a recorded hold time is refused');
+  assert.match(clearing.data.error, /record how long/);
+  assert.equal((await owner.request('GET', `${path}&date=${date}`)).data.hotTemperature.find(row => row.item === 'Chicken').holdSeconds, '12');
+
   // A site without hold controls accepts readings without a hold time.
   assert.equal((await staff.request('POST', `/food-safety?siteId=${plain.id}`, {
     recordDate: date, hotTemperature: [{ item: 'Chicken', coreTemp: '80' }],
   })).status, 201);
-  console.log('KitchenTrack hold-time controls, item rules, corrective actions and tenant/site scoping passed.');
+
+  // ── Controls are prospective: readings saved before a hold control was set
+  // stay as recorded, and nothing is inferred from descriptive labels ──
+  const plainConfig = `/food-safety/config?siteId=${plain.id}`;
+  assert.equal((await owner.request('PUT', plainConfig, { food_cooking_limit: 'Above 75°C for 2 minutes' })).status, 200);
+  assert.equal(JSON.parse((await owner.request('GET', plainConfig)).data.food_temperature_rules).cookingHoldSeconds, null,
+    'a legacy label naming a time does not create a hold control');
+  assert.equal((await staff.request('POST', `/food-safety/append?siteId=${plain.id}`, {
+    recordDate: date, section: 'hotTemperature', row: { item: 'Pie', coreTemp: '80' }, entryId: randomUUID(),
+  })).status, 201, 'no hold time is required from the label alone');
+  const plainRules = JSON.parse((await owner.request('GET', plainConfig)).data.food_temperature_rules);
+  assert.equal((await owner.request('PUT', plainConfig, { food_temperature_rules: JSON.stringify({ ...plainRules, cookingHoldSeconds: 30 }) })).status, 200);
+  const plainPath = `/food-safety?siteId=${plain.id}&date=${date}`;
+  const legacy = (await owner.request('GET', plainPath)).data;
+  const relabel = await staff.request('PUT', `/food-safety/${legacy.id}`, { hotTemperature: legacy.hotTemperature, correctives: 'Probe cleaned between items' });
+  assert.equal(relabel.status, 200, `older readings are not re-judged by a new control (${JSON.stringify(relabel.data)})`);
+  const kept = (await owner.request('GET', plainPath)).data.hotTemperature;
+  assert.ok(kept.every(row => row.holdSeconds === undefined), 'no hold time is filled in for older readings');
+  assert.equal((await owner.request('GET', `/track-actions?module=kitchen&siteId=${plain.id}`)).data.length, 0);
+  assert.equal((await staff.request('POST', `/food-safety/append?siteId=${plain.id}`, {
+    recordDate: date, section: 'hotTemperature', row: { item: 'Pie', coreTemp: '80' }, entryId: randomUUID(),
+  })).status, 400, 'new readings follow the new control');
+  console.log('KitchenTrack hold-time controls, item rules, boundaries, retries, prospective controls, corrective actions and tenant/site scoping passed.');
 } finally { await pool.end(); }

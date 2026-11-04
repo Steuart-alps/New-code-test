@@ -1,12 +1,15 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import { clientsTable, usersTable, consultantClientsTable } from "@workspace/db/schema";
-import { eq, inArray, sql } from "drizzle-orm";
-import { requireAuth, requireConsultant, requireClientAdmin, canAccessClient, denyViewers } from "../middleware/requireAuth";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { requireAuth, requireConsultant, requireClientAdmin, canAccessClient, denyViewers, isPlatformOperator, requirePlatformOperator } from "../middleware/requireAuth";
 import { seedStarterContent } from "../lib/seedStarterContent";
 import { logger } from "../lib/logger";
+import { APPROVED_ERASURE_REQUEST_READY, ERASURE_REQUEST_BLOCKING, deleteTestBusiness, runDataDeletionJob } from "../lib/offboarding";
+import { eraseClientStorageObjects } from "../lib/clientStorageErasure";
 
 const router = Router();
 
@@ -24,10 +27,11 @@ router.get("/clients", requireAuth, requireConsultant, async (req, res) => {
     res.json([]);
     return;
   }
+  // A business whose data has been deleted has nothing left to open.
   const clients = await db
     .select()
     .from(clientsTable)
-    .where(inArray(clientsTable.id, allowed))
+    .where(and(inArray(clientsTable.id, allowed), isNull(clientsTable.dataDeletedAt)))
     .orderBy(clientsTable.name);
   res.json(clients);
 });
@@ -51,7 +55,13 @@ router.get("/clients/:id", requireAuth, async (req, res) => {
 
 router.post("/clients", requireAuth, requireConsultant, async (req, res) => {
   const body = UpsertClientBody.parse(req.body);
-  const rows = await db.insert(clientsTable).values(body).returning();
+  // A new business starts on the same 14-day trial as a self-registration, so
+  // it locks when the trial ends unless it subscribes. Only platform operators
+  // create businesses without a trial.
+  const trialEndsAt = isPlatformOperator(req.currentUser)
+    ? null
+    : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+  const rows = await db.insert(clientsTable).values({ ...body, trialEndsAt }).returning();
   // Link the creating consultant to the new client so they can access it.
   await db
     .insert(consultantClientsTable)
@@ -73,7 +83,7 @@ router.put("/clients/:id", requireAuth, requireClientAdmin, async (req, res) => 
     return;
   }
 
-  const body = UpsertClientBody.partial().parse(req.body);
+  const body = partialUpdate(UpsertClientBody).parse(req.body);
   const rows = await db
     .update(clientsTable)
     .set({ ...body, updatedAt: new Date() })
@@ -144,6 +154,9 @@ router.post("/starter-pack/load", requireAuth, denyViewers, async (req, res) => 
   res.json({ ok: true });
 });
 
+// Permanent deletion only follows an account erasure request that was
+// approved by an independent reviewer and has passed its 30-day minimum wait
+// (POST /data-deletion/request, then review). It never bypasses that path.
 router.delete("/clients/:id", requireAuth, requireConsultant, async (req, res) => {
   const id = Number(req.params.id);
   if (!canAccessClient(req, id)) {
@@ -154,13 +167,14 @@ router.delete("/clients/:id", requireAuth, requireConsultant, async (req, res) =
     await tx.execute(sql`SELECT pg_advisory_xact_lock(106, ${id})`);
     const erasureReview = await tx.execute(sql`
       SELECT EXISTS (
-        SELECT 1 FROM client_data_deletion_requests
-        WHERE client_id = ${id}
-          AND (status = 'pending' OR
-               (status = 'approved' AND earliest_deletion_at > now()))
-      ) AS blocked
+        SELECT 1 FROM client_data_deletion_requests r
+        WHERE r.client_id = ${id} AND ${APPROVED_ERASURE_REQUEST_READY}
+      ) AND NOT EXISTS (
+        SELECT 1 FROM client_data_deletion_requests r
+        WHERE r.client_id = ${id} AND ${ERASURE_REQUEST_BLOCKING}
+      ) AS ready
     `);
-    if ((erasureReview.rows[0] as { blocked?: boolean } | undefined)?.blocked) return "request";
+    if (!(erasureReview.rows[0] as { ready?: boolean } | undefined)?.ready) return "request";
     const holdCheck = await tx.execute(sql`
       SELECT EXISTS (
         SELECT 1 FROM privacy_retention_schedules
@@ -170,15 +184,64 @@ router.delete("/clients/:id", requireAuth, requireConsultant, async (req, res) =
       ) AS blocked
     `);
     if ((holdCheck.rows[0] as { blocked?: boolean } | undefined)?.blocked) return "hold";
-    await tx.delete(clientsTable).where(eq(clientsTable.id, id));
-    return "deleted";
+    return "ready";
   });
-  if (result !== "deleted") {
-    return res.status(409).json({ error: result === "request"
-      ? "Account deletion requires manual review and the full 30-day retention window"
-      : "Client data cannot be deleted while a privacy legal hold or deletion exception is active" });
+  if (result === "ready") {
+    // Same erasure as the scheduled job: client rows and stored files go, the
+    // client row and append-only audit history stay (a raw DELETE of the
+    // client would cascade through every table, including the audit trail's
+    // erasure request, or fail on the audit ledger's RESTRICT).
+    const { clientsDeleted } = await runDataDeletionJob({ clientIds: [id], eraseStorage: eraseClientStorageObjects });
+    if (clientsDeleted !== 1) return res.status(409).json({ error: "Client data could not be deleted yet; it will be retried by the daily deletion job" });
+    return res.json({ ok: true });
   }
-  res.json({ ok: true });
+  res.status(409).json({ error: result === "request"
+    ? "Account deletion requires manual review and the full 30-day retention window. Request deletion from Settings; it can be completed once the request is approved and 30 days have passed."
+    : "Client data cannot be deleted while a privacy legal hold or deletion exception is active" });
+});
+
+// A platform operator deletes a test business that never paid, at once
+// (deleteTestBusiness). Typing the business's name confirms it, and their own
+// business is never offered.
+const DeleteTestBusinessBody = z.object({ confirmName: z.string().min(1).max(200) });
+
+router.post("/clients/:id/delete-test-business", requireAuth, requireConsultant, requirePlatformOperator, async (req, res) => {
+  const id = Number(req.params.id);
+  const parsed = DeleteTestBusinessBody.safeParse(req.body);
+  if (!Number.isSafeInteger(id) || id < 1 || !parsed.success) {
+    res.status(400).json({ error: "Type the business's name to confirm" });
+    return;
+  }
+  const operator = req.currentUser!;
+  if (operator.clientId === id) {
+    res.status(409).json({ error: "This is your own business, so it can't be deleted here" });
+    return;
+  }
+  const [client] = await db.select({ name: clientsTable.name }).from(clientsTable).where(eq(clientsTable.id, id));
+  if (!client) {
+    res.status(404).json({ error: "Client not found" });
+    return;
+  }
+  const typed = parsed.data.confirmName.trim().toLowerCase();
+  if (typed !== client.name.trim().toLowerCase()) {
+    res.status(400).json({ error: `Type "${client.name}" exactly to confirm` });
+    return;
+  }
+  try {
+    const result = await deleteTestBusiness(id, operator.id, eraseClientStorageObjects);
+    if (result.status === "not_found") {
+      res.status(404).json({ error: "Client not found" });
+      return;
+    }
+    if (result.status === "refused") {
+      res.status(409).json({ error: "Only a test business that never paid can be deleted here. This one has (or had) a subscription, a payment or an AI top-up, is under a legal hold, or is already deleted." });
+      return;
+    }
+    logger.info({ clientId: id, operatorId: operator.id, rowsDeleted: result.rowsDeleted }, "Test business deleted");
+    res.json({ ok: true, rowsDeleted: result.rowsDeleted, filesDeleted: result.objectsDeleted });
+  } catch {
+    res.status(503).json({ error: "The business could not be deleted. Its records were kept; try again later." });
+  }
 });
 
 export default router;

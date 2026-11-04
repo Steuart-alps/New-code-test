@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { KitchenClosedDay } from './kitchenClosedDay';
 
 export interface FoodSafetyMonthlySummaryDay {
   date: Date;
@@ -12,4 +13,7 @@ export interface FoodSafetyMonthlySummaryDay {
   hasRecord: boolean;
   /** Whether the diary record has been submitted. */
   submitted: boolean;
+  /** The diary scope was marked closed and has no record for this date, so it is not a missing day. */
+  nonOperating: boolean;
+  closure: KitchenClosedDay | null;
 }

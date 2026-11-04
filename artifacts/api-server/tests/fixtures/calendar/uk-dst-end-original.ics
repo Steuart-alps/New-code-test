@@ -1,0 +1,26 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//ComplyTrack//EN
+CALSCALE:GREGORIAN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:fix-track-44-881@complytrack
+SEQUENCE:1
+DTSTAMP:20300924T080000Z
+DTSTART;VALUE=DATE:20301026
+DTEND;VALUE=DATE:20301027
+SUMMARY:Révision chaudière № 12
+DESCRIPTION:Maintenance job: Révision chaudière № 12\nSite: Café Fran
+ çais\nLocation: Sous-sol\nScheduled by ÅLPS “Facilities” ^ Europe
+ORGANIZER;CN="ÅLPS “Facilities” ^^ Europe":MAILTO:compliance@example.t
+ est
+ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;CN="Zoë O’Connor":MA
+ ILTO:zoe@example.test
+STATUS:CONFIRMED
+BEGIN:VALARM
+TRIGGER:-P1D
+ACTION:DISPLAY
+DESCRIPTION:Reminder: Révision chaudière № 12
+END:VALARM
+END:VEVENT
+END:VCALENDAR

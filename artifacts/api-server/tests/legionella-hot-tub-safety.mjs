@@ -3,17 +3,19 @@
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 let passed = 0, failed = 0;
 const check = (name, ok, detail = "") => { if (ok) passed++; else { failed++; console.error(`FAIL ${name}`, detail); } };
-const client = () => {
+const client = (defaultHeaders = {}) => {
   let cookie = "";
   return async (method, path, body) => {
-    const r = await fetch(`${BASE}${path}`, { method, headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+    const r = await fetch(`${BASE}${path}`, { method, headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}), ...defaultHeaders },
       body: body === undefined ? undefined : JSON.stringify(body) });
     const c = r.headers.get("set-cookie"); if (c) cookie = c.split(";")[0];
     return { status: r.status, data: await r.json().catch(() => null) };
   };
 };
 const run = async () => {
-  const request = client();
+  // The manager deliberately records checks dated days ago (cadence and
+  // overdue cases), which an owner may do with a reason.
+  const request = client({ "X-Override-Reason": encodeURIComponent("Water safety fixture: past-dated check") });
   const email = `safety-${Date.now()}@test.local`;
   const reg = await request("POST", "/auth/register", { name: "Safety Integration Manager", email, password: "password-123" });
   check("register", [200, 201].includes(reg.status), reg.status);
@@ -39,12 +41,125 @@ const run = async () => {
   check("tub temperature checks require a reading", missingHotTemperature.status === 400);
   const legConfig = await request("GET", `/legionella/config?siteId=${siteId}`);
   check("default calorifier threshold available", legConfig.status === 200 && legConfig.data?.effectiveTemperatureLimits?.calorifier_temp?.min === 60);
+  // TMV outlets: the hot check is a 44°C maximum instead of the 50°C minimum.
+  const tmv = await request("POST", "/legionella/outlets", { name: "Assisted bath TMV", type: "tmv", siteId });
+  check("TMV outlet type can be registered", tmv.status === 201 && tmv.data?.type === "tmv", tmv.status);
+  const tmvReading = (temperature) => request("POST", "/legionella", {
+    checkType: "hot_sentinel_temp", checkDate: day, result: "pass", temperature, siteId, outletId: tmv.data?.id, performedBy: "Integration tester",
+  });
+  check("TMV outlet at 42°C passes (below the hot-outlet minimum)", (await tmvReading(42)).data?.result === "pass");
+  const tmvHot = await tmvReading(46);
+  check("TMV outlet above 44°C fails", tmvHot.status === 201 && tmvHot.data?.result === "fail", JSON.stringify(tmvHot.data));
+  const tmvEdit = await request("PUT", `/legionella/${tmvHot.data?.id}`, { temperature: 43, result: "pass" });
+  check("TMV reading corrected to 43°C passes on edit", tmvEdit.status === 200 && tmvEdit.data?.result === "pass", JSON.stringify(tmvEdit.data));
+  const plainHot = await request("POST", "/legionella", { checkType: "hot_sentinel_temp", checkDate: day, result: "pass", temperature: 42, siteId, performedBy: "Integration tester" });
+  check("ordinary hot outlet at 42°C still fails", plainHot.data?.result === "fail");
+  const outletStatus = await request("GET", "/legionella/outlet-status");
+  check("TMV outlet is logged as a hot check", (outletStatus.data ?? []).find(o => o.id === tmv.data?.id)?.checkTypeForOutlet === "hot_sentinel_temp");
+  // Little-used outlets are flushed weekly; their status covers the last 7 days.
+  const littleUsed = await request("POST", "/legionella/outlets", { name: "Outlet 3", type: "little_used", location: "Plant room hose", siteId, sortOrder: 3 });
+  check("little-used outlet type can be registered", littleUsed.status === 201 && littleUsed.data?.type === "little_used", littleUsed.status);
+  const littleStatus = () => request("GET", "/legionella/outlet-status").then(r => (r.data ?? []).find(o => o.id === littleUsed.data?.id));
+  const beforeFlush = await littleStatus();
+  check("little-used outlet is logged as a weekly flush", beforeFlush?.checkTypeForOutlet === "outlet_flush" && beforeFlush?.period === "week"
+    && beforeFlush?.testedThisMonth === false, JSON.stringify(beforeFlush));
+  const oldFlush = await request("POST", "/legionella", { checkType: "outlet_flush", checkDate: new Date(Date.now() - 9 * 86400000).toISOString().slice(0, 10), result: "pass", siteId, outletId: littleUsed.data?.id, performedBy: "Integration tester" });
+  check("a flush can be recorded against the outlet", oldFlush.status === 201, JSON.stringify(oldFlush.data));
+  check("a flush 9 days ago does not count for this week", (await littleStatus())?.testedThisMonth === false);
+  const flush = await request("POST", "/legionella", { checkType: "outlet_flush", checkDate: day, result: "pass", siteId, outletId: littleUsed.data?.id, performedBy: "Integration tester" });
+  check("today's flush is recorded", flush.status === 201, JSON.stringify(flush.data));
+  check("today's flush counts for this week", (await littleStatus())?.testedThisMonth === true);
+  const wrongType = await request("POST", "/legionella", { checkType: "hot_sentinel_temp", checkDate: day, result: "pass", temperature: 55, siteId, outletId: littleUsed.data?.id, performedBy: "Integration tester" });
+  check("a little-used outlet does not take a temperature check", wrongType.status === 400, wrongType.status);
+  const tmvStatus = (await request("GET", "/legionella/outlet-status")).data?.find(o => o.id === tmv.data?.id);
+  check("sentinel outlets stay monthly", tmvStatus?.period === "month", JSON.stringify(tmvStatus));
   const legionella = await request("POST", "/legionella", { checkType: "calorifier_temp", checkDate: day, result: "pass", temperature: 55, siteId, performedBy: "Integration tester" });
   check("unsafe Legionella POST fails", legionella.status === 201 && legionella.data?.result === "fail", legionella.status);
   const hotTub = await request("POST", "/hot-tub", { checkType: "water_chemistry", checkDate: day, result: "pass", phValue: 8.2, sanitiserLevel: 2, temperature: 41, siteId, performedBy: "Integration tester" });
   check("unsafe Hot Tub POST fails", hotTub.status === 201 && hotTub.data?.result === "fail", hotTub.status);
+  // Condition answers: sediment, biofilm, lid and screens on a tank inspection.
+  const cleanTank = { sediment: "slight", biofilm: "none", waterSurface: "clear", debris: "none", corrosion: "none",
+    lid: "yes", screens: "yes", insulation: "yes" };
+  const tankCheck = (findings, extra = {}) => request("POST", "/legionella", {
+    checkType: "cold_tank_inspection", checkDate: day, result: "pass", siteId, performedBy: "Integration tester", findings, ...extra,
+  });
+  const goodTank = await tankCheck(cleanTank);
+  check("a tank inspection with a little sediment passes and keeps its answers", goodTank.status === 201 &&
+    goodTank.data?.result === "pass" && goodTank.data?.findings?.sediment === "slight", JSON.stringify(goodTank.data));
+  const partTank = await tankCheck({ sediment: "none" });
+  check("a tank inspection with unanswered questions is refused", partTank.status === 400, partTank.status);
+  const oddTank = await tankCheck({ ...cleanTank, sediment: "loads" });
+  check("an unknown answer is refused", oddTank.status === 400, oddTank.status);
+  const tempFindings = await request("POST", "/legionella", { checkType: "cold_tank_temp", checkDate: day, result: "pass", temperature: 12, siteId, findings: { water: "clear" } });
+  check("temperature checks take no condition answers", tempFindings.status === 400, tempFindings.status);
+  const dirtyTank = await tankCheck({ ...cleanTank, sediment: "heavy", biofilm: "found" });
+  check("heavy sediment and biofilm turn a pass into a fail", dirtyTank.status === 201 && dirtyTank.data?.result === "fail", JSON.stringify(dirtyTank.data));
+  const editedGood = await request("PUT", `/legionella/${goodTank.data?.id}`, { findings: { ...cleanTank, lid: "no" }, result: "pass" });
+  check("editing the answers to a loose lid fails the check", editedGood.status === 200 && editedGood.data?.result === "fail" &&
+    editedGood.data?.findings?.lid === "no", JSON.stringify(editedGood.data));
+  const flushFound = await request("POST", "/legionella", { checkType: "outlet_flush", checkDate: day, result: "pass", siteId,
+    outletId: littleUsed.data?.id, performedBy: "Integration tester", findings: { water: "cleared" } });
+  check("a flush that ran clear after discolouring passes", flushFound.status === 201 && flushFound.data?.result === "pass", JSON.stringify(flushFound.data));
+  const noAnswers = await tankCheck(undefined);
+  check("older apps can still save an inspection without answers", noAnswers.status === 201 && noAnswers.data?.result === "pass"
+    && noAnswers.data?.findings == null, JSON.stringify(noAnswers.data));
+  // Named tanks: with two at a site, a tank check must say which one. They
+  // go on a second site so the checks below keep a site without tanks.
+  const tankSite = await request("POST", "/sites", { name: `Two tanks ${Date.now()}`, seedStarterChecks: false });
+  const tankCheckAt = (findings, extra = {}) => tankCheck(findings, { siteId: tankSite.data?.id, ...extra });
+  const tankA = await request("POST", "/equipment", { name: "Tank 1", type: "cold_water_tank", siteId: tankSite.data?.id, location: "Roof void" });
+  check("a tank can be named on the equipment list", tankA.status === 201 && tankA.data?.name === "Tank 1", JSON.stringify(tankA.data));
+  const oneTank = await tankCheckAt(cleanTank);
+  check("with one named tank, naming it is optional", oneTank.status === 201, oneTank.status);
+  const tankB = await request("POST", "/equipment", { name: "Kitchen header tank", type: "cold_water_tank", siteId: tankSite.data?.id });
+  const unnamed = await tankCheckAt(cleanTank);
+  check("with two named tanks, an inspection must say which", unnamed.status === 400 && /which tank/i.test(unnamed.data?.error ?? ""), JSON.stringify(unnamed.data));
+  const unnamedTemp = await request("POST", "/legionella", { checkType: "cold_tank_temp", checkDate: day, result: "pass", temperature: 14, siteId: tankSite.data?.id });
+  check("with two named tanks, a tank temperature must say which", unnamedTemp.status === 400, unnamedTemp.status);
+  const named = await tankCheckAt(cleanTank, { equipmentId: tankB.data?.id });
+  check("an inspection of the second tank is saved against it", named.status === 201 && named.data?.equipmentId === tankB.data?.id, JSON.stringify(named.data));
+  const calorifier = await request("POST", "/legionella", { checkType: "calorifier_temp", checkDate: day, result: "pass", temperature: 62, siteId: tankSite.data?.id });
+  check("calorifier checks are not held up by the tanks", calorifier.status === 201, calorifier.status);
+  const moved = await request("PUT", `/legionella/${named.data?.id}`, { equipmentId: tankA.data?.id });
+  check("a check can be moved to the other tank", moved.status === 200 && moved.data?.equipmentId === tankA.data?.id, JSON.stringify(moved.data));
+  // A spreadsheet of the site's own outlets, tanks and calorifiers.
+  const listSite = await request("POST", "/sites", { name: `Outlet list ${Date.now()}`, seedStarterChecks: false });
+  const outletList = (preview, rows) => request("POST", "/imports/legionella-outlets", {
+    headers: ["Outlet", "Type", "Location", "Site"], rows, preview, siteId: listSite.data?.id,
+  });
+  const listRows = [
+    ["Ladies basin 1", "Hot", "Clubhouse ground floor", ""],
+    ["Ladies basin 1", "Cold", "Clubhouse ground floor", ""],
+    ["Mens shower", "Little used", "Changing room", ""],
+    ["Assisted bath", "TMV", "", ""],
+    ["Tank 1", "Cold water storage tank", "Roof void", ""],
+    ["Tank 2", "CWST", "Plant room", ""],
+    ["Main calorifier", "Hot water cylinder", "Boiler room", ""],
+  ];
+  const listPreview = await outletList(true, listRows);
+  check("an outlet and tank list previews without saving", listPreview.status === 200 && listPreview.data?.summary?.create === 7
+    && listPreview.data?.committed === false, JSON.stringify(listPreview.data));
+  const badType = await outletList(true, [["Kitchen sink", "Warm", "", ""]]);
+  check("an unknown type is an error row", badType.data?.summary?.error === 1 && /not one of/.test(badType.data?.rows?.[0]?.reasons?.[0] ?? ""), JSON.stringify(badType.data));
+  const listImport = await outletList(false, listRows);
+  check("the list imports", listImport.status === 200 && listImport.data?.committed === true, JSON.stringify(listImport.data));
+  const listedOutlets = ((await request("GET", "/legionella/outlet-status")).data ?? []).filter(o => o.siteId === listSite.data?.id);
+  check("hot and cold taps at one basin become two outlets", listedOutlets.filter(o => o.name === "Ladies basin 1").map(o => o.type).sort().join(",") === "cold,hot"
+    && listedOutlets.some(o => o.name === "Mens shower" && o.type === "little_used") && listedOutlets.some(o => o.name === "Assisted bath" && o.type === "tmv"),
+    JSON.stringify(listedOutlets));
+  const listedUnits = ((await request("GET", `/equipment?siteId=${listSite.data?.id}`)).data ?? []);
+  check("tanks and the calorifier join the equipment list with their names", listedUnits.filter(u => u.type === "cold_water_tank").map(u => u.name).sort().join(",") === "Tank 1,Tank 2"
+    && listedUnits.some(u => u.type === "calorifier" && u.name === "Main calorifier" && u.location === "Boiler room"), JSON.stringify(listedUnits));
+  const listAgain = await outletList(true, [["Tank 1", "Tank", "Loft", ""], ["Ladies basin 1", "Hot", "Clubhouse ground floor", ""]]);
+  check("uploading again updates a location and skips what is unchanged", listAgain.data?.summary?.update === 1 && listAgain.data?.summary?.skip === 1
+    && listAgain.data?.summary?.create === 0, JSON.stringify(listAgain.data));
+  const listedTankCheck = await tankCheck(cleanTank, { siteId: listSite.data?.id });
+  check("an imported pair of tanks makes tank checks say which", listedTankCheck.status === 400, listedTankCheck.status);
   const actions = await request("GET", "/compliance-hub/actions");
   const rows = actions.data ?? [];
+  const tankAction = rows.find(a => a.sourceTrack === "LegionellaTrack" && a.sourceRecordId === String(dirtyTank.data?.id));
+  check("the tank's action says what was found", /Sediment or debris on the tank floor: A lot/.test(tankAction?.correctiveAction ?? "")
+    && /biofilm/i.test(tankAction?.correctiveAction ?? ""), JSON.stringify(tankAction));
   check("both actions persist with owners", actions.status === 200 &&
     rows.some(a => a.sourceTrack === "LegionellaTrack" && a.sourceRecordId === String(legionella.data?.id) && a.ownerName) &&
     rows.some(a => a.sourceTrack === "HotTubTrack" && a.sourceRecordId === String(hotTub.data?.id) && a.ownerName), JSON.stringify(rows));

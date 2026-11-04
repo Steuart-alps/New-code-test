@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import * as WebBrowser from 'expo-web-browser';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
 import { isInvalidMobileLoginChallenge } from '@/lib/api';
@@ -23,6 +24,7 @@ import {
   PasskeyFlowError,
 } from '@/lib/passkeys';
 import { passkeyFailureNeedsSetup } from '@/lib/passkeyErrors';
+import { privacyPolicyUrl, termsUrl } from '@/lib/links';
 
 export default function LoginScreen() {
   const colors = useColors();
@@ -112,7 +114,9 @@ export default function LoginScreen() {
       }
       if (result.requires2faSetup) {
         setSetupUrl(result.setupUrl ?? null);
+        return;
       }
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err: unknown) {
       if (err instanceof PasskeyFlowError) {
         if (passkeyFailureNeedsSetup(err.reason)) {
@@ -267,6 +271,8 @@ export default function LoginScreen() {
               <TouchableOpacity
                 style={styles.eyeBtn}
                 onPress={() => setShowPw((v) => !v)}
+                accessibilityRole="button"
+                accessibilityLabel={showPw ? 'Hide password' : 'Show password'}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <Feather
@@ -415,7 +421,8 @@ export default function LoginScreen() {
                   Sign in with your email and password, then add a passkey from the Profile
                   tab. Or open ComplyTrack Settings in this phone&apos;s browser and add one
                   there: it is saved to your phone&apos;s password manager and works in this
-                  app too. You will still enter your authenticator code each time.
+                  app too. If two-factor authentication is on, you will still enter your
+                  authenticator code.
                 </Text>
                 {passkeyHelp.webSetupUrl && (
                   <TouchableOpacity
@@ -434,9 +441,25 @@ export default function LoginScreen() {
             <Text
               style={[styles.footer, { color: colors.mutedForeground }]}
             >
-              ComplyTrack by ALPS Consulting
+              ComplyTrack by ALPS Consultancy
             </Text>
              </>}
+            <View style={styles.legalRow}>
+              <TouchableOpacity
+                testID="login-privacy"
+                accessibilityRole="link"
+                onPress={() => WebBrowser.openBrowserAsync(privacyPolicyUrl()).catch(() => undefined)}
+              >
+                <Text style={[styles.legalLink, { color: colors.mutedForeground }]}>Privacy policy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="login-terms"
+                accessibilityRole="link"
+                onPress={() => WebBrowser.openBrowserAsync(termsUrl()).catch(() => undefined)}
+              >
+                <Text style={[styles.legalLink, { color: colors.mutedForeground }]}>Terms of service</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -494,7 +517,7 @@ const styles = StyleSheet.create({
     marginBottom: 7,
   },
   input: {
-    height: 48,
+    minHeight: 48,
     borderWidth: 1,
     borderRadius: 4,
     paddingHorizontal: 14,
@@ -502,7 +525,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
   },
   passwordWrap: {
-    height: 48,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
@@ -536,7 +559,7 @@ const styles = StyleSheet.create({
   },
   errorText: { fontSize: 13, fontFamily: 'Inter_400Regular' },
   btn: {
-    height: 52,
+    minHeight: 52,
     borderRadius: 4,
     alignItems: 'center',
     justifyContent: 'center',
@@ -594,5 +617,18 @@ const styles = StyleSheet.create({
     marginTop: 24,
     fontSize: 12,
     fontFamily: 'Inter_400Regular',
+  },
+  legalRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 20,
+    marginTop: 12,
+  },
+  legalLink: {
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    textDecorationLine: 'underline',
+    paddingVertical: 6,
   },
 });

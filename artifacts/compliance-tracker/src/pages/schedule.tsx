@@ -89,7 +89,7 @@ export default function SchedulePage() {
           </div>
         ) : error && !info ? (
           <div className="text-center py-6">
-            <h1 className="text-xl font-semibold mb-2">Link unavailable</h1>
+            <h1 className="text-xl font-bold mb-2">Link unavailable</h1>
             <p className="text-muted-foreground">{error}</p>
             <p className="text-sm text-muted-foreground mt-4">If you've already proposed a date, no further action is needed. Otherwise please contact the business directly.</p>
           </div>

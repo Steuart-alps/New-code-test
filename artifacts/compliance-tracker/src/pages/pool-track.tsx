@@ -27,21 +27,26 @@ import {
   useUpdatePoolTrackConfig,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
-import { beginApiMutation } from "@/lib/api";
+import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { useSiteFilterId, useWorkingSiteId } from "@/hooks/use-working-site";
+import { sortedEntries } from "@/lib/sort-options";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
 const apiBase = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
 async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
   const mutationSucceeded = beginApiMutation(init?.method, path);
-  const res = await fetch(`${apiBase}${path}`, {
+  const res = await fetchWithOverrideReason(withActiveClient(`${apiBase}${path}`, init?.body), await withCsrfToken({
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
-  });
+  }));
+  notifyAuthStatus(res);
   const ct = res.headers.get("content-type") ?? "";
   const data = ct.includes("application/json") ? await res.json() : null;
   if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
@@ -345,6 +350,9 @@ function RecordDialog({
   const [checkDate, setCheckDate] = useState(existing?.check_date ?? todayIso());
   const [checkTime, setCheckTime] = useState(existing?.check_time ?? nowTime());
   const [selectedSite, setSelectedSite] = useState<number | undefined>(existing?.site_id ?? siteId);
+  const workingSiteId = useWorkingSiteId();
+  // A new check starts on the page's site, else the user's working site.
+  useEffect(() => { if (open && !isEdit) setSelectedSite(siteId ?? workingSiteId ?? undefined); }, [open]);
   const [ph, setPh] = useState(existing?.ph_level ?? "");
   const [freeChlor, setFreeChlor] = useState(existing?.free_chlorine ?? "");
   const [combChlor, setCombChlor] = useState(existing?.combined_chlorine ?? "");
@@ -357,6 +365,7 @@ function RecordDialog({
   const [actionsTaken, setActionsTaken] = useState(existing?.actions_taken ?? "");
   const [notes, setNotes] = useState(existing?.notes ?? "");
   const [overrideResult, setOverrideResult] = useState<string | null>(null);
+  const media = useRecordMedia("pool_check");
 
   const { toast } = useToast();
   const { data: sites } = useListSites();
@@ -387,17 +396,19 @@ function RecordDialog({
     try {
       const payload = {
         checkType, checkDate, checkTime: checkTime || undefined,
-        siteId: selectedSite,
+        siteId: selectedSite ?? null,
         phLevel: parsedPh, freeChlorine: parsedFree, combinedChlorine: parsedComb,
         waterTempC: parsedWT, airTempC: airTemp ? parseFloat(airTemp) : null,
         turbidity: turbidity || null, poolOpen, performedBy: performedBy || null, staffRosterId: staffRosterId,
-        actionsTaken: actionsTaken || undefined, result: effectiveResult,
-        notes: notes || undefined,
+        // null (not undefined) so clearing a field on edit actually clears it
+        actionsTaken: actionsTaken || null, result: effectiveResult,
+        notes: notes || null,
       };
       if (isEdit) {
         await apiFetch(`/pool-track/${existing!.id}`, { method: "PUT", body: JSON.stringify(payload) });
       } else {
-        await apiFetch("/pool-track", { method: "POST", body: JSON.stringify(payload) });
+        const created = await apiFetch<{ id?: number }>("/pool-track", { method: "POST", body: JSON.stringify(payload) });
+        await media.attach(created?.id);
       }
       toast({ title: isEdit ? "Record updated" : "Check recorded" });
       setOpen(false); onSaved();
@@ -407,7 +418,7 @@ function RecordDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={o => { setOpen(o); }}>
+    <Dialog open={open} onOpenChange={o => { setOpen(o); if (!o) media.clear(); }}>
       <DialogTrigger asChild>
         {isEdit
           ? <Button variant="ghost" size="sm"><Pencil className="w-3.5 h-3.5" /></Button>
@@ -416,7 +427,7 @@ function RecordDialog({
       </DialogTrigger>
       <DialogContent className="max-w-xl rounded-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-display">{isEdit ? "Edit Pool Check" : "Record Pool Check"}</DialogTitle>
+          <DialogTitle className="font-display font-bold">{isEdit ? "Edit Pool Check" : "Record Pool Check"}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-4">
           {!isEdit && (
@@ -425,7 +436,7 @@ function RecordDialog({
               <Select value={checkType} onValueChange={setCheckType}>
                 <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(CHECK_TYPE_LABELS).map(([k, v]) => (
+                  {sortedEntries(CHECK_TYPE_LABELS).map(([k, v]) => (
                     <SelectItem key={k} value={k}>{v}</SelectItem>
                   ))}
                 </SelectContent>
@@ -550,10 +561,11 @@ function RecordDialog({
             <Label>Notes <span className="text-muted-foreground text-xs">optional</span></Label>
             <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="rounded-sm" />
           </div>
+          {isEdit ? <CheckPhotoUploader entityType="pool_check" entityId={existing!.id} /> : media.picker}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={handleSubmit}>{isEdit ? "Update" : "Record Check"}</Button>
+          <Button variant="outline" disabled={media.attaching} onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={media.attaching}>{media.attaching ? "Adding photos…" : isEdit ? "Update" : "Record Check"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -583,7 +595,7 @@ export default function PoolTrackPage() {
   const hasPool = hasService("pooltrack");
 
   const [filterType, setFilterType] = useState("");
-  const [filterSite, setFilterSite] = useState<number | undefined>();
+  const [filterSite, setFilterSite] = useSiteFilterId();
   const [recordOpen, setRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<string | undefined>(undefined);
   const [checks, setChecks] = useState<PoolCheck[]>([]);
@@ -643,7 +655,7 @@ export default function PoolTrackPage() {
                 <Lock className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h2 className="text-2xl font-display font-medium mb-2">PoolTrack</h2>
+                <h2 className="text-2xl font-display font-bold mb-2">PoolTrack</h2>
                 <p className="text-muted-foreground mb-1">Swimming pool water testing logbook. Record pH, chlorine, temperature and clarity checks in line with PWTAG and HSG179.</p>
                 <p className="font-medium text-primary">£10 per site per month</p>
               </div>
@@ -769,7 +781,7 @@ export default function PoolTrackPage() {
                   <SelectTrigger className="rounded-sm"><SelectValue placeholder="All types" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All types</SelectItem>
-                    {Object.entries(CHECK_TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                    {sortedEntries(CHECK_TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -792,7 +804,7 @@ export default function PoolTrackPage() {
         {/* History */}
         <Card>
           <CardHeader className="border-b border-border/50 pb-4">
-            <CardTitle className="font-display">Check Log</CardTitle>
+            <CardTitle className="font-display font-bold">Check Log</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             {loading ? (
@@ -855,6 +867,7 @@ export default function PoolTrackPage() {
                             <div className="text-xs text-muted-foreground"><span className="font-medium">Notes:</span> {check.notes}</div>
                           )}
                           {/* Photos */}
+                          <RecordSignedBy recordType="pool_check" recordId={check.id} />
                           <CheckPhotoUploader entityType="pool_check" entityId={check.id} compact />
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">

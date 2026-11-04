@@ -35,7 +35,7 @@ assert.equal((await a.request("GET", "/audit-log?module=invalid")).status, 400);
 assert.equal((await a.request("GET", "/audit-log")).status, 400);
 assert.equal((await a.request("GET", `/audit-log?module=fire&clientId=${b.user.clientId}`)).status, 403);
 const created = await a.request("POST", "/fire-safety", {
-  checkType: "alarm", checkDate: new Date().toISOString().slice(0, 10),
+  checkType: "alarm", callPoint: "CP1", checkDate: new Date().toISOString().slice(0, 10),
   result: "pass", notes: "Audit endpoint fixture",
   changedBy: b.user.id, actorId: b.user.id,
 });

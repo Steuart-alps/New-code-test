@@ -53,7 +53,7 @@ export function session() {
     return { status: response.status, data, bytes: data === null ? raw : null, text: data === null ? raw.toString("utf8") : null };
   }
   let browserPolicy = false;
-  return async function request(method, path, body) {
+  async function request(method, path, body) {
     if (method === "GET" || method === "HEAD") return send(method, path, body);
     if (!browserPolicy) {
       const result = await send(method, path, body);
@@ -70,7 +70,10 @@ export function session() {
     const result = await send(method, path, body, { origin: ORIGIN, "x-csrf-token": csrfToken });
     if (path.startsWith("/auth/")) csrfToken = null;
     return result;
-  };
+  }
+  /** The session cookie ("name=value"), for handing the sign-in to a browser. */
+  request.cookie = () => cookie;
+  return request;
 }
 
 function currentTotp(secret) {
@@ -126,11 +129,11 @@ export function createRun(suite) {
     return { request, clientId: user.clientId, userId: user.id };
   }
 
-  /** A second, ordinary staff user in the tenant, created through POST /users. */
-  async function addSameClientUser(owner, label) {
+  /** A second user in the tenant (ordinary staff unless a role is given), created through POST /users. */
+  async function addSameClientUser(owner, label, role = "client_staff") {
     const email = `${suite}-${label}-${runId}-${randomUUID()}@test.local`;
     const created = await owner.request("POST", "/users", {
-      name: `${suite} ${label}`, email, password: PASSWORD, role: "client_staff", clientId: owner.clientId,
+      name: `${suite} ${label}`, email, password: PASSWORD, role, clientId: owner.clientId,
     });
     assert.equal(created.status, 201, `${label}: create same-client user`);
     assert.equal(created.data?.clientId, owner.clientId, `${label}: user belongs to the uploading client`);
@@ -199,7 +202,10 @@ export function createRun(suite) {
     console.log(`${suite}: fixture cleanup verified (${ids.length} client(s), no rows left)`);
   }
 
-  return { runId, registerTenant, addSameClientUser, assertProviderAcl, assertProviderHasNoAcl, cleanup };
+  /** Remove an object this run created at cleanup, without checking it. */
+  const trackObject = (objectPath) => { objectPaths.add(objectPath); };
+
+  return { runId, registerTenant, addSameClientUser, assertProviderAcl, assertProviderHasNoAcl, trackObject, cleanup };
 }
 
 /** Fetch an app download link (absolute, from getPublicAppUrl) against the API under test. */
@@ -209,7 +215,7 @@ export function appDownloadPath(downloadUrl) {
   return `${ORIGIN}${pathname}`;
 }
 
-function psqlScalar(sqlText) {
+export function psqlScalar(sqlText) {
   return new Promise((resolve, reject) => {
     const child = spawn("psql", ["-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", "-d", process.env.DATABASE_URL, "-f", "-"], {
       stdio: ["pipe", "pipe", "pipe"],

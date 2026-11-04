@@ -3,8 +3,8 @@ import { sql } from "drizzle-orm";
 /**
  * Every database location that can retain a private object reference. Keep this
  * registry aligned with the attachment sources in routes/export.ts. The two
- * specialised sources below cover the linked certificates table and FixTrack's
- * JSON media array.
+ * specialised sources below cover the linked certificates table and the JSON
+ * media arrays of FixTrack issues and track actions.
  */
 export const TENANT_ATTACHMENT_REFERENCE_SOURCES = [
   "doc_track_documents.object_path",
@@ -15,11 +15,22 @@ export const TENANT_ATTACHMENT_REFERENCE_SOURCES = [
   "client_documents.object_path",
   "contractor_certificates.object_path",
   "certificates.file_url",
+  "coshh_substances.sds_object_path",
+  "coshh_assessments.document_object_path",
+  "coshh_checks.report_object_path",
+  "asbestos_records.report_object_path",
+  "asbestos_survey_history.report_object_path",
+  "inspection_reports.object_path",
   "check_photos.object_path",
+  "incident_riddor_events.receipt_object_path",
+  "green_puwer_inspections.certificate_object_path",
   "staged_photo_upload_receipts.object_path",
   "fix_track_issues.media_urls",
   "fix_track_issues.completion_document_path",
   "fix_track_action_tokens.completion_object_path",
+  "track_actions.media_urls",
+  "certificate_inbox_items.object_path",
+  "contractor_test_visits.certificate_object_path",
 ] as const;
 
 type SqlExecutor = {
@@ -46,7 +57,20 @@ export async function listTenantAttachmentObjectPaths(
         FROM certificates cert
         JOIN contractors contractor ON contractor.id = cert.contractor_id
         WHERE contractor.client_id = ${tenantId}
+      UNION ALL
+        SELECT cert.file_url AS object_path
+        FROM certificates cert
+        JOIN compliance_items item ON item.id = cert.item_id
+        WHERE item.client_id = ${tenantId}
+      UNION ALL SELECT sds_object_path AS object_path FROM coshh_substances WHERE client_id = ${tenantId}
+      UNION ALL SELECT document_object_path AS object_path FROM coshh_assessments WHERE client_id = ${tenantId}
+      UNION ALL SELECT report_object_path AS object_path FROM coshh_checks WHERE client_id = ${tenantId}
+      UNION ALL SELECT report_object_path AS object_path FROM asbestos_records WHERE client_id = ${tenantId}
+      UNION ALL SELECT report_object_path AS object_path FROM asbestos_survey_history WHERE client_id = ${tenantId}
+      UNION ALL SELECT object_path FROM inspection_reports WHERE client_id = ${tenantId}
       UNION ALL SELECT object_path FROM check_photos WHERE client_id = ${tenantId}
+      UNION ALL SELECT receipt_object_path AS object_path FROM incident_riddor_events WHERE client_id = ${tenantId}
+      UNION ALL SELECT certificate_object_path AS object_path FROM green_puwer_inspections WHERE client_id = ${tenantId}
       UNION ALL SELECT object_path FROM staged_photo_upload_receipts WHERE client_id = ${tenantId}
       UNION ALL
         SELECT media.object_path
@@ -55,6 +79,13 @@ export async function listTenantAttachmentObjectPaths(
         WHERE issue.client_id = ${tenantId}
       UNION ALL SELECT completion_document_path AS object_path FROM fix_track_issues WHERE client_id = ${tenantId}
       UNION ALL SELECT completion_object_path AS object_path FROM fix_track_action_tokens WHERE client_id = ${tenantId}
+      UNION ALL
+        SELECT media.object_path
+        FROM track_actions action
+        CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(action.media_urls, '[]'::jsonb)) media(object_path)
+        WHERE action.client_id = ${tenantId}
+      UNION ALL SELECT object_path FROM certificate_inbox_items WHERE client_id = ${tenantId}
+      UNION ALL SELECT certificate_object_path AS object_path FROM contractor_test_visits WHERE client_id = ${tenantId}
     ) attachments
     WHERE object_path LIKE '/objects/%'
   `);
@@ -90,7 +121,21 @@ export async function hasTenantAttachmentReference(
         JOIN contractors contractor ON contractor.id = cert.contractor_id
         WHERE contractor.client_id = ${tenantId} AND cert.file_url = ${objectPath}
       )
+      OR EXISTS (
+        SELECT 1
+        FROM certificates cert
+        JOIN compliance_items item ON item.id = cert.item_id
+        WHERE item.client_id = ${tenantId} AND cert.file_url = ${objectPath}
+      )
+      OR EXISTS (SELECT 1 FROM coshh_substances WHERE client_id = ${tenantId} AND sds_object_path = ${objectPath})
+      OR EXISTS (SELECT 1 FROM coshh_assessments WHERE client_id = ${tenantId} AND document_object_path = ${objectPath})
+      OR EXISTS (SELECT 1 FROM coshh_checks WHERE client_id = ${tenantId} AND report_object_path = ${objectPath})
+      OR EXISTS (SELECT 1 FROM asbestos_records WHERE client_id = ${tenantId} AND report_object_path = ${objectPath})
+      OR EXISTS (SELECT 1 FROM asbestos_survey_history WHERE client_id = ${tenantId} AND report_object_path = ${objectPath})
+      OR EXISTS (SELECT 1 FROM inspection_reports WHERE client_id = ${tenantId} AND object_path = ${objectPath})
       OR EXISTS (SELECT 1 FROM check_photos WHERE client_id = ${tenantId} AND object_path = ${objectPath})
+      OR EXISTS (SELECT 1 FROM incident_riddor_events WHERE client_id = ${tenantId} AND receipt_object_path = ${objectPath})
+      OR EXISTS (SELECT 1 FROM green_puwer_inspections WHERE client_id = ${tenantId} AND certificate_object_path = ${objectPath})
       OR EXISTS (SELECT 1 FROM staged_photo_upload_receipts WHERE client_id = ${tenantId} AND object_path = ${objectPath})
       OR EXISTS (
         SELECT 1
@@ -106,6 +151,14 @@ export async function hasTenantAttachmentReference(
         SELECT 1 FROM fix_track_action_tokens
         WHERE client_id = ${tenantId} AND completion_object_path = ${objectPath}
       )
+      OR EXISTS (
+        SELECT 1
+        FROM track_actions action
+        CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(action.media_urls, '[]'::jsonb)) media(object_path)
+        WHERE action.client_id = ${tenantId} AND media.object_path = ${objectPath}
+      )
+      OR EXISTS (SELECT 1 FROM certificate_inbox_items WHERE client_id = ${tenantId} AND object_path = ${objectPath})
+      OR EXISTS (SELECT 1 FROM contractor_test_visits WHERE client_id = ${tenantId} AND certificate_object_path = ${objectPath})
     ) AS referenced
   `);
   return Boolean((result.rows?.[0] as { referenced?: boolean } | undefined)?.referenced);

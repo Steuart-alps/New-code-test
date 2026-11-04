@@ -147,6 +147,8 @@ export interface ReadinessReport {
     status: "ok" | "starting" | "degraded";
     blocker?: string;
     billing?: { state: BillingPhase; stage?: string; activationBlocked: boolean; retrying?: boolean };
+    /** Informational notes (stale jobs, email or contractor-link configuration); never change the status. */
+    details?: Record<string, unknown>;
   };
 }
 

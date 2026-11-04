@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { sitesTable } from "@workspace/db/schema";
-import { eq, and, or, isNull, desc } from "drizzle-orm";
+import { sitesTable, type Site } from "@workspace/db/schema";
+import { eq, and, desc } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import {
   requireAuth,
@@ -9,13 +9,18 @@ import {
   getClientId,
   canAccessClient,
   getActiveDepartmentId,
+  requireRole,
+  denyViewers,
 } from "../middleware/requireAuth";
+import { parseChecklistDueTime } from "../lib/checklistDueTimes";
 import { seedSiteStarterChecks } from "../lib/seedStarterContent";
 import { syncClientSubscriptionQuantity, queueSiteAddedCharge } from "../lib/billing";
 import { filterName } from "../lib/contentFilter";
-import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
+import { ObjectContentError, ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
 import { departmentsTable } from "@workspace/db/schema";
+import { sitesTableVisibleTo, siteVisibleToDepartment } from "../lib/departmentSites";
 
 const storage = new ObjectStorageService();
 
@@ -26,15 +31,42 @@ function parsePositiveSafeInteger(raw: unknown): number | null {
   return Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
-async function validateDepartmentForClient(rawDepartmentId: unknown, clientId: number): Promise<number | null | "invalid"> {
+// A site can be given to one department; a department that sits under a
+// site can only be given that site (siteId is null for a new site).
+async function validateDepartmentForClient(rawDepartmentId: unknown, clientId: number, siteId: number | null): Promise<number | null | "invalid"> {
   if (rawDepartmentId === undefined || rawDepartmentId === null || rawDepartmentId === "") return null;
   const departmentId = Number(rawDepartmentId);
   if (!Number.isSafeInteger(departmentId) || departmentId <= 0) return "invalid";
-  const [department] = await db.select({ id: departmentsTable.id })
+  const [department] = await db.select({ id: departmentsTable.id, siteId: departmentsTable.siteId })
     .from(departmentsTable)
     .where(and(eq(departmentsTable.id, departmentId), eq(departmentsTable.clientId, clientId)))
     .limit(1);
-  return department ? departmentId : "invalid";
+  if (!department) return "invalid";
+  return department.siteId === null || department.siteId === siteId ? departmentId : "invalid";
+}
+
+type FireWalkAnswers = Pick<Site, "sleepingAccommodation" | "nightPorter" | "nightPorterSince">;
+
+/**
+ * The site's answers to "Sleeping accommodation?" and "Night porter?" (true,
+ * false or null for not answered). A night porter is only asked about with
+ * sleeping accommodation, so without it the answer is cleared. The time the
+ * night porter answer became yes is kept so earlier nights never count as
+ * missed walks. Returns "invalid" for anything but a boolean or null.
+ */
+function fireWalkAnswers(body: Record<string, unknown>, existing?: FireWalkAnswers): FireWalkAnswers | "invalid" {
+  const answer = (key: "sleepingAccommodation" | "nightPorter"): boolean | null | "invalid" => {
+    if (!(key in body)) return existing?.[key] ?? null;
+    const value = body[key];
+    return value === null || typeof value === "boolean" ? value : "invalid";
+  };
+  const sleepingAccommodation = answer("sleepingAccommodation");
+  const asked = answer("nightPorter");
+  if (sleepingAccommodation === "invalid" || asked === "invalid") return "invalid";
+  const nightPorter = sleepingAccommodation === true ? asked : null;
+  const nightPorterSince = nightPorter !== true ? null
+    : existing?.nightPorter === true && existing.nightPorterSince ? existing.nightPorterSince : new Date();
+  return { sleepingAccommodation, nightPorter, nightPorterSince };
 }
 
 router.get("/sites", requireAuth, async (req, res) => {
@@ -47,10 +79,11 @@ router.get("/sites", requireAuth, async (req, res) => {
   const conditions: ReturnType<typeof eq>[] = [eq(sitesTable.clientId, clientId)];
 
   // Department scoping: staff/viewers with a department only see sites in their
-  // department or sites that have not been assigned to any department.
+  // department or sites that have not been assigned to any department, and
+  // only their department's own site when it sits under one.
   const deptId = getActiveDepartmentId(req);
   if (deptId !== null) {
-    conditions.push(or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)) as any);
+    conditions.push(sitesTableVisibleTo(deptId) as any);
   }
 
   const sites = await db
@@ -77,9 +110,8 @@ router.get("/sites/:id", requireAuth, async (req, res) => {
     return;
   }
   // Department scoping: staff/viewers can only read sites in their department
-  // (or unassigned sites).
-  const deptId = getActiveDepartmentId(req);
-  if (deptId !== null && site.departmentId !== null && site.departmentId !== deptId) {
+  // (or unassigned sites), and only their department's own site.
+  if (!(await siteVisibleToDepartment(site, getActiveDepartmentId(req)))) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
@@ -102,9 +134,14 @@ router.post("/sites", requireAuth, requireClientAdmin, async (req, res) => {
     res.status(400).json({ error: nameCheck.message });
     return;
   }
-  const departmentId = await validateDepartmentForClient(req.body?.departmentId, clientId);
+  const departmentId = await validateDepartmentForClient(req.body?.departmentId, clientId, null);
   if (departmentId === "invalid") {
-    res.status(400).json({ error: "Department does not belong to this client" });
+    res.status(400).json({ error: "Department does not belong to this client or this site" });
+    return;
+  }
+  const fireWalks = fireWalkAnswers(req.body ?? {});
+  if (fireWalks === "invalid") {
+    res.status(400).json({ error: "Answer sleeping accommodation and night porter with yes or no" });
     return;
   }
   // The site row and its billing charge intent are created atomically: a
@@ -119,6 +156,7 @@ router.post("/sites", requireAuth, requireClientAdmin, async (req, res) => {
         responsiblePerson: req.body.responsiblePerson ?? null,
         address: req.body.address ?? null,
         phone: req.body.phone ?? null,
+        ...fireWalks,
         updatedAt: new Date(),
       })
       .returning();
@@ -126,9 +164,9 @@ router.post("/sites", requireAuth, requireClientAdmin, async (req, res) => {
     return created;
   });
 
-  // Pre-populate the new site with the starter pack of compliance checks,
-  // unless the caller explicitly opted out.
-  if (req.body.seedStarterChecks !== false) {
+  // Pre-populate the new site with the starter pack of compliance checks only
+  // when the caller explicitly opts in.
+  if (req.body.seedStarterChecks === true) {
     await seedSiteStarterChecks(clientId, site.id);
   }
 
@@ -155,20 +193,81 @@ router.patch("/sites/:id", requireAuth, requireClientAdmin, async (req, res) => 
   }
   let departmentId: number | null | "invalid" = existing.departmentId;
   if ("departmentId" in req.body) {
-    departmentId = await validateDepartmentForClient(req.body.departmentId, existing.clientId);
+    departmentId = await validateDepartmentForClient(req.body.departmentId, existing.clientId, existing.id);
     if (departmentId === "invalid") {
-      res.status(400).json({ error: "Department does not belong to this client" });
+      res.status(400).json({ error: "Department does not belong to this client or this site" });
       return;
     }
   }
   const updates: Record<string, unknown> = { updatedAt: new Date() };
-  for (const key of ["name", "responsiblePerson", "address", "phone"] as const) {
+  for (const key of ["responsiblePerson", "address", "phone"] as const) {
     if (key in req.body) updates[key] = req.body[key];
+  }
+  if ("sleepingAccommodation" in req.body || "nightPorter" in req.body) {
+    const fireWalks = fireWalkAnswers(req.body, existing);
+    if (fireWalks === "invalid") {
+      res.status(400).json({ error: "Answer sleeping accommodation and night porter with yes or no" });
+      return;
+    }
+    Object.assign(updates, fireWalks);
+  }
+  // Same name rules as POST /sites.
+  if ("name" in req.body) {
+    const name = String(req.body.name ?? "").trim();
+    if (!name) {
+      res.status(400).json({ error: "Site name is required" });
+      return;
+    }
+    const nameCheck = filterName(name);
+    if (!nameCheck.ok) {
+      res.status(400).json({ error: nameCheck.message });
+      return;
+    }
+    updates.name = name;
   }
   // Allow tagging / un-tagging a site to a department
   if ("departmentId" in req.body) updates.departmentId = departmentId;
 
   const [updated] = await db.update(sitesTable).set(updates)
+    .where(and(eq(sitesTable.id, id), eq(sitesTable.clientId, existing.clientId))).returning();
+  res.json(updated);
+});
+
+/**
+ * When the site's opening and closing checks are due ("HH:MM"; null or blank
+ * for the default 06:00 / 18:00), and when the reminder about checks still not
+ * submitted goes out (default 11:00 / 21:00). Owners, consultants and the
+ * Managers who can see the site set them (lib/checklistDueTimes.ts).
+ */
+router.put("/sites/:id/checklist-due-times", requireAuth, denyViewers, requireRole("consultant", "client_admin", "client_manager"), async (req, res) => {
+  const id = parsePositiveSafeInteger(req.params.id);
+  if (id === null) {
+    res.status(400).json({ error: "Invalid site id" });
+    return;
+  }
+  const [existing] = await db.select().from(sitesTable).where(eq(sitesTable.id, id));
+  if (!existing) {
+    res.status(404).json({ error: "Site not found" });
+    return;
+  }
+  if (!canAccessClient(req, existing.clientId) || !(await siteVisibleToDepartment(existing, getActiveDepartmentId(req)))) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const time = (key: "openingChecksDue" | "closingChecksDue" | "openingReminderAt" | "closingReminderAt") =>
+    key in body ? parseChecklistDueTime(body[key]) : existing[key];
+  const times = {
+    openingChecksDue: time("openingChecksDue"),
+    closingChecksDue: time("closingChecksDue"),
+    openingReminderAt: time("openingReminderAt"),
+    closingReminderAt: time("closingReminderAt"),
+  };
+  if (Object.values(times).includes("invalid")) {
+    res.status(400).json({ error: "Enter times as hours and minutes, such as 06:00" });
+    return;
+  }
+  const [updated] = await db.update(sitesTable).set({ ...(times as Record<keyof typeof times, string | null>), updatedAt: new Date() })
     .where(and(eq(sitesTable.id, id), eq(sitesTable.clientId, existing.clientId))).returning();
   res.json(updated);
 });
@@ -243,6 +342,7 @@ router.post("/sites/:id/documents/request-upload", requireAuth, requireClientAdm
   if (!site) return res.status(404).json({ error: "Site not found" });
 
   try {
+    await ensureUploadCapacity(clientId, req.log);
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });
@@ -267,6 +367,7 @@ router.post("/sites/:id/documents", requireAuth, requireClientAdmin, async (req,
   try {
     await storage.finalizeTenantUpload(objectPath, clientId);
   } catch (err) {
+    if (err instanceof ObjectContentError) return res.status(400).json({ error: err.message });
     const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
       : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded document";
     return res.status(err instanceof ObjectNotFoundError ? 404 : 403).json({ error });

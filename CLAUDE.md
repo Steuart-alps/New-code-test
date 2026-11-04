@@ -25,6 +25,12 @@ unfamiliar area.
 - `pnpm --filter @workspace/api-server run build`
 - `pnpm --filter @workspace/api-server run dev` / `pnpm --filter @workspace/compliance-tracker run dev`
 - `pnpm --filter @workspace/api-spec run codegen` — after changing the OpenAPI spec
+  (it also records compatible changes in `lib/api-spec/openapi.baseline.yaml`;
+  `pnpm run check:api-contract` fails on changes that break deployed clients,
+  and `pnpm run api-contract:accept` records a deliberate breaking change)
+- New API routes must be added to `lib/api-spec/openapi.yaml` (or excluded with a
+  reason in `api-server/tests/openapi-route-inventory.mjs`); CI runs
+  `pnpm --filter @workspace/api-server run test:openapi-routes`
 - API tests: `pnpm --filter @workspace/api-server run test:<name>` (see its `package.json`;
   `*:ci` variants boot their own server). They need `DATABASE_URL` and `SESSION_SECRET`.
 

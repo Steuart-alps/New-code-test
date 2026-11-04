@@ -1,24 +1,41 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, type ReactNode } from "react";
 import { AppLayout } from "@/components/layout";
+import { SayItButton } from "@/components/say-it-button";
 import { useListSites } from "@workspace/api-client-react";
 import { apiFetch } from "@/lib/api";
-import { summarizeKitchenStatuses, type KitchenCheckState } from "@/lib/kitchen-dashboard-status";
+import { type KitchenCheckState } from "@/lib/kitchen-dashboard-status";
+import { KitchenStatusPill } from "@/components/kitchen-status-pill";
+import { ComplianceChecksDue } from "@/components/compliance-checks-due";
+import { FrostWarningCard } from "@/components/frost-warning-card";
+import { TodayByDepartmentCard } from "@/components/today-by-department";
+import { RegisterReviewsDue } from "@/components/register-reviews-due";
+import { DashboardStartCards } from "@/components/dashboard-start-cards";
+import { useBillingReturn } from "@/lib/billing-return";
 import { cn } from "@/lib/utils";
 import { Link } from "wouter";
+import { useCertificateInbox } from "@/components/certificate-inbox-card";
 import {
   ChevronDown, ChevronRight, ArrowRight, AlertCircle, AlertTriangle,
-  CheckCircle2, MinusCircle, SlidersHorizontal,
-  MapPin, UserPlus, Mail, Settings2, MailWarning,
+  CheckCircle2, Circle, MinusCircle, SlidersHorizontal,
+  MapPin, UserPlus, Mail, Settings2, MailWarning, Inbox, ShieldCheck,
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useAuth, useCanAdmin, useIsMaintenanceManager } from "@/context/auth-context";
+import { useSiteFilter } from "@/hooks/use-working-site";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type TrackStatus = "ok" | "attention" | "overdue" | "no_data";
-type TrackHealth = "action_required" | "clear";
+// not_started: nothing recorded yet and nothing overdue — neutral, not a failure.
+type TrackHealth = "action_required" | "not_started" | "clear";
+
+const HEALTH_LABEL: Record<TrackHealth, string> = {
+  action_required: "action required",
+  not_started: "not started",
+  clear: "clear",
+};
 
 interface TrackItem {
   label: string;
@@ -35,6 +52,8 @@ interface TrackSummary {
   health: TrackHealth;
   badge: string;
   items: TrackItem[];
+  /** Not picked in the setup wizard and not started: listed under "Other modules". */
+  otherModule?: boolean;
 }
 
 interface ChecklistTotals {
@@ -45,7 +64,16 @@ interface ChecklistTotals {
   expectedPmPairs: number;
   completedPmPairs: number;
   completedSitePairs: number;
+  /** Sites with a checklist still to submit today; `am` / `pm` true = still to do. */
+  /** amDue / pmDue: when the site's opening / closing checks are due ("HH:MM"); *Overdue once that has passed. */
+  outstanding?: Array<{
+    siteId: number; siteName: string; am: boolean; pm: boolean;
+    amDue?: string; pmDue?: string; amOverdue?: boolean; pmOverdue?: boolean;
+  }>;
 }
+
+/** Most sites listed under "Still to do today"; the rest are on the full status page. */
+const MAX_OUTSTANDING_SITES = 6;
 
 // ── Status styling ─────────────────────────────────────────────────────────────
 
@@ -72,6 +100,7 @@ const STATUS_BADGE: Record<TrackStatus, string> = {
 
 function StatusIcon({ status, health, className }: { status: TrackStatus; health: TrackHealth; className?: string }) {
   if (health === "action_required") return <AlertCircle className={cn("text-rose-500", className)} />;
+  if (health === "not_started") return <Circle className={cn("text-muted-foreground/60", className)} />;
   if (status === "attention") return <AlertTriangle className={cn("text-amber-500", className)} />;
   if (health === "clear") return <CheckCircle2 className={cn("text-emerald-500", className)} />;
   return                             <MinusCircle    className={cn("text-muted-foreground/50",    className)} />;
@@ -79,8 +108,13 @@ function StatusIcon({ status, health, className }: { status: TrackStatus; health
 
 // ── Track row ─────────────────────────────────────────────────────────────────
 
-function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchenOverdueBadge?: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
+function TrackRow({ track, kitchenOverdueBadge, defaultOpen = false }: {
+  track: TrackSummary;
+  kitchenOverdueBadge?: React.ReactNode;
+  /** Start with the checks listed, e.g. when picked from the summary bar. */
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   const hasItems = track.items.length > 0;
   const canExpand = hasItems;
 
@@ -97,7 +131,7 @@ function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchen
         <Link
           href={track.path}
           className="flex min-w-0 flex-1 items-center gap-3 rounded-sm text-left transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-          aria-label={`Open ${track.label}: ${track.health === "action_required" ? "action required" : "clear"}`}
+          aria-label={`Open ${track.label}: ${HEALTH_LABEL[track.health] ?? "clear"}`}
         >
           <StatusIcon status={track.status} health={track.health} className="w-4 h-4 shrink-0" />
 
@@ -105,6 +139,8 @@ function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchen
             "font-medium text-sm flex-1",
             track.health === "action_required"
               ? "text-rose-700"
+              : track.health === "not_started"
+              ? "text-muted-foreground"
               : track.status === "attention"
               ? "text-amber-700"
               : track.status === "no_data"
@@ -142,7 +178,7 @@ function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchen
           <Link
             href={track.path}
             className="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-            aria-label={`Open ${track.label}: ${track.health === "action_required" ? "action required" : "clear"}`}
+            aria-label={`Open ${track.label}: ${HEALTH_LABEL[track.health] ?? "clear"}`}
           >
             <ArrowRight className="w-4 h-4" />
           </Link>
@@ -195,43 +231,79 @@ function DisabledTrack({ track }: { track: TrackSummary }) {
 
 // ── Summary bar ───────────────────────────────────────────────────────────────
 
-function SummaryBar({ tracks }: { tracks: TrackSummary[] }) {
+type SummaryFilter = "action_required" | "due" | "complete" | "not_started";
+
+// These buckets are deliberately ordered so every module is counted once:
+// an overdue or failed module is action-needed even when its status is not
+// "attention", while future due items remain a separate, non-urgent state.
+// Modules with nothing recorded yet are "not started", a neutral state.
+const SUMMARY_FILTERS: Record<SummaryFilter, (t: TrackSummary) => boolean> = {
+  action_required: (t) => t.health === "action_required",
+  due: (t) => t.health === "clear" && t.status === "attention",
+  complete: (t) => t.health === "clear" && t.status === "ok",
+  not_started: (t) => t.health === "not_started",
+};
+
+const SUMMARY_FILTER_LABEL: Record<SummaryFilter, string> = {
+  action_required: "that require action",
+  due: "due soon",
+  complete: "complete",
+  not_started: "not started",
+};
+
+/**
+ * Counts of modules by state. Each count is a button that narrows the module
+ * list below to those modules with their checks listed, so anything still to
+ * do is one more click away. "Not applicable" opens the disabled list.
+ */
+function SummaryBar({ tracks, filter, onFilter, onShowDisabled }: {
+  tracks: TrackSummary[];
+  filter: SummaryFilter | null;
+  onFilter: (filter: SummaryFilter | null) => void;
+  onShowDisabled: () => void;
+}) {
   const enabled = tracks.filter((t) => t.enabled);
-  // These buckets are deliberately ordered so every module is counted once:
-  // an overdue/no-data module is action-needed even when its status is not
-  // "attention", while future due items remain a separate, non-urgent state.
-  const actionRequired = enabled.filter((t) => t.health === "action_required").length;
-  const due = enabled.filter((t) => t.health !== "action_required" && t.status === "attention").length;
-  const complete = enabled.filter((t) => t.health !== "action_required" && t.status === "ok").length;
+  const count = (key: SummaryFilter) => enabled.filter(SUMMARY_FILTERS[key]).length;
+  const actionRequired = count("action_required");
+  const due = count("due");
+  const complete = count("complete");
+  const notStarted = count("not_started");
   const notApplicable = tracks.filter((t) => !t.enabled).length;
 
   if (enabled.length === 0) return null;
 
+  const chip = (key: SummaryFilter, className: string, icon: ReactNode, label: string) => (
+    <button
+      type="button"
+      aria-pressed={filter === key}
+      onClick={() => onFilter(filter === key ? null : key)}
+      className={cn(
+        "flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+        filter === key ? "border-current bg-muted/60" : "border-transparent",
+        className,
+      )}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+
   return (
-    <div className="flex items-center gap-4 text-sm flex-wrap">
-      {actionRequired > 0 && (
-        <span className="flex items-center gap-1.5 text-rose-600 font-medium">
-          <AlertCircle className="w-4 h-4" />
-          {actionRequired} track{actionRequired > 1 ? "s" : ""} require action
-        </span>
-      )}
-      {due > 0 && (
-        <span className="flex items-center gap-1.5 text-amber-700">
-          <AlertTriangle className="w-4 h-4" />
-          {due} due soon
-        </span>
-      )}
-      {complete > 0 && (
-        <span className="flex items-center gap-1.5 text-emerald-600">
-          <CheckCircle2 className="w-4 h-4" />
-          {complete} complete
-        </span>
-      )}
+    <div className="flex items-center gap-x-2 gap-y-1 text-sm flex-wrap -mx-2.5">
+      {actionRequired > 0 && chip("action_required", "text-rose-600 font-medium", <AlertCircle className="w-4 h-4" />,
+        `${actionRequired} track${actionRequired > 1 ? "s require" : " requires"} action`)}
+      {due > 0 && chip("due", "text-amber-700", <AlertTriangle className="w-4 h-4" />, `${due} due soon`)}
+      {complete > 0 && chip("complete", "text-emerald-600", <CheckCircle2 className="w-4 h-4" />, `${complete} complete`)}
+      {notStarted > 0 && chip("not_started", "text-muted-foreground", <Circle className="w-4 h-4" />, `${notStarted} not started`)}
       {notApplicable > 0 && (
-        <span className="flex items-center gap-1.5 text-muted-foreground">
+        <button
+          type="button"
+          onClick={onShowDisabled}
+          className="flex cursor-pointer items-center gap-1.5 rounded-full border border-transparent px-2.5 py-1 text-muted-foreground transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+        >
           <MinusCircle className="w-4 h-4" />
           {notApplicable} not applicable
-        </span>
+        </button>
       )}
     </div>
   );
@@ -244,11 +316,14 @@ function SetupChecklist({
   teamCount,
   notificationEmail,
   hasModules,
+  askTwoStep,
 }: {
   siteCount: number;
   teamCount: number;
   notificationEmail: string;
   hasModules: boolean;
+  /** An Owner without two-step sign-in: offer it as a step. */
+  askTwoStep: boolean;
 }) {
   const steps = [
     {
@@ -269,16 +344,23 @@ function SetupChecklist({
       label: "Set the admin alert email",
       detail: "Choose where overdue and compliance alerts should be sent.",
       done: Boolean(notificationEmail.trim()),
-      href: "/settings",
+      href: "/settings#admin-alert-email",
       icon: Mail,
     },
     {
       label: "Review your modules",
       detail: "Make sure the tracks you need are enabled for this account.",
       done: hasModules,
-      href: "/settings",
+      href: "/settings#services",
       icon: Settings2,
     },
+    ...(askTwoStep ? [{
+      label: "Turn on two-step sign-in",
+      detail: "Your login holds staff injury records. A code from your phone stops anyone who guesses your password.",
+      done: false,
+      href: "/account-security",
+      icon: ShieldCheck,
+    }] : []),
   ];
   const completed = steps.filter((step) => step.done).length;
   if (completed === steps.length) return null;
@@ -290,7 +372,7 @@ function SetupChecklist({
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary mb-1">
             Getting started
           </p>
-          <h2 className="text-lg font-display font-semibold text-foreground">
+          <h2 className="text-lg font-display font-bold text-foreground">
             Finish setting up your account
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
@@ -345,11 +427,31 @@ function SetupChecklist({
 
 // ── DailyTrack snapshot card ──────────────────────────────────────────────────
 
-function DailyTrackSnapshotCard({ totals, loading }: { totals: ChecklistTotals | null; loading: boolean }) {
+/** A checklist still to do today: opens that site's checklist ready to fill in. */
+function ChecklistLink({ href, label, overdue, children }: { href: string; label: string; overdue?: boolean; children: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      aria-label={label}
+      className={cn(
+        "flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+        overdue
+          ? "border-rose-300 bg-rose-50 text-rose-800 hover:border-rose-400 hover:bg-rose-100"
+          : "border-amber-300 bg-amber-50 text-amber-800 hover:border-amber-400 hover:bg-amber-100",
+      )}
+    >
+      {children} <ArrowRight className="w-3 h-3" />
+    </Link>
+  );
+}
+
+function DailyTrackSnapshotCard({ totals, loading, siteId }: { totals: ChecklistTotals | null; loading: boolean; siteId: string }) {
+  const siteQuery = siteId === "all" ? "" : `?siteId=${siteId}`;
   if (!totals && !loading) return null;
   const requiredPairs = (totals?.expectedAmPairs ?? 0) + (totals?.expectedPmPairs ?? 0);
   const completedPairs = (totals?.completedAmPairs ?? 0) + (totals?.completedPmPairs ?? 0);
   const allDone = Boolean(totals && totals.available && requiredPairs > 0 && completedPairs === requiredPairs);
+  const outstanding = totals?.outstanding ?? [];
   const dateLabel = totals
     ? new Date(`${totals.date}T12:00:00`).toLocaleDateString("en-GB", {
         weekday: "short",
@@ -359,9 +461,13 @@ function DailyTrackSnapshotCard({ totals, loading }: { totals: ChecklistTotals |
     : "";
 
   return (
-    <div className={cn(
+    <section aria-label="Today's checklists" className={cn(
       "rounded-lg border border-border/60 bg-card px-4 py-3",
-      allDone
+      // While a site's totals load, show no status colour: the previous
+      // site's colour would read as the new site's result.
+      loading
+        ? "border-l-4 border-l-muted-foreground/30"
+        : allDone
         ? "border-l-4 border-l-emerald-500"
         : !totals?.available
         ? "border-l-4 border-l-rose-500"
@@ -395,15 +501,46 @@ function DailyTrackSnapshotCard({ totals, loading }: { totals: ChecklistTotals |
           </span>
         )}
       </div>
+      {!loading && totals?.available && outstanding.length > 0 && (
+        <div className="mt-3">
+          <p className="text-xs font-medium text-muted-foreground mb-1.5">Still to do today</p>
+          <ul className="space-y-1.5">
+            {outstanding.slice(0, MAX_OUTSTANDING_SITES).map((site) => (
+              <li key={site.siteId} className="flex items-center gap-2 flex-wrap">
+                <span className="min-w-0 flex-1 truncate text-sm">{site.siteName}</span>
+                {site.am && (
+                  <ChecklistLink href={`/daily-track-am?siteId=${site.siteId}`} label={`Open ${site.siteName} AM checklist`} overdue={site.amOverdue}>
+                    AM checklist{site.amDue ? (site.amOverdue ? ` · overdue (${site.amDue})` : ` · due ${site.amDue}`) : ""}
+                  </ChecklistLink>
+                )}
+                {site.pm && (
+                  <ChecklistLink href={`/daily-track-pm?siteId=${site.siteId}`} label={`Open ${site.siteName} PM checklist`} overdue={site.pmOverdue}>
+                    PM checklist{site.pmDue ? (site.pmOverdue ? ` · overdue (${site.pmDue})` : ` · due ${site.pmDue}`) : ""}
+                  </ChecklistLink>
+                )}
+              </li>
+            ))}
+          </ul>
+          {outstanding.length > MAX_OUTSTANDING_SITES && (
+            <p className="text-xs text-muted-foreground mt-1.5">
+              and {outstanding.length - MAX_OUTSTANDING_SITES} more {outstanding.length - MAX_OUTSTANDING_SITES === 1 ? "site" : "sites"}
+            </p>
+          )}
+        </div>
+      )}
       {!loading && (
         <div className="mt-3 flex items-center gap-x-4 gap-y-2 text-xs flex-wrap">
           {totals?.expectedAmPairs ? (
-            <span className="text-emerald-700"><strong>{totals.completedAmPairs}/{totals.expectedAmPairs}</strong> AM complete</span>
+            <Link href={`/daily-track-am${siteQuery}`} className="cursor-pointer rounded-sm text-emerald-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
+              <strong>{totals.completedAmPairs}/{totals.expectedAmPairs}</strong> AM complete
+            </Link>
           ) : (
             <span className="text-muted-foreground">AM not applicable</span>
           )}
           {totals?.expectedPmPairs ? (
-            <span className="text-emerald-700"><strong>{totals.completedPmPairs}/{totals.expectedPmPairs}</strong> PM complete</span>
+            <Link href={`/daily-track-pm${siteQuery}`} className="cursor-pointer rounded-sm text-emerald-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
+              <strong>{totals.completedPmPairs}/{totals.expectedPmPairs}</strong> PM complete
+            </Link>
           ) : (
             <span className="text-muted-foreground">PM not applicable</span>
           )}
@@ -415,7 +552,7 @@ function DailyTrackSnapshotCard({ totals, loading }: { totals: ChecklistTotals |
           </Link>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -425,14 +562,15 @@ type KitchenCheckStatus = {
   status: KitchenCheckState;
 };
 
-function KitchenTrackStatusPill() {
+function KitchenTrackStatusPill({ siteId }: { siteId: string }) {
   const [statuses, setStatuses] = useState<KitchenCheckStatus[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setStatuses(null);
     (async () => {
       try {
-        const res = await apiFetch("/food-safety/status");
+        const res = await apiFetch(`/food-safety/status${siteId !== "all" ? `?siteId=${siteId}` : ""}`);
         if (!cancelled && res.ok) {
           const json: unknown = await res.json();
           setStatuses(Array.isArray(json) ? json as KitchenCheckStatus[] : []);
@@ -440,49 +578,22 @@ function KitchenTrackStatusPill() {
       } catch { /* silent */ }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [siteId]);
 
-  if (!statuses?.length) return null;
+  if (!statuses) return null;
 
-  const { overdue, dueSoon, ok, never, tone, label } = summarizeKitchenStatuses(
-    statuses.map(({ status }) => status),
-  );
-  const pillClass = tone === "overdue"
-    ? "bg-rose-100 text-rose-700"
-    : tone === "due_soon"
-    ? "bg-amber-100 text-amber-700"
-    : tone === "never"
-    ? "bg-muted text-muted-foreground"
-    : "bg-emerald-100 text-emerald-700";
-
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium shrink-0", pillClass)}>
-        {label}
-      </span>
-      <span
-        className="hidden text-xs text-muted-foreground tabular-nums shrink-0 md:inline"
-        aria-label={`${overdue} overdue, ${dueSoon} due soon, ${ok} clear, ${never} never recorded`}
-        title="Overdue / due soon / clear / never recorded"
-      >
-        <span className={overdue > 0 ? "font-semibold text-rose-700" : undefined}>{overdue}</span>
-        {" / "}
-        <span className={dueSoon > 0 ? "font-semibold text-amber-700" : undefined}>{dueSoon}</span>
-        {" / "}
-        <span className={ok > 0 ? "font-semibold text-emerald-700" : undefined}>{ok}</span>
-        {" / "}
-        <span>{never}</span>
-      </span>
-    </span>
-  );
+  return <KitchenStatusPill statuses={statuses.map(({ status }) => status)} />;
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const { hasService, services } = useAuth();
+  const { hasService, services, user } = useAuth();
+  useBillingReturn();
   const canAdmin = useCanAdmin();
   const canManageContractorEmails = canAdmin || useIsMaintenanceManager();
+  const certificateInbox = useCertificateInbox(canAdmin);
+  const certificatesToConfirm = certificateInbox.data?.items.filter((item) => item.status !== "reading").length ?? 0;
   const hasStandaloneDailytrackAm = hasService("dailytrack_am");
   const hasStandaloneDailytrackPm = hasService("dailytrack_pm");
   const hasKitchentrack = hasService("kitchentrack");
@@ -493,13 +604,18 @@ export default function Dashboard() {
   const { data: sites = [] } = useListSites();
   const [teamCount, setTeamCount] = useState(0);
   const [notificationEmail, setNotificationEmail] = useState("");
-  const [siteId, setSiteId] = useState<string>("all");
+  const [siteId, setSiteId, siteReady] = useSiteFilter("all");
   const [tracks, setTracks] = useState<TrackSummary[]>([]);
   const [checklistTotals, setChecklistTotals] = useState<ChecklistTotals | null>(null);
   const [checklistLoading, setChecklistLoading] = useState(false);
   const [pendingEmailsCount, setPendingEmailsCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Bumped by Retry so a retry goes through the effect below and is cancelled
+  // like any other summary request when the site changes.
+  const [reloadKey, setReloadKey] = useState(0);
+  const [summaryFilter, setSummaryFilter] = useState<SummaryFilter | null>(null);
+  const [disabledOpen, setDisabledOpen] = useState(false);
 
   useEffect(() => {
     if (!canManageContractorEmails) return;
@@ -526,17 +642,24 @@ export default function Dashboard() {
     setLoading(true);
     setChecklistLoading(true);
     setError(null);
+    // Drop the previous site's results so nothing on the page describes it
+    // while this site loads.
+    setTracks([]);
+    setChecklistTotals(null);
     try {
       const params = siteId !== "all" ? `?siteId=${siteId}` : "";
       const res = await apiFetch(`/dashboard/summary${params}`, { signal });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: unknown } | null;
+        throw new Error(typeof body?.error === "string" ? body.error : `Request failed (${res.status})`);
+      }
       const json = await res.json();
       if (signal.aborted) return;
       setTracks(json.tracks ?? []);
       setChecklistTotals(json.checklistTotals ?? null);
     } catch (e) {
       if (signal.aborted) return;
-      setError(String(e));
+      setError(e instanceof Error ? e.message : String(e));
       setChecklistTotals(null);
       setTracks([]);
     } finally {
@@ -548,23 +671,32 @@ export default function Dashboard() {
   }, [siteId]);
 
   useEffect(() => {
+    if (!siteReady) return;
     const controller = new AbortController();
     load(controller.signal);
     return () => controller.abort();
-  }, [load]);
+  }, [load, reloadKey, siteReady]);
 
-  const enabledTracks   = tracks.filter((t) => t.enabled);
+  const enabledTracks   = tracks.filter((t) => t.enabled && !t.otherModule);
+  const otherTracks     = tracks.filter((t) => t.enabled && t.otherModule);
   const disabledTracks  = tracks.filter((t) => !t.enabled);
 
-  // Put actionable modules first; due-soon modules stay visible but follow them.
+  // Put actionable modules first; due-soon modules stay visible but follow
+  // them, and modules not started yet come last.
   const statusOrder: Record<TrackStatus, number> = {
     overdue: 0, attention: 1, ok: 2, no_data: 3,
   };
+  const healthOrder: Record<TrackHealth, number> = { action_required: 0, clear: 1, not_started: 2 };
   const sorted = [...enabledTracks].sort(
     (a, b) =>
-      (a.health === "action_required" ? 0 : 1) - (b.health === "action_required" ? 0 : 1) ||
+      (healthOrder[a.health] ?? 1) - (healthOrder[b.health] ?? 1) ||
       statusOrder[a.status] - statusOrder[b.status],
   );
+  // A count picked in the summary bar narrows the list; it lifts itself once
+  // nothing matches (e.g. after switching site).
+  const filtered = summaryFilter ? sorted.filter(SUMMARY_FILTERS[summaryFilter]) : [];
+  const activeFilter = filtered.length > 0 ? summaryFilter : null;
+  const listed = activeFilter ? filtered : sorted;
 
   return (
     <AppLayout title="Dashboard">
@@ -599,13 +731,41 @@ export default function Dashboard() {
           )}
         </div>
 
+        <SayItButton siteId={siteId === "all" ? null : Number(siteId)} className="w-full sm:w-auto h-11" />
+
+        <FrostWarningCard siteId={siteId === "all" ? null : Number(siteId)} />
+        <DashboardStartCards />
+        <ComplianceChecksDue siteId={siteId === "all" ? null : Number(siteId)} />
+        <RegisterReviewsDue siteId={siteId === "all" ? null : Number(siteId)} />
+
         {canAdmin && (
           <SetupChecklist
             siteCount={sites.length}
             teamCount={teamCount}
             notificationEmail={notificationEmail}
             hasModules={services === "all" || (Array.isArray(services) && services.length > 0)}
+            askTwoStep={user?.role === "client_admin" && !user.totpEnabled}
           />
+        )}
+
+        {canAdmin && certificatesToConfirm > 0 && (
+          <Link
+            href="/external-checks"
+            className="flex items-center justify-between gap-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 transition-colors hover:bg-emerald-100/50"
+          >
+            <div className="flex items-center gap-3 text-emerald-800">
+              <Inbox className="h-5 w-5" />
+              <div>
+                <p className="font-semibold text-sm">Certificates to confirm</p>
+                <p className="text-xs text-emerald-700/80">
+                  {certificatesToConfirm} certificate{certificatesToConfirm === 1 ? "" : "s"} or message{certificatesToConfirm === 1 ? "" : "s"} from contractors {certificatesToConfirm === 1 ? "is" : "are"} waiting for you to check.
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1 text-sm font-medium text-emerald-700">
+              Check <ArrowRight className="h-4 w-4" />
+            </div>
+          </Link>
         )}
 
         {canManageContractorEmails && pendingEmailsCount !== null && pendingEmailsCount > 0 && (
@@ -636,36 +796,91 @@ export default function Dashboard() {
         )}
 
         {/* Error */}
-        {!loading && error && (
-          <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-            Failed to load dashboard: {error}
+        {!loading && error && user?.role === "consultant" && error === "No client context" ? (
+          <div className="rounded-md border border-border bg-muted/40 p-4 text-sm">
+            <p className="font-medium">Choose a business</p>
+            <p className="mt-1 text-muted-foreground">Pick the business you want to work in to see its dashboard.</p>
+            <Link href="/clients" className="mt-3 inline-flex items-center gap-1 font-medium text-primary underline underline-offset-2">
+              Choose a business <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        ) : !loading && error && (
+          <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+            <span>We couldn't load the dashboard: {error}</span>
+            <button type="button" className="rounded-sm border border-rose-300 bg-white px-3 py-1 font-medium hover:bg-rose-100"
+              onClick={() => setReloadKey((key) => key + 1)}>Retry</button>
           </div>
         )}
 
         {/* DailyTrack snapshot */}
-        {hasDailytrack && <DailyTrackSnapshotCard totals={checklistTotals} loading={checklistLoading} />}
+        {hasDailytrack && <DailyTrackSnapshotCard totals={checklistTotals} loading={checklistLoading} siteId={siteId} />}
+
+        {/* Today by department (Owners; other roles as chosen in Settings) */}
+        <TodayByDepartmentCard siteId={siteId === "all" ? null : Number(siteId)} />
 
         {/* Summary bar */}
         {!loading && !error && tracks.length > 0 && (
-          <SummaryBar tracks={tracks} />
+          <SummaryBar
+            tracks={tracks.filter((t) => !t.otherModule)}
+            filter={activeFilter}
+            onFilter={setSummaryFilter}
+            onShowDisabled={() => {
+              setDisabledOpen(true);
+              requestAnimationFrame(() => document.getElementById("dashboard-disabled-tracks")?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
+            }}
+          />
         )}
 
         {/* Track list */}
-        {!loading && !error && sorted.length > 0 && (
+        {!loading && !error && activeFilter && (
+          <p className="-mt-3 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+            Showing {filtered.length} track{filtered.length === 1 ? "" : "s"} {SUMMARY_FILTER_LABEL[activeFilter]}.
+            <button
+              type="button"
+              onClick={() => setSummaryFilter(null)}
+              className="cursor-pointer rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            >
+              Show all tracks
+            </button>
+          </p>
+        )}
+        {!loading && !error && listed.length > 0 && (
           <div className="space-y-2">
-            {sorted.map((track) => (
+            {listed.map((track) => (
               <TrackRow
-                key={track.trackId}
+                // Remounts when a summary count is picked so its checks open.
+                key={`${track.trackId}:${activeFilter ?? ""}`}
+                defaultOpen={Boolean(activeFilter)}
                 track={track}
-                kitchenOverdueBadge={hasKitchentrack && track.trackId === "kitchen" ? <KitchenTrackStatusPill /> : null}
+                kitchenOverdueBadge={hasKitchentrack && track.trackId === "kitchen" ? <KitchenTrackStatusPill siteId={siteId} /> : null}
               />
             ))}
           </div>
         )}
 
+        {/* Modules not picked in setup and not started yet (collapsed section) */}
+        {!loading && !error && otherTracks.length > 0 && (
+          <details className="group">
+            <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground select-none list-none flex items-center gap-1">
+              <ChevronRight className="w-3.5 h-3.5 group-open:rotate-90 transition-transform" />
+              Other modules ({otherTracks.length})
+            </summary>
+            <div className="mt-2 space-y-2">
+              {otherTracks.map((track) => (
+                <TrackRow key={track.trackId} track={track} />
+              ))}
+            </div>
+          </details>
+        )}
+
         {/* Disabled tracks (collapsed section) */}
         {!loading && !error && disabledTracks.length > 0 && (
-          <details className="group">
+          <details
+            id="dashboard-disabled-tracks"
+            className="group"
+            open={disabledOpen}
+            onToggle={(event) => setDisabledOpen(event.currentTarget.open)}
+          >
             <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground select-none list-none flex items-center gap-1">
               <ChevronRight className="w-3.5 h-3.5 group-open:rotate-90 transition-transform" />
               {disabledTracks.length} disabled track{disabledTracks.length > 1 ? "s" : ""}

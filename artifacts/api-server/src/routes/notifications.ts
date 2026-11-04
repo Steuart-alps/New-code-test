@@ -1,14 +1,18 @@
 import { Router, type IRouter } from "express";
+import { ownersOfClient } from "../lib/ownerBusinesses";
 import { db } from "@workspace/db";
 import { complianceItemsTable, contractorsTable, appSettingsTable, usersTable, sitesTable } from "@workspace/db/schema";
 import { eq, and, isNotNull, sql } from "drizzle-orm";
 import { sendEmail, sendSystemEmail, parseEmailList } from "../lib/email";
-import { buildReminderEmail, buildCalendarInvite, buildVisitConfirmationEmail, getPublicAppUrl } from "../lib/email";
+import { buildReminderEmail, buildCalendarInvite, buildVisitConfirmationEmail, getPublicAppUrl, getSenderEmail } from "../lib/email";
 import { TestEmailBody } from "@workspace/api-zod";
 import { randomUUID } from "crypto";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
-import { digestBearerToken, encryptTokenPayload } from "../lib/bearerTokens";
+import { digestBearerToken, encryptTokenPayload, newBearerToken } from "../lib/bearerTokens";
+import { certificateEmailConfigured, certificateUploadBlock, certificateUploadUrl, issueCertificateUploadLink } from "../lib/certificateInbox";
 import { lockReminderItem, reminderCycleOf, supersedeStaleReminderCycles } from "../lib/reminderCycles";
+import { logger } from "../lib/logger";
+import { syncContractorVisitChecks } from "../lib/contractorVisits";
 
 /**
  * Build the full CC list for a reminder email by combining:
@@ -34,7 +38,7 @@ async function buildReminderCcList(opts: {
     const admins = await db
       .select({ email: usersTable.email })
       .from(usersTable)
-      .where(and(eq(usersTable.clientId, clientId), eq(usersTable.role, "client_admin"), eq(usersTable.active, true)));
+      .where(and(ownersOfClient(clientId), eq(usersTable.active, true)));
     for (const a of admins) list.push(a.email);
   }
 
@@ -79,6 +83,12 @@ async function sendReminderForItem(opts: {
   const scheduleLink = `${getPublicAppUrl()}/schedule/${scheduleToken}`;
 
   const ccDisplay = ccList.length > 0 ? ccList.join(", ") : null;
+  // After the visit the contractor can upload the certificate from the same
+  // email; the link's token rides in the encrypted payload like the booking one.
+  const uploadToken = newBearerToken();
+  const certificateRequest = certificateUploadBlock({
+    uploadUrl: certificateUploadUrl(), byReply: certificateEmailConfigured(),
+  });
 
   const { html, text } = buildReminderEmail({
     contractorName: contractor.name,
@@ -89,6 +99,7 @@ async function sendReminderForItem(opts: {
     notes: item.notes,
     ccMaintenanceEmail: ccDisplay,
     scheduleLink,
+    certificateRequest,
   });
 
   // Reminders use the same approval queue as FixTrack contractor mail. The
@@ -102,7 +113,7 @@ async function sendReminderForItem(opts: {
   const safeText = text.split(scheduleToken).join("{{BOOKED_TOKEN}}");
   const subject = `Compliance Check Reminder: ${item.title}`;
   const preview = { subject, text: safeText, html: safeHtml };
-  const encryptedTokenPayload = encryptTokenPayload({ booked: scheduleToken });
+  const encryptedTokenPayload = encryptTokenPayload({ booked: scheduleToken, certUpload: uploadToken });
 
   // The idempotency claim and token issuance are one atomic operation. A retry
   // (or a concurrent runner) that loses the unique-key race leaves the first
@@ -143,12 +154,26 @@ async function sendReminderForItem(opts: {
     if (updatedItems.length !== 1) {
       throw new Error("Compliance item disappeared before its reminder token could be saved");
     }
+    await issueCertificateUploadLink(tx, { clientId: item.clientId, itemId: item.id, contractorId: contractor.id }, uploadToken);
     return true;
   });
 }
 
 export async function runReminderJob(): Promise<{ queued: number; sent: number; skipped: number; errors: number }> {
   const now = new Date();
+
+  // Contractor visits kept on the tracks (pest control, water servicing and
+  // others) first take their track's due date, so the reminder is for the
+  // visit the track says is next.
+  const visitClients = await db.selectDistinct({ clientId: complianceItemsTable.clientId })
+    .from(complianceItemsTable).where(isNotNull(complianceItemsTable.contractorId));
+  for (const { clientId } of visitClients) {
+    try {
+      await syncContractorVisitChecks(clientId);
+    } catch (err) {
+      logger.error({ err, clientId }, "Contractor visit due dates could not be brought up to date");
+    }
+  }
 
   const items = await db
     .select({ item: complianceItemsTable, contractor: contractorsTable, siteDepartmentId: sitesTable.departmentId })
@@ -167,21 +192,25 @@ export async function runReminderJob(): Promise<{ queued: number; sent: number; 
   let errors = 0;
 
   for (const { item, contractor, siteDepartmentId } of items) {
-    if (!contractor?.email || !item.dueDate || item.status === "completed") { skipped++; continue; }
-
-    const leadTimeDays = item.leadTimeDays ?? 30;
-    const dueDate = new Date(item.dueDate);
-    const notifyDate = new Date(dueDate.getTime() - leadTimeDays * 24 * 60 * 60 * 1000);
-
-    if (now < notifyDate || item.notificationSentAt) { skipped++; continue; }
+    if (!contractor?.email || !item.dueDate || item.status === "completed" || item.notificationSentAt) { skipped++; continue; }
 
     if (!settingsCache[item.clientId]) {
       settingsCache[item.clientId] = await getClientSettings(item.clientId);
     }
     const settings = settingsCache[item.clientId];
+    const parsedLeadTime = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
+    const defaultLeadTimeDays = Number.isFinite(parsedLeadTime) && parsedLeadTime >= 0 ? parsedLeadTime : 30;
+
+    // A check without its own lead time uses the business's default, as the
+    // manual send and the email text do.
+    const leadTimeDays = item.leadTimeDays ?? defaultLeadTimeDays;
+    const dueDate = new Date(item.dueDate);
+    const notifyDate = new Date(dueDate.getTime() - leadTimeDays * 24 * 60 * 60 * 1000);
+
+    if (now < notifyDate) { skipped++; continue; }
+
     const companyName = settings["companyName"] ?? "ComplyTrack";
-    const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
-    const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
+    const fromEmail = getSenderEmail(settings);
     const ccList = await buildReminderCcList({
       clientId: item.clientId,
       settings,
@@ -258,7 +287,7 @@ router.post("/notifications/send-reminders", requireAuth, requireClientAdmin, as
     }
     const settings = settingsCache[item.clientId];
   const companyName = settings["companyName"] ?? "ComplyTrack";
-  const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+  const fromEmail = getSenderEmail(settings);
   const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
 
     const leadTimeDays = item.leadTimeDays ?? defaultLeadTimeDays;
@@ -325,7 +354,7 @@ router.post("/notifications/send-reminder/:itemId", requireAuth, requireClientAd
 
   const settings = await getClientSettings(row.item.clientId);
   const companyName = settings["companyName"] ?? "ComplyTrack";
-  const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+  const fromEmail = getSenderEmail(settings);
   const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
   const ccList = await buildReminderCcList({
     clientId: item.clientId,
@@ -411,7 +440,7 @@ notificationsPublicRouter.post("/:token", async (req, res) => {
   const settings = await getClientSettings(item.clientId);
   const companyName = settings["companyName"] ?? "ComplyTrack";
   const maintenanceEmail = settings["maintenanceEmail"] ?? null;
-  const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+  const fromEmail = getSenderEmail(settings);
 
   const ics = buildCalendarInvite({
     itemTitle: item.title,
@@ -424,11 +453,15 @@ notificationsPublicRouter.post("/:token", async (req, res) => {
   });
 
   const safeTitle = item.title.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+  const uploadToken = newBearerToken();
   const { subject: confirmationSubject, html, text, dateStr } = buildVisitConfirmationEmail({
     contractorName: contractor.name,
     companyName,
     itemTitle: item.title,
     visitDate: proposed,
+    certificateRequest: certificateUploadBlock({
+      uploadUrl: certificateUploadUrl(), byReply: certificateEmailConfigured(),
+    }),
   });
   // Consume the link and queue the confirmation atomically. The conditional
   // update on the digest is the one-time claim: of concurrent submissions
@@ -444,13 +477,18 @@ notificationsPublicRouter.post("/:token", async (req, res) => {
       ))
       .returning({ id: complianceItemsTable.id });
     if (consumed.length === 0) return false;
-    await tx.execute(sql`INSERT INTO contractor_email_queue
-    (client_id,entity_type,entity_id,contractor_id,email_type,mode,to_email,subject,body_html,body_text,cc_json,ics_content,ics_filename,email_preview_json,idempotency_key)
+    const queued = await tx.execute(sql`INSERT INTO contractor_email_queue
+    (client_id,entity_type,entity_id,contractor_id,email_type,mode,to_email,subject,body_html,body_text,cc_json,ics_content,ics_filename,email_preview_json,encrypted_token_payload,idempotency_key)
     VALUES (${item.clientId},'compliance',${item.id},${contractor.id},'reminder','assign',${contractor.email},
       ${confirmationSubject},${html},${text},${JSON.stringify(maintenanceEmail ? [maintenanceEmail] : [])}::jsonb,
       ${ics},${`${safeTitle}.ics`},${JSON.stringify({ subject: confirmationSubject, html, text })}::jsonb,
+      ${encryptTokenPayload({ certUpload: uploadToken })},
       ${`schedule-confirmation-${item.clientId}-${item.id}-${proposed.toISOString().slice(0,10)}`})
-    ON CONFLICT (idempotency_key) DO NOTHING`);
+    ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING id`);
+    if (queued.rows.length) {
+      await issueCertificateUploadLink(tx, { clientId: item.clientId, itemId: item.id, contractorId: contractor.id }, uploadToken);
+    }
     return true;
   });
   if (!claimed) return void res.status(404).json({ error: "This scheduling link is no longer valid." });

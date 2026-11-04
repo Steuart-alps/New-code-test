@@ -12,12 +12,18 @@ import { sessionMiddleware } from "./lib/session";
 import { loadUser, enforceClientAccess, enforceTwoFactorEnrollment } from "./middleware/requireAuth";
 import { enforceTrialLock } from "./middleware/trialLock";
 import { enforceDailyEntryCutoff } from "./middleware/dailyEntryCutoff";
+import { requireRecordSignature } from "./middleware/recordSignatureGate";
+import { requireCorrectiveActions } from "./middleware/correctiveActionGate";
 import { WebhookHandlers } from "./lib/webhookHandlers";
-import { Sentry } from "./lib/sentry";
-import { sendCancellationWarningEmail } from "./lib/offboarding";
+import {
+  certificateInboxDomain, inboundWebhookSecret, processInboundEmail, recordInboundEmail, verifyInboundWebhook,
+} from "./lib/certificateInbox";
+import { Sentry, isErrorReportingEnabled } from "./lib/sentry";
 import { recordAlpsDiscountCheckoutEvent } from "./lib/alpsDiscount";
+import { recordSetupServiceCheckoutEvent } from "./lib/setupService";
 import { csrfProtection } from "./middleware/csrf";
 import { computeReadiness, getBillingReadiness } from "./lib/stripeStartup";
+import { withReadinessDetails } from "./lib/readinessDetails";
 import { internalAnalyticsRouter } from "./routes/analytics";
 import mobileAppLinksRouter from "./routes/mobileAppLinks";
 
@@ -43,7 +49,7 @@ app.use(
       req(req) {
         const requestPath = req.url?.split("?")[0] ?? "";
         const redactedPath = requestPath.replace(
-          /(\/(?:sign-off|contractor-portal|fix-track\/action|fix-track\/quotes\/public)\/)[^/]+/g,
+          /(\/(?:sign-off|contractor-portal|fix-track\/action|fix-track\/quotes\/public|privacy-intake|privacy-request|site-sign-in|contractor-tests)\/)[^/]+/g,
           "$1[redacted]",
         );
         return {
@@ -125,8 +131,28 @@ if (fs.existsSync(webIndexHtml)) {
   const isServerPath = (p: string) =>
     p === "/api" || p.startsWith("/api/") || p === "/healthz" || p === "/readyz";
 
+  // Public pages the web build prerendered as <path>/index.html (see
+  // compliance-tracker scripts/seo-pages.mjs). Every other client route gets
+  // the home page's HTML, so it is marked noindex: otherwise search engines
+  // would index app, token and unknown URLs as copies of the home page.
+  // Pages can be nested one level, such as /features/fire-safety-logbook.
+  const publicPageFiles = new Map<string, string>();
+  const addPublicPages = (dir: string, urlPrefix: string, depth: number) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name === "assets") continue;
+      const pageDir = path.join(dir, entry.name);
+      const pageFile = path.join(pageDir, "index.html");
+      if (fs.existsSync(pageFile)) publicPageFiles.set(`${urlPrefix}/${entry.name}`, pageFile);
+      if (depth > 0) addPublicPages(pageDir, `${urlPrefix}/${entry.name}`, depth - 1);
+    }
+  };
+  addPublicPages(webDistDir, "", 1);
+
   const serveWebFiles = express.static(webDistDir, {
     index: false,
+    // A prerendered page lives in a directory; without this /signup would
+    // redirect to /signup/ instead of falling through to the handler below.
+    redirect: false,
     setHeaders(res, filePath) {
       // Vite fingerprints everything under assets/, so it can be cached forever.
       if (filePath.startsWith(path.join(webDistDir, "assets") + path.sep)) {
@@ -135,11 +161,40 @@ if (fs.existsSync(webIndexHtml)) {
     },
   });
 
+  // Once the site has its own domain (PUBLIC_SITE_URL), send web page
+  // requests that arrive on Render's onrender.com address there, so people
+  // and search engines see one copy of the site. API paths are left alone:
+  // the mobile app and webhooks may still call the onrender.com address.
+  const canonicalOrigin = process.env.PUBLIC_SITE_URL
+    ? new URL(process.env.PUBLIC_SITE_URL).origin
+    : null;
+  const renderHost = process.env.RENDER_EXTERNAL_URL
+    ? new URL(process.env.RENDER_EXTERNAL_URL).host.toLowerCase()
+    : null;
+  if (canonicalOrigin && renderHost && new URL(canonicalOrigin).host !== renderHost) {
+    app.use((req, res, next) => {
+      if ((req.method !== "GET" && req.method !== "HEAD") || isServerPath(req.path)) return next();
+      if (req.headers.host?.toLowerCase() !== renderHost) return next();
+      res.redirect(301, canonicalOrigin + req.originalUrl);
+    });
+  }
+
   app.use((req, res, next) => (isServerPath(req.path) ? next() : serveWebFiles(req, res, next)));
 
   app.use((req, res, next) => {
     if ((req.method !== "GET" && req.method !== "HEAD") || isServerPath(req.path)) return next();
     res.setHeader("Cache-Control", "no-cache");
+    // A missing script or style file (usually one from before the latest
+    // release, asked for by a tab opened earlier) is a 404, never the app's
+    // HTML: browsers cannot run HTML as a script, and the web app reloads
+    // itself when a page file fails to load.
+    if (req.path.startsWith("/assets/")) {
+      return void res.status(404).type("text/plain").send("Not found");
+    }
+    const pagePath = req.path.length > 1 ? req.path.replace(/\/+$/, "") : req.path;
+    const pageFile = publicPageFiles.get(pagePath);
+    if (pageFile) return void res.sendFile(pageFile);
+    if (pagePath !== "/") res.setHeader("X-Robots-Tag", "noindex");
     res.sendFile(webIndexHtml);
   });
 }
@@ -169,6 +224,7 @@ app.post(
         data?: { object?: Record<string, any> };
       };
       await recordAlpsDiscountCheckoutEvent(event);
+      await recordSetupServiceCheckoutEvent(event);
       res.status(200).json({ received: true });
     } catch (err: any) {
       logger.error({ err }, "Stripe webhook error");
@@ -176,33 +232,71 @@ app.post(
       return;
     }
 
-    // Best-effort: send a cancellation warning email when a subscription is
-    // cancelled immediately or scheduled to cancel at period end.
-    // Must happen AFTER processWebhook so the DB is already updated.
-    // Never throws — a failure must not affect the 200 already sent.
-    try {
-      const sub = event?.data?.object ?? {};
-      const isCancelled = event.type === "customer.subscription.deleted";
-      const isCancelAtPeriodEnd =
-        event.type === "customer.subscription.updated" &&
-        sub.cancel_at_period_end === true;
-
-      if ((isCancelled || isCancelAtPeriodEnd) && sub.customer) {
-        const accessEndsAt: string | number | null =
-          typeof sub.cancel_at === "number" ? sub.cancel_at :
-          typeof sub.current_period_end === "number" ? sub.current_period_end :
-          null;
-        sendCancellationWarningEmail({
-          stripeCustomerId: String(sub.customer),
-          accessEndsAt,
-        }).catch((err) => logger.warn({ err }, "Cancellation warning email failed"));
-      }
-    } catch (err) {
-      logger.warn({ err }, "Could not parse Stripe event for cancellation warning");
-    }
+    // Best-effort follow-up once the synced tables are updated: local plan
+    // status, retention-clock reset on resubscription, cancellation and
+    // failed-payment emails, and billing changes for ALPS's digest. Never
+    // throws — the 200 has already been sent.
+    WebhookHandlers.afterSync(event).catch((err) => logger.warn({ err }, "Stripe webhook follow-up failed"));
   }
 );
 
+// Emails received for certificate addresses (lib/certificateInbox.ts). Resend
+// signs each delivery; the email is recorded and answered at once, and its
+// attachments are fetched afterwards. Off (404) until the inbox domain and
+// webhook secret are set.
+app.post(
+  "/api/inbound/certificate-email",
+  express.raw({ type: "*/*", limit: "1mb" }),
+  async (req, res) => {
+    const secret = inboundWebhookSecret();
+    if (!secret || !certificateInboxDomain()) return void res.status(404).json({ error: "Not found" });
+    const payload = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
+    const header = (name: string) => {
+      const value = req.headers[name];
+      return Array.isArray(value) ? value[0] : value;
+    };
+    const signed = verifyInboundWebhook(payload, {
+      id: header("svix-id"), timestamp: header("svix-timestamp"), signature: header("svix-signature"),
+    }, secret);
+    if (!signed) return void res.status(401).json({ error: "Invalid signature" });
+    let event: unknown;
+    try {
+      event = JSON.parse(payload);
+    } catch {
+      return void res.status(400).json({ error: "Invalid JSON" });
+    }
+    let emailRowId: number | null;
+    try {
+      emailRowId = await recordInboundEmail(event as Parameters<typeof recordInboundEmail>[0]);
+    } catch (err) {
+      logger.error({ err }, "Received certificate email could not be recorded");
+      return void res.status(500).json({ error: "Could not record the email" });
+    }
+    res.status(200).json({ received: true });
+    if (emailRowId !== null) {
+      processInboundEmail(emailRowId).catch((err) => logger.error({ err, emailRowId }, "Received certificate email failed"));
+    }
+  },
+);
+
+// Register CSV imports send up to 1,000 rows, and a PAT register photo or PDF
+// is sent as base64 (8 MB file at most); every other route keeps the default limit.
+app.use("/api/imports/pat-appliances/read", express.json({ limit: "12mb" }));
+// Certificates read by ComplyTrack's AI arrive as base64 (20 MB at most before
+// encoding, all files together).
+app.use("/api/certificates/read", express.json({ limit: "28mb" }));
+app.use("/api/certificates/read-files", express.json({ limit: "28mb" }));
+// So does a safety data sheet read into a COSHH assessment draft.
+app.use("/api/coshh-track/assessments/read-sds", express.json({ limit: "28mb" }));
+// A contractor's certificate upload arrives as base64 (10 MB at most before encoding).
+app.use("/api/certificate-upload", express.json({ limit: "14mb" }));
+// A contractor's drawn signature arrives as a PNG data URL when they sign in at a site.
+app.use("/api/site-sign-in", express.json({ limit: "1mb" }));
+// On a contractor's testing link: their certificate (10 MB at most before
+// encoding), else a drawn signature at most.
+app.use("/api/contractor-tests/:token/certificate", express.json({ limit: "14mb" }));
+app.use("/api/contractor-tests", express.json({ limit: "1mb" }));
+app.use("/api/imports", express.json({ limit: "2mb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(sessionMiddleware);
@@ -210,14 +304,23 @@ app.use(csrfProtection);
 app.use(loadUser);
 app.use(enforceTwoFactorEnrollment);
 app.use(enforceClientAccess);
+// A fail is answered with its corrective action first, then the check is signed.
+app.use("/api", requireCorrectiveActions);
+// Before the late-edit reason, so a reason is asked (and audited) only once.
+app.use("/api", requireRecordSignature);
 app.use("/api", enforceDailyEntryCutoff);
 app.use("/api", enforceTrialLock);
 
 // Root-level health check — matches the deployment probe path and is exempt
-// from the /api prefix so load balancers can reach it directly.
-app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
+// from the /api prefix so load balancers can reach it directly. It is 503
+// until runtime migrations finish, so Render never promotes an instance whose
+// migrations are still running (or failed: the process then exits).
+app.get("/healthz", (_req, res) => {
+  if (!applicationReady) return void res.status(503).json({ status: "starting" });
+  res.json({ status: "ok" });
+});
 app.get("/readyz", (_req, res) => {
-  const report = computeReadiness(applicationReady, getBillingReadiness());
+  const report = withReadinessDetails(computeReadiness(applicationReady, getBillingReadiness()));
   res.status(report.httpStatus).json(report.body);
 });
 
@@ -230,7 +333,7 @@ app.use("/api", (_req: Request, res: Response) => {
 
 // Sentry error handler — must come after all routes and before other error
 // handlers so it has access to the full request context and error details.
-if (process.env.SENTRY_DSN) {
+if (isErrorReportingEnabled()) {
   Sentry.setupExpressErrorHandler(app);
 }
 

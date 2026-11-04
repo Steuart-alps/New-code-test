@@ -4,6 +4,20 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # The database is private, but API bundling and startup still compete for RAM.
 source tests/api-integration-lock.sh
+# Debian/Ubuntu keep initdb and pg_ctl out of PATH (cloud sessions).
+if ! command -v initdb >/dev/null; then
+  for pg_bin in /usr/lib/postgresql/*/bin; do
+    if [ -x "$pg_bin/initdb" ]; then PATH="$pg_bin:$PATH"; fi
+  done
+fi
+# initdb and the postmaster refuse to run as root: when root (cloud sessions),
+# run them as the postgres user. Non-root callers run them directly as before.
+pg_as() { "$@"; }
+if [ "$(id -u)" = "0" ]; then
+  command -v runuser >/dev/null || { echo "Running as root requires runuser" >&2; exit 1; }
+  id postgres >/dev/null 2>&1 || { echo "Running as root requires a postgres user" >&2; exit 1; }
+  pg_as() { runuser -u postgres -- "$@"; }
+fi
 for binary in initdb pg_ctl psql node; do
   command -v "$binary" >/dev/null || { echo "Required test tool missing: $binary" >&2; exit 1; }
 done
@@ -14,7 +28,7 @@ cleanup() {
   result=$?
   trap - EXIT
   if [ -n "$server_pid" ]; then kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; fi
-  pg_ctl -D "$temp/data" -m immediate stop >/dev/null 2>&1 || true
+  pg_as pg_ctl -D "$temp/data" -m immediate stop >/dev/null 2>&1 || true
   if [ "$result" -ne 0 ]; then cat "$temp/server.log" 2>/dev/null || true; fi
   rm -rf "$temp" "$build"
   exit "$result"
@@ -22,13 +36,28 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-initdb -D "$temp/data" -A trust -U schema_test --no-locale >/dev/null
+if [ "$(id -u)" = "0" ]; then
+  # The postgres user owns the private temp directory (data, socket, logs);
+  # root keeps writing its own files there.
+  chown postgres "$temp"
+  runuser -u postgres -- test -w "$temp" || { echo "postgres user cannot use $temp (set TMPDIR to a directory it can reach)" >&2; exit 1; }
+fi
+pg_as initdb -D "$temp/data" -A trust -U schema_test --no-locale >/dev/null
 # Unix-socket-only Postgres is isolated by its unique private temp directory.
-pg_ctl -D "$temp/data" -l "$temp/postgres.log" -o "-k $temp -c listen_addresses=''" -w start >/dev/null
+pg_as pg_ctl -D "$temp/data" -l "$temp/postgres.log" -o "-k $temp -c listen_addresses=''" -w start >/dev/null
 psql -h "$temp" -U schema_test -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE schema_test' >/dev/null
 url="postgresql://schema_test@/schema_test?host=$temp"
 count="$(psql "$url" -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")"
 [ "$count" = "0" ] || { echo "Disposable database is not empty" >&2; exit 1; }
+# FRESH_SCHEMA_BASE=push builds the base schema the way production's deploy
+# does (lib/db/bootstrap.mjs: drizzle-kit push on the empty database) before
+# the runtime migrations run. The default stays runtime migrations only.
+schema_base="runtime migrations only"
+if [ "${FRESH_SCHEMA_BASE:-}" = "push" ]; then
+  env -i PATH="$PATH" HOME="$HOME" DATABASE_URL="$url" node ../../lib/db/bootstrap.mjs >"$temp/bootstrap.log" 2>&1 \
+    || { cat "$temp/bootstrap.log" >&2; echo "drizzle-kit push bootstrap failed" >&2; exit 1; }
+  schema_base="drizzle-kit push base, then runtime migrations"
+fi
 : > "$temp/contractor-outbox.jsonl"
 # Synthetic, test-only key: no workspace encryption key or mail credentials.
 test_token_key="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -40,9 +69,37 @@ port="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()
 # serves the web build, so same-origin browser requests pass CORS and CSRF.
 server_policy=()
 suite_browser=()
+# FRESH_SCHEMA_UPGRADE_FIXTURE=<shape> seeds an older, populated schema
+# (tests/upgrade-fixtures/legacy-shapes.ts) before the migrations run, so the
+# suite can prove an upgrade keeps every record. The shape name only.
+if [ -n "${FRESH_SCHEMA_UPGRADE_FIXTURE:-}" ]; then
+  [ "${FRESH_SCHEMA_BASE:-}" != "push" ] || { echo "Upgrade fixtures build their own base; unset FRESH_SCHEMA_BASE" >&2; exit 1; }
+  server_policy+=(FRESH_SCHEMA_UPGRADE_FIXTURE="$FRESH_SCHEMA_UPGRADE_FIXTURE")
+  suite_browser+=(FRESH_SCHEMA_UPGRADE_FIXTURE="$FRESH_SCHEMA_UPGRADE_FIXTURE")
+  schema_base="older populated schema ($FRESH_SCHEMA_UPGRADE_FIXTURE), then runtime migrations"
+fi
+# FRESH_SCHEMA_CERTIFICATE_INBOX=1 switches on emailed certificates for the
+# server and the suite: a test-only address domain and a synthetic webhook
+# signing secret (no Resend key, so nothing is ever fetched from the provider).
+if [ "${FRESH_SCHEMA_CERTIFICATE_INBOX:-}" = "1" ]; then
+  inbox_env=(CERTIFICATE_INBOX_DOMAIN=certs.test.local
+    RESEND_INBOUND_WEBHOOK_SECRET="whsec_$(printf 'disposable-certificate-inbox-test-only' | base64)")
+  server_policy+=("${inbox_env[@]}")
+  suite_browser+=("${inbox_env[@]}")
+fi
+# FRESH_SCHEMA_RECORD_SIGNATURES=1 makes the server ask for a drawn signature on
+# recorded checks, as in production (other suites predate signatures).
+if [ "${FRESH_SCHEMA_RECORD_SIGNATURES:-}" = "1" ]; then
+  server_policy+=(ENFORCE_RECORD_SIGNATURES=1)
+fi
+# FRESH_SCHEMA_CORRECTIVE_ACTIONS=1 makes the server ask what was done about
+# each fail on a recorded check, as in production.
+if [ "${FRESH_SCHEMA_CORRECTIVE_ACTIONS:-}" = "1" ]; then
+  server_policy+=(ENFORCE_CORRECTIVE_ACTIONS=1)
+fi
 if [ "${FRESH_SCHEMA_BROWSER_POLICY:-}" = "1" ]; then
-  server_policy=(ENFORCE_CSRF=1 ENFORCE_MANDATORY_2FA=1 PUBLIC_APP_URL="http://127.0.0.1:$port")
-  suite_browser=(FRESH_SCHEMA_BROWSER_POLICY=1)
+  server_policy+=(ENFORCE_CSRF=1 ENFORCE_MANDATORY_2FA=1 PUBLIC_APP_URL="http://127.0.0.1:$port")
+  suite_browser+=(FRESH_SCHEMA_BROWSER_POLICY=1)
   # Browser binary locations only; never credentials.
   [ -z "${CHROMIUM_PATH:-}" ] || suite_browser+=(CHROMIUM_PATH="$CHROMIUM_PATH")
   [ -z "${PLAYWRIGHT_BROWSERS_PATH:-}" ] || suite_browser+=(PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH")
@@ -81,4 +138,4 @@ if grep -Eq '42P01|42703|relation .* does not exist|column .* does not exist|Run
   echo "Missing database table/column detected in API logs" >&2
   exit 1
 fi
-echo "Fresh-schema validation passed (runtime migrations only, including second boot)."
+echo "Fresh-schema validation passed ($schema_base, including second boot)."

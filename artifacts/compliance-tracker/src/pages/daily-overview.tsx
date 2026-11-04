@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { format } from "date-fns";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -34,7 +35,7 @@ interface OverviewData {
 }
 
 function todayDate() {
-  return new Date().toISOString().slice(0, 10);
+  return format(new Date(), "yyyy-MM-dd");
 }
 
 function offsetDate(date: string, days: number) {

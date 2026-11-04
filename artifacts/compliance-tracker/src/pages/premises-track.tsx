@@ -18,7 +18,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { useAuth, useCanAdmin, useCanEdit } from "@/context/auth-context";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
@@ -28,7 +28,13 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
+import { useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { format, parseISO, isValid } from "date-fns";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
+import { sortByLabel } from "@/lib/sort-options";
+import { useRecordMedia } from "@/components/record-media";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -38,6 +44,15 @@ const TYPE_LABELS: Record<string, string> = {
   fault:        "Maintenance fault",
   housekeeping: "Housekeeping",
   signage:      "Signage",
+};
+
+// Examples that fit each inspection type; retired or custom types use the routine ones.
+const TYPE_PLACEHOLDERS: Record<string, { area: string; findings: string; hazard: string; action: string }> = {
+  routine:      { area: "e.g. Reception, stairwell, car park", findings: "e.g. Floors, lighting, handrails and exits all checked, all fine apart from one loose stair nosing", hazard: "Describe any hazard identified (slip, trip, fall, obstruction, etc.)", action: "e.g. Refix stair nosing on the main stairs" },
+  hazard:       { area: "e.g. Kitchen back door, main stairs", findings: "e.g. Water pooling by the back door after rain", hazard: "e.g. Wet floor, slip risk to staff carrying trays", action: "e.g. Fit a drip tray and anti-slip mat; coned off meanwhile" },
+  fault:        { area: "e.g. Plant room, first floor corridor", findings: "e.g. Corridor light fitting not working", hazard: "e.g. Poor lighting on the route to the fire exit", action: "e.g. Electrician to replace the fitting" },
+  housekeeping: { area: "e.g. Cellar, linen store, back yard", findings: "e.g. Empty boxes stacked in the corridor to the cellar", hazard: "e.g. Obstructed walkway and extra fire load", action: "e.g. Clear boxes to the recycling store and remind staff" },
+  signage:      { area: "e.g. Fire exits, cellar steps, car park", findings: "e.g. Fire exit sign above the bar door is faded", hazard: "e.g. Fire exit hard to see in an emergency", action: "e.g. Order and fit a new fire exit sign" },
 };
 
 const STATUSES = ["open", "actioned", "closed"] as const;
@@ -103,6 +118,8 @@ interface PremisesInspection {
   status: string;
   inspectedBy: string | null;
   createdAt: string;
+  /** A later inspection of the same type and area at the site exists. */
+  superseded?: boolean;
 }
 
 interface PremisesSummary {
@@ -115,12 +132,14 @@ interface PremisesSummary {
 
 // ─── InspectionDialog ───────────────────────────────────────────────────────────
 
-function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
+function InspectionDialog({ open, inspection, onClose, onSaved, sites, spoken }: {
   open: boolean;
   inspection: PremisesInspection | null;
   onClose: () => void;
   onSaved: () => void;
   sites: { id: number; name: string }[];
+  /** A new inspection filled in from Say it. */
+  spoken?: { area: string; findings: string; actionRequired: string; siteId: string } | null;
 }) {
   const { toast } = useToast();
   const apiFetch = usePremisesApi();
@@ -128,12 +147,19 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
   const inspectionTypes = pickOptions(formOptions, "premises_inspection_types");
   const isEdit = !!inspection;
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("premises_inspection", { open, disabled: saving });
+  // A new inspection starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
+  const formSiteId = inspection
+    ? inspection.siteId == null ? "all" : String(inspection.siteId)
+    : workingSiteId ? String(workingSiteId) : "all";
   // Keep the record's stored type selectable even if it was later removed from
   // the effective list, so editing other fields doesn't force a type change.
   const currentType = inspection?.inspectionType;
-  const formInspectionTypes = currentType && !inspectionTypes.includes(currentType)
-    ? [...inspectionTypes, currentType]
-    : inspectionTypes;
+  const currentTypeRetired = !!currentType && !inspectionTypes.includes(currentType);
+  const formInspectionTypes = currentTypeRetired ? [...inspectionTypes, currentType] : inspectionTypes;
+  const typeLabel = (t: string) =>
+    `${TYPE_LABELS[t] ?? t}${formOptions && currentTypeRetired && t === currentType ? " (disabled)" : ""}`;
   const [form, setForm] = useState(() => ({
     inspectionDate: inspection?.inspectionDate ?? new Date().toISOString().slice(0, 10),
     nextInspectionDate: inspection?.nextInspectionDate ?? "",
@@ -146,7 +172,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
     status:         inspection?.status ?? "open",
      inspectedBy:    inspection?.inspectedBy ?? "",
      staffRosterId:  (inspection as any)?.staffRosterId ?? null,
-    siteId:         inspection?.siteId == null ? "all" : String(inspection.siteId),
+    siteId:         formSiteId,
   }));
 
   useEffect(() => {
@@ -163,9 +189,10 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
       status: inspection?.status ?? "open",
       inspectedBy: inspection?.inspectedBy ?? "",
       staffRosterId: (inspection as any)?.staffRosterId ?? null,
-      siteId: inspection?.siteId == null ? "all" : String(inspection.siteId),
+      siteId: formSiteId,
+      ...(!inspection && spoken ? spoken : {}),
     });
-  }, [open, inspection, inspectionTypes]);
+  }, [open, inspection, inspectionTypes, spoken]);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }));
@@ -192,7 +219,8 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
       if (isEdit) {
         await apiFetch(`/${inspection.id}`, { method: "PUT", body: JSON.stringify(payload) });
       } else {
-        await apiFetch("/", { method: "POST", body: JSON.stringify(payload) });
+        const created = await apiFetch("/", { method: "POST", body: JSON.stringify(payload) });
+        await media.attach(created?.id);
       }
       toast({ title: isEdit ? "Inspection updated" : "Inspection logged" });
       onSaved(); onClose();
@@ -200,6 +228,8 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
       toast({ title: "Failed to save", description: err.message, variant: "destructive" });
     } finally { setSaving(false); }
   };
+
+  const examples = TYPE_PLACEHOLDERS[form.inspectionType] ?? TYPE_PLACEHOLDERS.routine;
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving && !v) onClose(); }}>
@@ -220,17 +250,17 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
             <Input type="date" value={form.nextInspectionDate} onChange={set("nextInspectionDate")} className="rounded-sm" />
           </div>
           <div className="space-y-1.5">
-            <Label>Type</Label>
+            <Label htmlFor="inspection-type">Type</Label>
             <Select value={form.inspectionType} onValueChange={v => setForm(f => ({ ...f, inspectionType: v }))}>
-              <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
+              <SelectTrigger id="inspection-type" className="rounded-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {formInspectionTypes.map(t => <SelectItem key={t} value={t}>{TYPE_LABELS[t] ?? t}</SelectItem>)}
+                {sortByLabel(formInspectionTypes, typeLabel).map(t => <SelectItem key={t} value={t}>{typeLabel(t)}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-1.5">
             <Label>Area / location</Label>
-            <Input value={form.area} onChange={set("area")} placeholder="e.g. Reception, stairwell, car park" className="rounded-sm" />
+            <Input value={form.area} onChange={set("area")} placeholder={examples.area} className="rounded-sm" />
           </div>
           <div className="space-y-1.5">
             <StaffPerformerSelect label="Inspected by" value={form.inspectedBy} onChange={(value) => setForm((current) => ({ ...current, inspectedBy: value }))} onRosterIdChange={(value) => setForm((current) => ({ ...current, staffRosterId: value }))} />
@@ -257,20 +287,23 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
             </Select>
           </div>
           <div className="col-span-full space-y-1.5">
-            <Label>Findings</Label>
-            <Textarea rows={2} value={form.findings} onChange={set("findings")} placeholder="What was observed during the inspection" className="rounded-sm" />
+            <Label htmlFor="premises-findings">Findings</Label>
+            <Textarea id="premises-findings" rows={2} value={form.findings} onChange={set("findings")} placeholder={examples.findings} className="rounded-sm" />
           </div>
           <div className="col-span-full space-y-1.5">
             <Label>Hazard details</Label>
-            <Textarea rows={2} value={form.hazardDetails} onChange={set("hazardDetails")} placeholder="Describe any hazard identified (slip, trip, fall, obstruction, etc.)" className="rounded-sm" />
+            <Textarea rows={2} value={form.hazardDetails} onChange={set("hazardDetails")} placeholder={examples.hazard} className="rounded-sm" />
           </div>
           <div className="col-span-full space-y-1.5">
             <Label>Action required</Label>
-            <Textarea rows={2} value={form.actionRequired} onChange={set("actionRequired")} placeholder="Remedial action needed" className="rounded-sm" />
+            <Textarea rows={2} value={form.actionRequired} onChange={set("actionRequired")} placeholder={examples.action} className="rounded-sm" />
           </div>
           <div className="col-span-full space-y-1.5">
             <Label>Action taken</Label>
             <Textarea rows={2} value={form.actionTaken} onChange={set("actionTaken")} placeholder="What was done in response" className="rounded-sm" />
+          </div>
+          <div className="col-span-full">
+            {inspection ? <CheckPhotoUploader entityType="premises_inspection" entityId={inspection.id} /> : media.picker}
           </div>
         </div>
         <DialogFooter>
@@ -289,6 +322,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
 export default function PremisesTrackPage() {
   const { user, activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
+  const canEdit = useCanEdit();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const apiFetch = usePremisesApi();
@@ -298,13 +332,28 @@ export default function PremisesTrackPage() {
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter]     = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [siteFilter, setSiteFilter]     = useState<string>("all");
+  const [siteFilter, setSiteFilter]     = useSiteFilter("all");
   const [fromDate, setFromDate]         = useState("");
   const [toDate, setToDate]             = useState("");
 
   const [dialog, setDialog]         = useState(false);
   const [editItem, setEditItem]     = useState<PremisesInspection | null>(null);
   const [deleteId, setDeleteId]     = useState<number | null>(null);
+  const [spoken, setSpoken]         = useState<{ area: string; findings: string; actionRequired: string; siteId: string } | null>(null);
+
+  // Say it: "stairwell, loose handrail on the top flight" opens a new
+  // inspection with the area, findings and any action needed filled in.
+  useSayItFill(["premises-inspection"], fill => {
+    const said = (key: string) => (typeof fill.values[key] === "string" ? fill.values[key] as string : "");
+    setEditItem(null);
+    setSpoken({
+      area: said("area"),
+      findings: withSpokenNote(said("findings"), fill.text),
+      actionRequired: said("actionRequired"),
+      siteId: fill.siteId ? String(fill.siteId) : "all",
+    });
+    setDialog(true);
+  });
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -468,11 +517,11 @@ ${sorted.map(r => `<tr>
               <Building2 className="w-4 h-4 text-violet-700" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold leading-tight">PremisesTrack</h1>
+              <h1 className="text-lg font-bold leading-tight">PremisesTrack</h1>
               <p className="text-xs text-muted-foreground">Digital premises safety logbook</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <FormOptionsEditor
               optionKey="premises_inspection_types"
               title="Inspection types"
@@ -535,7 +584,7 @@ ${sorted.map(r => `<tr>
             <SelectTrigger className="rounded-sm h-8 text-xs w-40"><SelectValue placeholder="All types" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All types</SelectItem>
-              {inspectionTypes.map(t => <SelectItem key={t} value={t}>{TYPE_LABELS[t] ?? t}</SelectItem>)}
+              {sortByLabel(inspectionTypes, t => TYPE_LABELS[t] ?? t).map(t => <SelectItem key={t} value={t}>{TYPE_LABELS[t] ?? t}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -597,7 +646,9 @@ ${sorted.map(r => `<tr>
               </thead>
               <tbody>
                 {filtered.map((r, i) => {
-                   const isOverdue = (r.status === "open" || r.status === "actioned")
+                   // The latest inspection of its type and area sets when the
+                   // next is due, whatever its action status.
+                   const isOverdue = !r.superseded
                      && !!r.nextInspectionDate
                      && r.nextInspectionDate < today;
                   return (
@@ -605,6 +656,8 @@ ${sorted.map(r => `<tr>
                       <td className="px-4 py-3">
                          <p className="text-sm font-medium">{fmt(r.inspectionDate)}</p>
                          {r.inspectedBy && <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[120px]">{r.inspectedBy}</p>}
+                         <CheckPhotoUploader entityType="premises_inspection" entityId={r.id} compact readOnly={!canEdit} />
+                         <RecordSignedBy recordType="premises_inspection" recordId={r.id} compact className="mt-1" />
                       </td>
                        <td className="px-4 py-3 text-xs">{TYPE_LABELS[r.inspectionType] ?? r.inspectionType}</td>
                       <td className="px-4 py-3 hidden sm:table-cell text-xs text-muted-foreground">
@@ -662,7 +715,8 @@ ${sorted.map(r => `<tr>
         inspection={editItem}
         sites={sites}
         onSaved={refetchAll}
-        onClose={() => { setDialog(false); setEditItem(null); }}
+        onClose={() => { setDialog(false); setEditItem(null); setSpoken(null); }}
+        spoken={spoken}
       />
 
       {/* ── Confirm delete ───────────────────────────────────────────────────── */}

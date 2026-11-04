@@ -1,10 +1,12 @@
 import { Router } from "express";
+import { partialUpdate } from "../lib/partialUpdate";
 import { db } from "@workspace/db";
 import { roomTrackChecksTable, roomTrackRoomsTable, sitesTable } from "@workspace/db/schema";
 import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getActiveDepartmentId, getClientId, requireAuth, requireClientAdmin, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
 
 const router = Router();
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
@@ -27,7 +29,7 @@ const CheckCreateBody = z.object({
   checkedBy: z.string().trim().max(200).optional().nullable(),
   checkedByRosterId: z.number().int().positive().optional().nullable(),
 });
-const CheckUpdateBody = CheckCreateBody.partial().omit({ roomId: true, checkDate: true }).extend({
+const CheckUpdateBody = partialUpdate(CheckCreateBody).omit({ roomId: true, checkDate: true }).extend({
   roomId: z.number().int().positive().optional(),
   checkDate: dateString.optional(),
 });
@@ -41,7 +43,7 @@ async function allowedSites(clientId: number, departmentId: number | null): Prom
   if (departmentId === null) return null;
   const found = await db.select({ id: sitesTable.id }).from(sitesTable).where(and(
     eq(sitesTable.clientId, clientId),
-    or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId)),
+    sitesTableVisibleTo(departmentId),
   ));
   return found.map((site) => site.id);
 }

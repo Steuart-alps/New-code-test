@@ -1,4 +1,5 @@
-import { pgTable, serial, integer, text, date, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, date, boolean, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
@@ -61,9 +62,28 @@ export const patTestsTable = pgTable("pat_tests", {
   operatingCurrent: text("operating_current"),
   notes: text("notes"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  // Submitter's department when the row was created, set by a database
+  // trigger and never changed (submitterDepartmentMigration.ts).
+  submitterDepartmentId: integer("submitter_department_id"),
+  submitterDepartmentSource: text("submitter_department_source").notNull().default("recorded"),
+  // Mobile outbox entry ID and payload fingerprint: a replay of an applied
+  // submission is recognised instead of creating a duplicate. Not a credential.
+  clientEntryId: text("client_entry_id"),
+  clientEntryHash: text("client_entry_hash"),
+  // Logged by a contractor through their testing link (contractor_test_visits);
+  // one test per appliance per visit. Not a foreign key, to keep the schema
+  // files free of an import cycle; the visit row is never deleted on its own.
+  contractorTestVisitId: integer("contractor_test_visit_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  uniqueIndex("UQ_pat_tests_client_entry_id")
+    .on(table.clientId, table.clientEntryId)
+    .where(sql`${table.clientEntryId} IS NOT NULL`),
+  uniqueIndex("UQ_pat_tests_contractor_visit_appliance")
+    .on(table.contractorTestVisitId, table.applianceId)
+    .where(sql`${table.contractorTestVisitId} IS NOT NULL`),
+]);
 
 // Certificate-level PAT register. The legacy appliance/test register above is
 // intentionally retained; these tables support room-template based testing.
@@ -73,6 +93,8 @@ export const patEquipmentTemplatesTable = pgTable("pat_equipment_templates", {
   siteId: integer("site_id").references(() => sitesTable.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   description: text("description"),
+  // Filled into a room's area type when the template is chosen for it.
+  areaType: text("area_type"),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
