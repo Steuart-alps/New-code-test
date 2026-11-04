@@ -22,6 +22,7 @@
     "test:night-fire-walks": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/night-fire-walks.mjs",
     "test:frost-warnings": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/frost-warnings.mjs",
     "test:equipment-labels": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/equipment-labels.mjs",
+    "test:equipment-defib-parts": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/equipment-defib-parts.mjs",
     "test:inspection-reports": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/inspection-reports.mjs",
     "test:report-reading": "bash tests/run-bundled-unit.sh tests/report-reading.ts esm",
     "test:register-reading": "bash tests/run-bundled-unit.sh tests/register-reading.ts esm",

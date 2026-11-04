@@ -451,6 +451,9 @@ jobs:
       - name: Equipment list and QR label tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:equipment-labels
 
+      - name: Defibrillator pads and battery expiry dates (production schema base)
+        run: pnpm --filter @workspace/api-server run test:equipment-defib-parts
+
       # KitchenTrack numeric controls: the shared rule model and country
       # presets, then hold-time boundaries, retries and the corrective-action
       # follow-up, each on its own fresh database.
