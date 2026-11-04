@@ -56,6 +56,8 @@ const STEPS = [
  * only Owners record for now.
  */
 const TEAM_STEP = 3;
+/** /setup?step=modules: Settings > Track owners links here to change the business's tracks. */
+const MODULES_STEP = 4;
 /** The getting-started page opens setup once per business on this browser; "What you'll need" reopens it. */
 const introSeenKey = (clientId: number | null) => `complytrack:setup-intro-seen:${clientId ?? "own"}`;
 function introSeen(clientId: number | null): boolean {
@@ -92,7 +94,10 @@ export default function SetupPage() {
   const [state, setState] = useState<SetupState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // "Add your team" on a held-back form page opens the wizard at the team step.
-  const [step, setStep] = useState(() => new URLSearchParams(search).get("step") === "team" ? TEAM_STEP : 0);
+  const [step, setStep] = useState(() => {
+    const requested = new URLSearchParams(search).get("step");
+    return requested === "team" ? TEAM_STEP : requested === "modules" ? MODULES_STEP : 0;
+  });
   const [intro, setIntro] = useState(() => !new URLSearchParams(search).get("step") && !introSeen(clientId));
   const [busy, setBusy] = useState(false);
   const [businessType, setBusinessType] = useState("");
