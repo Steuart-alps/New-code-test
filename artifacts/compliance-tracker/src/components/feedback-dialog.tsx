@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ClipboardEvent } from "react";
 import { ImagePlus, Loader2, MessageSquareWarning, X } from "lucide-react";
+import { useFileDrop } from "@/hooks/use-file-drop";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ export function FeedbackDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [screenshot, setScreenshot] = useState<Screenshot | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const screenshotDrop = useFileDrop((files) => void attach(files[0]!), !uploading);
 
   useEffect(() => {
     if (!open) {
@@ -138,7 +140,7 @@ export function FeedbackDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             <Textarea id="feedback-details" value={details} onChange={(event) => setDetails(event.target.value)} maxLength={5000} rows={6} placeholder="Tell us what happened, what you expected, or what would make ComplyTrack better." />
             <p className="text-xs text-muted-foreground">The current page, the app version and your account details are included automatically.</p>
           </div>
-          <div className="space-y-2">
+          <div {...screenshotDrop.dropZoneProps} className={screenshotDrop.isDragging ? "space-y-2 rounded-md ring-2 ring-primary ring-offset-1 bg-primary/5" : "space-y-2"}>
             <Label>Screenshot (optional)</Label>
             <input
               ref={fileRef}
@@ -160,7 +162,7 @@ export function FeedbackDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               <Button type="button" variant="outline" size="sm" className="w-full justify-start gap-2" disabled={uploading || submitting}
                 onClick={() => fileRef.current?.click()} data-testid="button-feedback-screenshot">
                 {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
-                {uploading ? "Attaching…" : "Attach a screenshot"}
+                {uploading ? "Attaching…" : screenshotDrop.isDragging ? "Drop the screenshot here" : "Attach a screenshot, or drag it here"}
               </Button>
             )}
             <p className="text-xs text-muted-foreground">PNG, JPEG or WebP, up to 10 MB. You can also paste a copied screenshot here. Only the ALPS team and your business's administrators can see it.</p>

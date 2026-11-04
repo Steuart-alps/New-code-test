@@ -11,6 +11,7 @@ import {
   CheckCircle2, Circle, Loader2, FileText, Upload, Trash2, ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useFileDrop } from "@/hooks/use-file-drop";
 import { notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 import { assertWithinUploadLimit } from "@/lib/upload-limits";
 import { CheckStatusWithCertificate } from "@/components/certificates-outstanding-card";
@@ -67,6 +68,7 @@ export default function SiteDetailPage() {
   const [docs, setDocs] = useState<SiteDocument[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const siteDocsDrop = useFileDrop((files) => void uploadFile(files[0]!), canAdmin && !uploading);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -84,6 +86,10 @@ export default function SiteDetailPage() {
     if (!file) return;
     // Reset input so same file can be re-uploaded
     e.target.value = "";
+    await uploadFile(file);
+  }
+
+  async function uploadFile(file: File) {
     setUploading(true);
     try {
       assertWithinUploadLimit(file);
@@ -214,11 +220,12 @@ export default function SiteDetailPage() {
       </div>
 
       {/* Site Documents */}
-      <Card className="bg-card overflow-hidden mb-6">
+      <Card {...siteDocsDrop.dropZoneProps} className={cn("bg-card overflow-hidden mb-6", siteDocsDrop.isDragging && "ring-2 ring-primary")}>
         <div className="px-6 py-4 border-b border-border flex items-center justify-between">
           <div className="flex items-center gap-2">
             <FileText className="w-4 h-4 text-muted-foreground" />
             <h3 className="font-display font-bold text-lg">Site Documents</h3>
+            {canAdmin && <span className="hidden sm:inline text-xs text-muted-foreground">{siteDocsDrop.isDragging ? "Drop to upload" : "or drag a file here"}</span>}
           </div>
           {canAdmin && (
             <>

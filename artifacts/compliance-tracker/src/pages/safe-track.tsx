@@ -26,6 +26,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { useLiveAcknowledgements } from "@/hooks/use-live-acknowledgements";
 import { cn } from "@/lib/utils";
+import { useFileDrop } from "@/hooks/use-file-drop";
 import { compareTrainingExpiry, getTrainingExpiry } from "@/lib/training-expiry";
 import { useLocalToday } from "@/hooks/use-local-today";
 import { INDUCTION_SECTIONS, parseChecklist, renderInductionHtml, type InductionChecklist, type SectionKey, type ChecklistItem } from "@/lib/induction-print";
@@ -318,6 +319,7 @@ function FileUploadField({ form, setForm }: { form: any; setForm: (f: any) => vo
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  const { isDragging, dropZoneProps } = useFileDrop((files) => void handleFile(files[0]!), !uploading);
 
   async function handleFile(file: File) {
     setUploading(true);
@@ -344,7 +346,7 @@ function FileUploadField({ form, setForm }: { form: any; setForm: (f: any) => vo
   }
 
   return (
-    <div className="space-y-1.5">
+    <div {...dropZoneProps} className={cn("space-y-1.5", isDragging && "ring-2 ring-primary ring-offset-1 rounded-md bg-primary/5")}>
       <Label>Attached Document</Label>
       <input ref={inputRef} type="file" className="hidden" onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
       {form.fileName ? (
@@ -359,7 +361,7 @@ function FileUploadField({ form, setForm }: { form: any; setForm: (f: any) => vo
       ) : (
         <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()} disabled={uploading} className="w-full justify-start gap-2">
           <Upload className="w-3.5 h-3.5" />
-          {uploading ? "Uploading…" : "Attach Document (PDF, Word, etc.)"}
+          {uploading ? "Uploading…" : isDragging ? "Drop the file here" : "Attach Document (PDF, Word, etc.), or drag it here"}
         </Button>
       )}
     </div>

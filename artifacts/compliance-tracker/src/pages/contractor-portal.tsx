@@ -5,6 +5,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams } from "wouter";
 import { format, isPast, differenceInDays } from "date-fns";
+import { useFileDrop } from "@/hooks/use-file-drop";
 import { ShieldCheck, FileUp, Trash2, Plus, CheckCircle2, AlertTriangle, Clock, X, Loader2, Download } from "lucide-react";
 import { getDownloadErrorMessage } from "@/lib/download";
 
@@ -111,6 +112,11 @@ export default function ContractorPortalPage() {
   const [downloadingCert, setDownloadingCert] = useState<number | null>(null);
   const [deletingCert, setDeletingCert] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // A dropped certificate replaces whatever the file picker held.
+  const certDrop = useFileDrop((files) => {
+    if (fileRef.current) fileRef.current.value = "";
+    setCertFile(files[0] ?? null);
+  });
 
   useEffect(() => {
     if (!token) return;
@@ -436,13 +442,14 @@ export default function ContractorPortalPage() {
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                 <p className="mt-1 text-xs text-slate-500">A common renewal interval is suggested for preset certificates. Check your certificate and edit this date if needed.</p>
               </div>
-              <div>
+              <div {...certDrop.dropZoneProps} className={certDrop.isDragging ? "rounded-lg ring-2 ring-slate-500 bg-slate-50" : undefined}>
                 <label className="block text-xs font-medium text-slate-600 mb-1">
-                  <FileUp className="w-3.5 h-3.5 inline mr-1" />Upload certificate (PDF, JPG, PNG)
+                  <FileUp className="w-3.5 h-3.5 inline mr-1" />Upload certificate (PDF, JPG, PNG), or drag it here
                 </label>
                 <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png"
                   onChange={e => setCertFile(e.target.files?.[0] ?? null)}
                   className="block w-full text-xs text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-slate-200 file:text-slate-700 hover:file:bg-slate-300" />
+                {certFile && !fileRef.current?.files?.length && <p className="mt-1 text-xs text-slate-600" data-testid="dropped-certificate">Chosen: {certFile.name}</p>}
                 {/^dbs\b/i.test(certName.trim()) && (
                   <p className="mt-2 text-xs rounded-lg border border-amber-200 bg-amber-50 text-amber-900 px-3 py-2">
                     DBS certificates contain criminal record information and DBS guidance advises against keeping copies.
