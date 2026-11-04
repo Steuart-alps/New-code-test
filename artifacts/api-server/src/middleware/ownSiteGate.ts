@@ -24,6 +24,11 @@ import { logger } from "../lib/logger";
 
 const MUTATIONS = new Set(["POST", "PUT", "PATCH"]);
 
+// Requests where a blank siteId names a scope (the whole business), not a
+// record's site. The route itself refuses that scope to people tied to a site,
+// so it is left for the route to answer rather than quietly narrowed.
+const BLANK_SITE_IS_SCOPE = new Set(["/staff-roster/reconcile"]);
+
 export const OWN_SITE_ERROR = "You can only add or change records for your own site.";
 
 export async function enforceOwnSite(req: Request, res: Response, next: NextFunction) {
@@ -56,7 +61,7 @@ export async function enforceOwnSite(req: Request, res: Response, next: NextFunc
   const raw = body.siteId;
   const empty = raw === null || raw === undefined || raw === "" || raw === "none";
   if (empty) {
-    if (req.method === "POST") body.siteId = ownSiteId;
+    if (req.method === "POST" && !BLANK_SITE_IS_SCOPE.has(req.path)) body.siteId = ownSiteId;
     next();
     return;
   }
