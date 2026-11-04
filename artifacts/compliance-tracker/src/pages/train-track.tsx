@@ -76,6 +76,7 @@ import { DocumentSignOffSection } from "@/components/document-sign-offs";
 import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 import { matchSpokenItem, spokenDate, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { sortByLabel, sortedEntries } from "@/lib/sort-options";
+import { RecordSiteField } from "@/components/record-site-field";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1229,18 +1230,8 @@ ${rows.map(r => `<tr>
                     onChange={e => setCertForm(f => ({ ...f, provider: e.target.value }))}
                     className="mt-1 rounded-sm" />
                 </div>
-                {sites.length > 0 && (
-                  <div>
-                    <Label>Site</Label>
-                    <Select value={certForm.siteId || "none"} onValueChange={v => setCertForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
-                      <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">No site</SelectItem>
-                        {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
+                <RecordSiteField value={certForm.siteId} onChange={id => setCertForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+                  keepSiteId={editRecord ? editRecord.site_id ?? null : undefined} />
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label htmlFor="completedDate">Completed *</Label>
@@ -1296,18 +1287,8 @@ ${rows.map(r => `<tr>
                     </SelectContent>
                   </Select>
                 </div>
-                {sites.length > 0 && (
-                  <div>
-                    <Label>Site</Label>
-                    <Select value={signoffForm.siteId || "none"} onValueChange={v => setSignoffForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
-                      <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">No site</SelectItem>
-                        {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
+                <RecordSiteField value={signoffForm.siteId} onChange={id => setSignoffForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+                  keepSiteId={editRecord ? editRecord.site_id ?? null : undefined} />
                 <div>
                   <Label htmlFor="signedDate">Date Signed *</Label>
                   <Input id="signedDate" type="date" value={signoffForm.completedDate}
@@ -1355,18 +1336,8 @@ ${rows.map(r => `<tr>
                     onChange={e => setInternalForm(f => ({ ...f, trainer: e.target.value }))}
                     className="mt-1 rounded-sm" />
                 </div>
-                {sites.length > 0 && (
-                  <div>
-                    <Label>Site</Label>
-                    <Select value={internalForm.siteId || "none"} onValueChange={v => setInternalForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
-                      <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">No site</SelectItem>
-                        {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
+                <RecordSiteField value={internalForm.siteId} onChange={id => setInternalForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+                  keepSiteId={editRecord ? editRecord.site_id ?? null : undefined} />
                 <div>
                   <Label htmlFor="internalDate">Date *</Label>
                   <Input id="internalDate" type="date" value={internalForm.completedDate}

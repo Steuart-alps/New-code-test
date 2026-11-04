@@ -16,6 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { getApiErrorMessage } from "@/lib/api";
 import { csvCell } from "@/lib/csv";
 import { downloadBlob, downloadFile, getDownloadErrorMessage } from "@/lib/download";
+import { RecordSiteField } from "@/components/record-site-field";
 
 // Shared pieces for the allergen, COSHH and asbestos register pages
 // (API: /api/registers/*).
@@ -87,6 +88,13 @@ export function SiteFilter({ value, onChange }: { value: string; onChange: (valu
 
 export function SiteSelect({ value, onChange, id = "register-site" }: { value: string; onChange: (value: string) => void; id?: string }) {
   const { sites } = useRegisterSites();
+  // An entry being edited keeps the site it was saved at; a new one goes to
+  // the selected site only (see RecordSiteField).
+  const [openedOn] = useState(value);
+  if (sites.length > 0) {
+    return <RecordSiteField label="Site *" testId={id} value={value} onChange={siteId => onChange(siteId ? String(siteId) : "")}
+      keepSiteId={openedOn ? Number(openedOn) : undefined} />;
+  }
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id}>Site *</Label>

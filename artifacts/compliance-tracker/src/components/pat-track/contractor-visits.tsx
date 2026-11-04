@@ -16,6 +16,7 @@ import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
 import { getApiErrorMessage } from "@/lib/api";
 import { CheckCircle2, ChevronDown, ChevronUp, Copy, FileText, HardHat, Link2, Loader2, Plus, XCircle } from "lucide-react";
+import { RecordSiteField } from "@/components/record-site-field";
 
 type Site = { id: number; name: string };
 interface ContractorOption { id: number; name: string; company: string | null; email: string | null }
@@ -282,11 +283,8 @@ export function PATContractorVisits({ sites, siteFilter, openVisitId }: { sites:
             <DialogDescription>The contractor gets a link that works for this site only, until two days after the last day.</DialogDescription>
           </DialogHeader>
           <form id="contractor-visit-form" onSubmit={create} className="space-y-3">
-            <div className="space-y-1.5"><Label htmlFor="cv-site">Site</Label>
-              <select id="cv-site" className="h-10 w-full rounded-sm border border-input bg-background px-3 text-sm" value={form.siteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>
-                <option value="">Choose a site</option>
-                {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select></div>
+            <RecordSiteField testId="cv-site" value={form.siteId} onChange={(id) => setForm({ ...form, siteId: id ? String(id) : "" })}
+              pageSiteId={siteFilter ? Number(siteFilter) : null} />
             <div className="space-y-1.5"><Label htmlFor="cv-contractor">Contractor</Label>
               <select id="cv-contractor" className="h-10 w-full rounded-sm border border-input bg-background px-3 text-sm" value={form.contractor} onChange={(e) => setForm({ ...form, contractor: e.target.value })}>
                 <option value="">{contractorsQuery.isLoading ? "Loading…" : "Choose a contractor"}</option>

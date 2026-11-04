@@ -27,6 +27,7 @@ import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { downloadBlob } from "@/lib/download";
 import { Archive, ChevronDown, ChevronUp, Download, Flame, Loader2, Pencil, Plus, QrCode, RefreshCw, RotateCcw, Search } from "lucide-react";
 import { sortByLabel } from "@/lib/sort-options";
+import { RecordSiteField } from "@/components/record-site-field";
 
 const TYPE_LABELS: Record<EquipmentType, string> = {
   cold_water_tank: "Cold water storage tank",
@@ -197,16 +198,9 @@ function ItemDialog({ item, sites, defaultSite, open, onOpenChange, onSaved }: {
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-1.5">
-            <Label>Site</Label>
-            <Select value={form.siteId} onValueChange={value => update("siteId", value)}>
-              <SelectTrigger aria-label="Equipment site"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_SITE}>No particular site</SelectItem>
-                {sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
+          <RecordSiteField value={form.siteId} onChange={id => update("siteId", id ? String(id) : NO_SITE)}
+            pageSiteId={defaultSite && defaultSite !== NO_SITE ? Number(defaultSite) || null : null}
+            keepSiteId={item ? item.siteId ?? null : undefined} businessWide="No particular site" testId="equipment-site" />
           {hint && <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground sm:col-span-2">{hint}</p>}
           <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="equipment-location">Location</Label>
@@ -287,15 +281,8 @@ function ImportExtinguishersDialog({ sites, defaultSite, open, onOpenChange, onD
           <DialogTitle>Copy extinguishers from FireTrack</DialogTitle>
           <DialogDescription>Adds one item for each extinguisher location on your FireTrack list, so each can have its own label. Locations already on the list are skipped.</DialogDescription>
         </DialogHeader>
-        <div className="space-y-1.5 py-2">
-          <Label>Site</Label>
-          <Select value={siteId} onValueChange={setSiteId}>
-            <SelectTrigger aria-label="Site for the extinguishers"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NO_SITE}>No particular site</SelectItem>
-              {sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+        <div className="py-2">
+          <RecordSiteField value={siteId} onChange={id => setSiteId(id ? String(id) : NO_SITE)} pageSiteId={defaultSite && defaultSite !== NO_SITE ? Number(defaultSite) || null : null} businessWide="No particular site" testId="extinguisher-site" />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button>

@@ -35,6 +35,7 @@ import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActive
 import { useSiteFilterId, useWorkingSiteId } from "@/hooks/use-working-site";
 import { sortedEntries } from "@/lib/sort-options";
 import { RecordSignedBy } from "@/components/record-signature";
+import { RecordSiteField } from "@/components/record-site-field";
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
@@ -459,18 +460,8 @@ function RecordDialog({
             <div className="space-y-1.5">
               <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} optional />
             </div>
-            {sites && sites.length > 0 && (
-              <div className="space-y-1.5">
-                <Label>Site <span className="text-muted-foreground text-xs">optional</span></Label>
-                <Select value={selectedSite ? String(selectedSite) : "none"} onValueChange={v => setSelectedSite(v === "none" ? undefined : Number(v))}>
-                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No specific site</SelectItem>
-                    {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            <RecordSiteField value={selectedSite} onChange={id => setSelectedSite(id ?? undefined)}
+              keepSiteId={existing ? existing.site_id ?? null : undefined} pageSiteId={siteId} />
           </div>
 
           {/* ── Chemistry ──────────────────────────────────────────────── */}

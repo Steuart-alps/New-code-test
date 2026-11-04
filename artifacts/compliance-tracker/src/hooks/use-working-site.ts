@@ -96,6 +96,8 @@ export function useWorkingSite() {
     ready: !sitesLoading && !(needDepartments && departments.isLoading),
     /** The sites this user works across (every site for an Owner). */
     sites: mySites,
+    /** True for Owners, Consultants and every-department Managers. */
+    everySite,
     setSiteId: (id: number | null) => writeStored(key, id),
   };
 }

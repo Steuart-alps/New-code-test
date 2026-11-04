@@ -17,6 +17,7 @@ import { ImportCsvButton } from "@/components/import-csv-dialog";
 import {
   CHARTS_PATH, DISHES_PATH, INGREDIENTS_PATH, sameSet, type AllergenIngredient,
 } from "@/lib/allergens";
+import { RecordSiteField } from "@/components/record-site-field";
 
 interface IngredientForm {
   siteId: string; // "all" for every site
@@ -238,16 +239,9 @@ export function AllergenIngredientsTab({ ingredients, isLoading, error }: {
                   <Input id="ingredient-name" value={form.name} maxLength={200} placeholder="For example: Sourdough loaf"
                     onChange={(e) => setForm({ ...form, name: e.target.value })} />
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="ingredient-site">Used at</Label>
-                  <Select value={form.siteId} onValueChange={(siteId) => setForm({ ...form, siteId })}>
-                    <SelectTrigger id="ingredient-site"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All sites</SelectItem>
-                      {sites.map((site) => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
+                <RecordSiteField label="Used at" testId="ingredient-site" value={form.siteId}
+                  onChange={(siteId) => setForm({ ...form, siteId: siteId ? String(siteId) : "all" })}
+                  keepSiteId={editing ? editing.siteId ?? null : undefined} businessWide="All sites" />
                 <div className="space-y-1.5">
                   <Label htmlFor="ingredient-supplier">Supplier</Label>
                   <Input id="ingredient-supplier" value={form.supplier} maxLength={200} onChange={(e) => setForm({ ...form, supplier: e.target.value })} />

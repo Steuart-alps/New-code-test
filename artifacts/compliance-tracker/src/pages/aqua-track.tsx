@@ -43,6 +43,7 @@ import { useSayItFill, withSpokenNote, type SayItFill } from "@/lib/say-it-fill"
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 import { sortedEntries } from "@/lib/sort-options";
 import { RecordSignedBy } from "@/components/record-signature";
+import { RecordSiteField } from "@/components/record-site-field";
 
 // ── API helpers ────────────────────────────────────────────────────────────────
 
@@ -386,18 +387,8 @@ function PoolRecordDialog({
             <div className="space-y-1.5">
               <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} optional />
             </div>
-            {sites && sites.length > 0 && (
-              <div className="space-y-1.5">
-                <Label>Site <span className="text-muted-foreground text-xs">optional</span></Label>
-                <Select value={selectedSite ? String(selectedSite) : "none"} onValueChange={v => setSelectedSite(v === "none" ? undefined : Number(v))}>
-                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No specific site</SelectItem>
-                    {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            <RecordSiteField value={selectedSite} onChange={id => setSelectedSite(id ?? undefined)}
+              keepSiteId={existing ? existing.site_id ?? null : undefined} pageSiteId={siteId} />
           </div>
           <div className="border border-border rounded-sm p-3 space-y-3 bg-muted/20">
             <p className="text-sm font-medium flex items-center gap-1.5"><Droplets className="w-4 h-4 text-primary" /> Water chemistry</p>
@@ -546,14 +537,8 @@ function SessionDialog({ open, onClose, session, sites, onSaved }: { open: boole
                 <SelectContent>{sortedEntries(SESSION_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            {sites.length > 0 && (
-              <div className="col-span-2"><Label>Site <span className="text-muted-foreground text-xs">optional</span></Label>
-                <Select value={form.siteId || "_none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "_none" ? "" : v }))}>
-                  <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
-                  <SelectContent><SelectItem value="_none">— All sites —</SelectItem>{sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-            )}
+            <RecordSiteField className="col-span-2" value={form.siteId} onChange={id => setForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+              keepSiteId={session ? session.siteId ?? null : undefined} />
             <div><Label>Lifeguard on duty <span className="text-muted-foreground text-xs">optional</span></Label><Input className="mt-1 rounded-sm" value={form.lifeguardName} onChange={e => setForm(f => ({ ...f, lifeguardName: e.target.value }))} /></div>
             <div><Label>Pre-session result</Label>
               <Select value={form.preSessionResult} onValueChange={v => setForm(f => ({ ...f, preSessionResult: v }))}>
@@ -626,7 +611,8 @@ function SurveillanceDialog({ open, onClose, check, sites, onSaved, spoken }: { 
           <div className="grid grid-cols-2 gap-3">
             <div><Label>Date *</Label><Input type="date" className="mt-1 rounded-sm" value={form.checkDate} onChange={e => setForm(f => ({ ...f, checkDate: e.target.value }))} /></div>
             <div><Label>Time</Label><Input type="time" className="mt-1 rounded-sm" value={form.checkTime} onChange={e => setForm(f => ({ ...f, checkTime: e.target.value }))} /></div>
-            {sites.length > 0 && (<div className="col-span-2"><Label>Site <span className="text-muted-foreground text-xs">optional</span></Label><Select value={form.siteId || "_none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "_none" ? "" : v }))}><SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger><SelectContent><SelectItem value="_none">— All sites —</SelectItem>{sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}</SelectContent></Select></div>)}
+            <RecordSiteField className="col-span-2" value={form.siteId} onChange={id => setForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+              keepSiteId={check ? check.siteId ?? null : undefined} />
             <div><Label>Bather count <span className="text-muted-foreground text-xs">optional</span></Label><Input type="number" min="0" className="mt-1 rounded-sm" value={form.batherCount} onChange={e => setForm(f => ({ ...f, batherCount: e.target.value }))} /></div>
             <div><Label>Checked by <span className="text-muted-foreground text-xs">optional</span></Label><Input className="mt-1 rounded-sm" value={form.checkedBy} onChange={e => setForm(f => ({ ...f, checkedBy: e.target.value }))} /></div>
           </div>
@@ -677,7 +663,8 @@ function FirstAidDialog({ open, onClose, check, sites, onSaved }: { open: boolea
           <div className="grid grid-cols-2 gap-3">
             <div><Label>Date *</Label><Input type="date" className="mt-1 rounded-sm" value={form.checkDate} onChange={e => setForm(f => ({ ...f, checkDate: e.target.value }))} /></div>
             <div><Label>Checked by <span className="text-muted-foreground text-xs">optional</span></Label><Input className="mt-1 rounded-sm" value={form.checkedBy} onChange={e => setForm(f => ({ ...f, checkedBy: e.target.value }))} /></div>
-            {sites.length > 0 && (<div className="col-span-2"><Label>Site <span className="text-muted-foreground text-xs">optional</span></Label><Select value={form.siteId || "_none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "_none" ? "" : v }))}><SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger><SelectContent><SelectItem value="_none">— All sites —</SelectItem>{sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}</SelectContent></Select></div>)}
+            <RecordSiteField className="col-span-2" value={form.siteId} onChange={id => setForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+              keepSiteId={check ? check.siteId ?? null : undefined} />
           </div>
           <div className="space-y-2">
             <Label className="text-sm font-medium">Equipment checklist</Label>
@@ -738,7 +725,8 @@ function IncidentDialog({ open, onClose, incident, sites, onSaved }: { open: boo
             <div><Label>Time <span className="text-muted-foreground text-xs">optional</span></Label><Input type="time" className="mt-1 rounded-sm" value={form.incidentTime} onChange={e => setForm(f => ({ ...f, incidentTime: e.target.value }))} /></div>
             <div><Label>Type</Label><Select value={form.incidentType} onValueChange={v => setForm(f => ({ ...f, incidentType: v }))}><SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger><SelectContent>{sortedEntries(INCIDENT_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent></Select></div>
             <div><Label>Severity</Label><Select value={form.severity} onValueChange={v => setForm(f => ({ ...f, severity: v }))}><SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(SEVERITY_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent></Select></div>
-            {sites.length > 0 && (<div className="col-span-2"><Label>Site <span className="text-muted-foreground text-xs">optional</span></Label><Select value={form.siteId || "_none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "_none" ? "" : v }))}><SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger><SelectContent><SelectItem value="_none">— All sites —</SelectItem>{sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}</SelectContent></Select></div>)}
+            <RecordSiteField className="col-span-2" value={form.siteId} onChange={id => setForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+              keepSiteId={incident ? incident.siteId ?? null : undefined} />
           </div>
           <div><Label>Persons involved <span className="text-muted-foreground text-xs">do not record names of members of public</span></Label><Input className="mt-1 rounded-sm" value={form.personsInvolved} onChange={e => setForm(f => ({ ...f, personsInvolved: e.target.value }))} placeholder="e.g. 1 adult male bather, 2 staff members" /></div>
           <div><Label>Description *</Label><Textarea className="mt-1 rounded-sm" rows={3} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Describe what happened…" /></div>

@@ -31,6 +31,7 @@ import { getApiErrorMessage } from "@/lib/api";
 import { camelCaseRows } from "@/lib/camel-case-rows";
 import { sortedEntries } from "@/lib/sort-options";
 import { RecordSignedBy } from "@/components/record-signature";
+import { RecordSiteField } from "@/components/record-site-field";
 
 function useSwimTrackApi() {
   const request = useActiveClientApi();
@@ -265,18 +266,8 @@ function SessionDialog({
                 </SelectContent>
               </Select>
             </div>
-            {sites.length > 0 && (
-              <div className="col-span-2">
-                <Label>Site <span className="text-muted-foreground text-xs">optional</span></Label>
-                <Select value={form.siteId || "_none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "_none" ? "" : v }))}>
-                  <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="_none">— All sites —</SelectItem>
-                    {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            <RecordSiteField className="col-span-2" value={form.siteId} onChange={id => setForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+              keepSiteId={session ? session.siteId ?? null : undefined} />
             <div>
               <Label>Lifeguard on duty <span className="text-muted-foreground text-xs">optional</span></Label>
               <StaffPerformerSelect label="Lifeguard" value={form.lifeguardName}
@@ -431,18 +422,8 @@ function SurveillanceDialog({
               <Input type="time" className="mt-1 rounded-sm" value={form.checkTime}
                 onChange={e => setForm(f => ({ ...f, checkTime: e.target.value }))} />
             </div>
-            {sites.length > 0 && (
-              <div className="col-span-2">
-                <Label>Site <span className="text-muted-foreground text-xs">optional</span></Label>
-                <Select value={form.siteId || "_none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "_none" ? "" : v }))}>
-                  <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="_none">— All sites —</SelectItem>
-                    {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            <RecordSiteField className="col-span-2" value={form.siteId} onChange={id => setForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+              keepSiteId={check ? check.siteId ?? null : undefined} />
             <div>
               <Label>Bather count <span className="text-muted-foreground text-xs">optional</span></Label>
               <Input type="number" min="0" className="mt-1 rounded-sm" value={form.batherCount}
@@ -551,18 +532,8 @@ function FirstAidDialog({
                 onChange={(value) => setForm(f => ({ ...f, checkedBy: value }))}
                 onRosterIdChange={(value) => setForm(f => ({ ...f, checkedByRosterId: value }))} />
             </div>
-            {sites.length > 0 && (
-              <div className="col-span-2">
-                <Label>Site <span className="text-muted-foreground text-xs">optional</span></Label>
-                <Select value={form.siteId || "_none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "_none" ? "" : v }))}>
-                  <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="_none">— All sites —</SelectItem>
-                    {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            <RecordSiteField className="col-span-2" value={form.siteId} onChange={id => setForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+              keepSiteId={check ? check.siteId ?? null : undefined} />
           </div>
           <div className="space-y-2">
             <Label className="text-sm font-medium">Equipment checklist</Label>
@@ -704,18 +675,8 @@ function IncidentDialog({
                 </SelectContent>
               </Select>
             </div>
-            {sites.length > 0 && (
-              <div className="col-span-2">
-                <Label>Site <span className="text-muted-foreground text-xs">optional</span></Label>
-                <Select value={form.siteId || "_none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "_none" ? "" : v }))}>
-                  <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="_none">— All sites —</SelectItem>
-                    {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            <RecordSiteField className="col-span-2" value={form.siteId} onChange={id => setForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+              keepSiteId={incident ? incident.siteId ?? null : undefined} />
           </div>
           <div>
             <Label>Persons involved <span className="text-muted-foreground text-xs">optional — do not record names of members of public</span></Label>

@@ -40,6 +40,7 @@ import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill
 import { sortByLabel } from "@/lib/sort-options";
 import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import { RecordSignedBy } from "@/components/record-signature";
+import { RecordSiteField } from "@/components/record-site-field";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1002,19 +1003,8 @@ export default function HotTubPage() {
               </div>
             )}
 
-            {/* Site */}
-            {sites.length > 0 && (
-              <div>
-                <Label>Site</Label>
-                <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
-                  <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No specific site</SelectItem>
-                    {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            <RecordSiteField value={form.siteId} onChange={id => setForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+              keepSiteId={editItem ? editItem.siteId ?? null : activeTubs.find(t => String(t.id) === form.hotTubId)?.siteId ?? undefined} />
 
             {/* Hot Tub selector */}
             <div>
@@ -1340,15 +1330,7 @@ function ManageTubsDialog({
                 onChange={e => setNewDesc(e.target.value)}
                 className="rounded-sm"
               />
-              {sites.length > 0 && (
-                <Select value={newSiteId || "none"} onValueChange={v => setNewSiteId(v === "none" ? "" : v)}>
-                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="Link to a site (optional)" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No specific site</SelectItem>
-                    {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              )}
+              <RecordSiteField label="Site" value={newSiteId} onChange={id => setNewSiteId(id ? String(id) : "")} />
               <div className="flex gap-2 justify-end">
                 <Button variant="ghost" size="sm" className="rounded-sm" onClick={() => setAdding(false)}>Cancel</Button>
                 <Button size="sm" className="rounded-sm" disabled={!newName.trim() || saving} onClick={handleAdd}>

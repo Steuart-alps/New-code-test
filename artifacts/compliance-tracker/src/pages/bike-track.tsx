@@ -44,6 +44,7 @@ import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActive
 import { sortByLabel } from "@/lib/sort-options";
 import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import { RecordSignedBy } from "@/components/record-signature";
+import { RecordSiteField } from "@/components/record-site-field";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -888,18 +889,8 @@ function BikeFormDialog({
               </SelectContent>
             </Select>
           </div>
-          {sites.length > 0 && (
-            <div className="space-y-1.5">
-              <Label>Site <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Select value={siteId || "none"} onValueChange={v => setSiteId(v === "none" ? "" : v)}>
-                <SelectTrigger className="rounded-sm"><SelectValue placeholder="No specific site" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No specific site</SelectItem>
-                  {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <RecordSiteField value={siteId} onChange={id => setSiteId(id ? String(id) : "")}
+            keepSiteId={bike ? bike.siteId ?? null : undefined} />
           <div className="space-y-1.5">
             <Label>Notes <span className="text-muted-foreground text-xs">optional</span></Label>
             <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Colour, size, any identifying features…" rows={2} className="rounded-sm" />

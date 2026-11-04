@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { RosterImportDialog } from "@/components/roster-import-dialog";
 import { DepartmentNameSelect } from "@/components/department-name-select";
 import { printHtmlDocument } from "@/lib/download";
+import { RecordSiteField } from "@/components/record-site-field";
 
 interface StaffMember {
   id: number;
@@ -117,18 +118,8 @@ function StaffDialog({
             <Label>Email <span className="text-muted-foreground text-xs">(optional)</span></Label>
             <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="staff@example.com" />
           </div>
-          {sites.length > 0 && (
-            <div className="space-y-1.5">
-              <Label>Site <span className="text-muted-foreground text-xs">(optional)</span></Label>
-              <Select value={form.siteId} onValueChange={v => setForm(f => ({ ...f, siteId: v }))}>
-                <SelectTrigger><SelectValue placeholder="All sites" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">All sites</SelectItem>
-                  {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <RecordSiteField value={form.siteId} onChange={id => setForm(f => ({ ...f, siteId: id ? String(id) : "none" }))}
+            keepSiteId={editing ? editing.site_id ?? null : undefined} businessWide="All sites" />
           <div className="space-y-1.5">
             <Label htmlFor="staff-department">Department</Label>
             <DepartmentNameSelect

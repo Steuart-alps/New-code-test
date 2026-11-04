@@ -35,6 +35,7 @@ import { useFileDrop } from "@/hooks/use-file-drop";
 import { PendingMediaPicker } from "@/components/pending-media-picker";
 import { tradeLabel } from "@/lib/contractor-trades";
 import { sortByLabel } from "@/lib/sort-options";
+import { RecordSiteField } from "@/components/record-site-field";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -159,8 +160,10 @@ function MediaThumb({ path, clientId, previewSrc, onRemove }: { path: string; cl
 
 // ── IssueForm ─────────────────────────────────────────────────────────────────
 
-function IssueForm({ form, setForm, issueId, isNew }: {
+function IssueForm({ form, setForm, issueId, isNew, keepSiteId }: {
   form: Record<string, any>;
+  /** The site an issue being edited already has (null for none). */
+  keepSiteId?: number | null;
   setForm: (f: Record<string, any>) => void;
   issueId?: number;
   isNew?: boolean;
@@ -385,17 +388,7 @@ function IssueForm({ form, setForm, issueId, isNew }: {
         </F>
       </div>
 
-      <div>
-        <F label="Site">
-          <Select value={form.siteId ? String(form.siteId) : "__none__"} onValueChange={v => setForm({ ...form, siteId: v === "__none__" ? null : Number(v) })}>
-            <SelectTrigger><SelectValue placeholder="All sites" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">No specific site</SelectItem>
-              {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </F>
-      </div>
+      <RecordSiteField value={form.siteId} onChange={id => setForm({ ...form, siteId: id ?? null })} keepSiteId={keepSiteId} />
 
       <F label="Solution / Resolution Notes">
         <Textarea value={form.solutionNotes ?? ""} onChange={e => setForm({ ...form, solutionNotes: e.target.value })}
@@ -1465,7 +1458,7 @@ export default function FixTrackPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="py-2">
-            <IssueForm form={form} setForm={setForm} issueId={editing?.id} isNew={!editing} />
+            <IssueForm form={form} setForm={setForm} issueId={editing?.id} isNew={!editing} keepSiteId={editing ? editing.siteId ?? null : undefined} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)} type="button">
