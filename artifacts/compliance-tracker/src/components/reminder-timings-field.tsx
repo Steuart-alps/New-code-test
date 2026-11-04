@@ -7,7 +7,11 @@ import {
   type ReminderTiming,
   type ReminderType,
 } from "@workspace/api-zod/reminder-timings";
+import { useState } from "react";
+import { Link } from "wouter";
 import { Label } from "@/components/ui/label";
+import { useCanAdmin } from "@/context/auth-context";
+import { isChosenTrack, useTrackOwners } from "@/lib/chosen-tracks";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 /** Stored timings: only the types changed from their default. */
@@ -56,6 +60,16 @@ export function ReminderTimingsField({
       ? { ...defaultReminderTiming(type), daysBefore: contractorLeadDays }
       : defaultReminderTiming(type);
 
+  // Only the tracks the business chose in setup (plus staff tasks, contractors
+  // and any type already changed); the rest wait behind "Show other types".
+  // Hidden rows keep their saved timings.
+  const { data: tracks } = useTrackOwners();
+  const canAdmin = useCanAdmin();
+  const [showOthers, setShowOthers] = useState(false);
+  const isListed = (type: ReminderType) => value[type.key] != null || isChosenTrack(tracks, type.key);
+  const otherTypes = REMINDER_TYPES.filter((type) => !isListed(type));
+  const shownTypes = showOthers ? REMINDER_TYPES : REMINDER_TYPES.filter(isListed);
+
   const update = (type: ReminderType, timing: ReminderTiming) => {
     const next = { ...value };
     if (sameTiming(timing, defaultFor(type))) delete next[type.key];
@@ -77,7 +91,7 @@ export function ReminderTimingsField({
           <span>Remind</span>
           <span>If overdue, remind again</span>
         </div>
-        {REMINDER_TYPES.map((type) => {
+        {shownTypes.map((type) => {
           const fallback = defaultFor(type);
           const timing = value[type.key] ?? fallback;
           const off = timing.daysBefore == null;
@@ -136,6 +150,26 @@ export function ReminderTimingsField({
           );
         })}
       </div>
+      {otherTypes.length > 0 && (
+        <div className="flex flex-col gap-1 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            {showOthers
+              ? "Showing every type, including tracks you didn't choose in setup."
+              : `Showing the tracks you chose in setup. ${otherTypes.length} other type${otherTypes.length === 1 ? " is" : "s are"} hidden.`}
+            {canAdmin && (
+              <> <Link href="/setup?step=modules" className="text-primary hover:underline">Change your tracks</Link></>
+            )}
+          </span>
+          <button
+            type="button"
+            className="self-start font-medium text-primary hover:underline sm:self-auto"
+            onClick={() => setShowOthers((shown) => !shown)}
+            data-testid="button-reminder-timings-show-others"
+          >
+            {showOthers ? "Hide other types" : `Show other types (${otherTypes.length})`}
+          </button>
+        </div>
+      )}
       <p className="text-xs text-muted-foreground">
         "Off" stops that type's reminder emails to people; it still shows in the Owner update. For staff training, the
         "Remind" choice also sets how far ahead each staff member's Monday training email looks, and Off stops it. Urgent items and new FixTrack issues

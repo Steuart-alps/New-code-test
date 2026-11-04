@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "wouter";
+import { useQueryClient } from "@tanstack/react-query";
 import { BellRing, ChevronRight } from "lucide-react";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
@@ -7,23 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { roleLabel } from "@/lib/roles";
-
-interface TrackOwner {
-  id: number;
-  module: string;
-  siteId: number | null;
-  userId: number;
-  userName: string;
-  eligible: boolean;
-}
-
-interface TrackOwnersResponse {
-  modules: { key: string; label: string; enabled: boolean }[];
-  owners: TrackOwner[];
-  sites: { id: number; name: string }[];
-  users: { id: number; name: string; email: string; role: string }[];
-  defaultRecipients: { id: number; name: string }[];
-}
+import { isChosenTrack, useTrackOwners } from "@/lib/chosen-tracks";
 
 const DEFAULT = "default";
 
@@ -35,19 +20,11 @@ const DEFAULT = "default";
 export function TrackOwnersCard() {
   const { toast } = useToast();
   const canAdmin = useCanAdmin();
-  const { user, activeClientId } = useAuth();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState<string | null>(null);
-  const queryKey = ["track-owners", user?.id ?? null, activeClientId ?? null];
-
-  const { data, isLoading, error } = useQuery({
-    queryKey,
-    queryFn: async (): Promise<TrackOwnersResponse> => {
-      const response = await apiFetch("/track-owners");
-      if (!response.ok) throw new Error(await getApiErrorMessage(response, "Couldn't load track owners"));
-      return response.json();
-    },
-  });
+  const [showOthers, setShowOthers] = useState(false);
+  const { data, isLoading, error, queryKey } = useTrackOwners();
 
   const ownerFor = (module: string, siteId: number | null) =>
     data?.owners.find((owner) => owner.module === module && owner.siteId === siteId);
@@ -76,7 +53,12 @@ export function TrackOwnersCard() {
     }
   };
 
+  // Only the tracks the business chose in setup; the rest wait behind
+  // "Show other tracks" (an older server without `chosen` shows them all).
   const enabledModules = data?.modules.filter((module) => module.enabled) ?? [];
+  const chosenModules = enabledModules.filter((module) => isChosenTrack(data, module.key));
+  const otherModules = enabledModules.filter((module) => !isChosenTrack(data, module.key));
+  const shownModules = showOthers ? enabledModules : chosenModules;
   const defaultNames = data?.defaultRecipients.map((recipient) => recipient.name).join(", ") || "the business's admins";
 
   const ownerSelect = (module: string, siteId: number | null, emptyLabel: string) => {
@@ -135,7 +117,7 @@ export function TrackOwnersCard() {
           <p className="text-sm text-muted-foreground">No tracks are enabled for this business yet.</p>
         ) : (
           <div className="divide-y divide-border rounded-lg border border-border">
-            {enabledModules.map((module) => {
+            {shownModules.map((module) => {
               const owner = ownerFor(module.key, null);
               const overrides = data!.owners.filter((row) => row.module === module.key && row.siteId !== null).length;
               return (
@@ -169,6 +151,26 @@ export function TrackOwnersCard() {
                 </div>
               );
             })}
+          </div>
+        )}
+        {!isLoading && !error && otherModules.length > 0 && (
+          <div className="mt-3 flex flex-col gap-1 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              {showOthers
+                ? "Showing every track, including ones you didn't choose in setup."
+                : `Showing the tracks you chose in setup. ${otherModules.length} other track${otherModules.length === 1 ? " is" : "s are"} hidden.`}
+              {canAdmin && (
+                <> <Link href="/setup?step=modules" className="text-primary hover:underline">Change your tracks</Link></>
+              )}
+            </span>
+            <button
+              type="button"
+              className="self-start font-medium text-primary hover:underline sm:self-auto"
+              onClick={() => setShowOthers((value) => !value)}
+              data-testid="button-track-owners-show-others"
+            >
+              {showOthers ? "Hide other tracks" : `Show other tracks (${otherModules.length})`}
+            </button>
           </div>
         )}
       </CardContent>
