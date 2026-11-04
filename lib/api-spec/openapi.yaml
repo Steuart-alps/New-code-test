@@ -9699,6 +9699,11 @@ components:
           type: string
           nullable: true
           description: The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).
+        equipmentPart:
+          type: string
+          nullable: true
+          enum: [defib_pads, defib_battery, defib_child_pads]
+          description: Set when this check is the replacement date of a part of an equipment list item (a defibrillator's pads or battery); its due date is the part's expiry date. Marking it done asks for the new part's expiry date (nextDueDate).
         notes:
           type: string
           nullable: true
@@ -9855,6 +9860,11 @@ components:
           nullable: true
           maxLength: 200
           description: Only with status completed. The competent person who did the check in house instead of a contractor; no contractor certificate is then due for this completion. Leave out (or null) for a contractor.
+        nextDueDate:
+          type: string
+          nullable: true
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: Only with status completed, and only for a check with an equipmentPart. The expiry date of the new part (YYYY-MM-DD), after the date done; the check stays open, due on that date.
       required:
         - status
 
@@ -13482,7 +13492,48 @@ components:
 
     EquipmentType:
       type: string
-      enum: [cold_water_tank, calorifier, boiler, water_heater, lift, hoist, lifting_equipment, pressure_system, gas_appliance, air_conditioning, fire_extinguisher, ladder, other]
+      enum: [cold_water_tank, calorifier, boiler, water_heater, lift, hoist, lifting_equipment, pressure_system, gas_appliance, air_conditioning, fire_extinguisher, defibrillator, ladder, other]
+
+    EquipmentPart:
+      type: string
+      enum: [defib_pads, defib_battery, defib_child_pads]
+
+    EquipmentPartState:
+      type: object
+      description: A part of the item that expires on a printed date, kept as a Compliance Check due on that date.
+      properties:
+        part:
+          $ref: "#/components/schemas/EquipmentPart"
+        label:
+          type: string
+        checkId:
+          type: integer
+        expiryDate:
+          type: string
+          nullable: true
+          description: YYYY-MM-DD; null once marked replaced without a new expiry date.
+        status:
+          type: string
+        lastReplaced:
+          type: string
+          nullable: true
+          description: YYYY-MM-DD the part was last replaced.
+      required: [part, label, checkId, expiryDate, status, lastReplaced]
+
+    EquipmentPartExpiryDates:
+      type: object
+      description: Expiry dates (YYYY-MM-DD) of a defibrillator's parts; null clears one, a missing one is left as it is.
+      additionalProperties: false
+      properties:
+        defib_pads:
+          type: string
+          nullable: true
+        defib_battery:
+          type: string
+          nullable: true
+        defib_child_pads:
+          type: string
+          nullable: true
 
     EquipmentLabelKind:
       type: string
@@ -13538,13 +13589,23 @@ components:
         labelCode:
           type: string
           nullable: true
+        parts:
+          type: array
+          items:
+            $ref: "#/components/schemas/EquipmentPartState"
+        partsAssigneeUserId:
+          type: integer
+          nullable: true
+        partsAssigneeName:
+          type: string
+          nullable: true
         createdAt:
           type: string
           format: date-time
         updatedAt:
           type: string
           format: date-time
-      required: [id, siteId, siteName, name, type, typeLabel, location, make, model, serialNo, notes, active, complianceItems, labelCode, createdAt, updatedAt]
+      required: [id, siteId, siteName, name, type, typeLabel, location, make, model, serialNo, notes, active, complianceItems, labelCode, parts, partsAssigneeUserId, partsAssigneeName, createdAt, updatedAt]
 
     EquipmentItemRequest:
       type: object
@@ -13577,6 +13638,12 @@ components:
           type: array
           items:
             type: integer
+        partExpiryDates:
+          $ref: "#/components/schemas/EquipmentPartExpiryDates"
+        partsAssigneeUserId:
+          type: integer
+          nullable: true
+          description: The person who replaces the parts; their reminders reach them.
       required: [name, type]
 
     UpdateEquipmentItemRequest:
@@ -13610,6 +13677,12 @@ components:
           type: array
           items:
             type: integer
+        partExpiryDates:
+          $ref: "#/components/schemas/EquipmentPartExpiryDates"
+        partsAssigneeUserId:
+          type: integer
+          nullable: true
+          description: The person who replaces the parts; their reminders reach them.
 
     EquipmentLabelRef:
       type: object

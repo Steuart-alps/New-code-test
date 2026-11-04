@@ -32,7 +32,7 @@ export function CompleteCheckDialog({
   onClose,
   onAddCertificate,
 }: {
-  item: { id: number; title: string; frequencyMonths?: number | null } | null;
+  item: { id: number; title: string; frequencyMonths?: number | null; equipmentPart?: string | null } | null;
   onClose: () => void;
   /** Offered as "Mark done and add certificate"; receives the date done. */
   onAddCertificate?: (completedAt: string) => void;
@@ -41,6 +41,11 @@ export function CompleteCheckDialog({
   const [date, setDate] = useState(localToday());
   const [inHouse, setInHouse] = useState(false);
   const [competentPerson, setCompetentPerson] = useState("");
+  // A replaced part (a defibrillator's pads or battery) is next due on the new part's expiry date.
+  const [nextExpiry, setNextExpiry] = useState("");
+  const isPart = !!item?.equipmentPart;
+  const partWord = item?.equipmentPart === "defib_battery" ? "battery" : item?.equipmentPart === "defib_child_pads" ? "child pads" : "pads";
+  const wasWere = partWord === "battery" ? "was" : "were";
   const today = localToday();
 
   useEffect(() => {
@@ -48,20 +53,27 @@ export function CompleteCheckDialog({
       setDate(localToday());
       setInHouse(false);
       setCompetentPerson("");
+      setNextExpiry("");
     }
   }, [item]);
 
   const invalid = !/^\d{4}-\d{2}-\d{2}$/.test(date) ? "Enter the date the check was done"
     : date > today ? "The date done cannot be in the future"
     : date < "2000-01-01" ? "Enter a date after 2000"
-    : inHouse && !competentPerson.trim() ? "Enter the name of the competent person who did it" : null;
+    : inHouse && !competentPerson.trim() ? "Enter the name of the competent person who did it"
+    : isPart && !/^\d{4}-\d{2}-\d{2}$/.test(nextExpiry) ? `Enter the expiry date of the new ${partWord}`
+    : isPart && nextExpiry <= date ? `The new ${partWord} must expire after the date ${partWord === "battery" ? "it was" : "they were"} fitted` : null;
 
   const submit = async (thenCertificate: boolean) => {
     if (!item || invalid) return;
     try {
       await updateItemStatus.mutateAsync({
         id: item.id,
-        data: { status: "completed", completedAt: date, ...(inHouse ? { completedInHouseBy: competentPerson.trim() } : {}) },
+        data: {
+          status: "completed", completedAt: date,
+          ...(inHouse ? { completedInHouseBy: competentPerson.trim() } : {}),
+          ...(isPart ? { nextDueDate: nextExpiry } : {}),
+        },
       });
       onClose();
       if (thenCertificate) onAddCertificate?.(date);
@@ -78,10 +90,18 @@ export function CompleteCheckDialog({
           <DialogDescription>{item?.title}</DialogDescription>
         </DialogHeader>
         <div className="space-y-2 py-2">
-          <Label htmlFor="completed-at">Date the check was done</Label>
+          <Label htmlFor="completed-at">{isPart ? `Date the new ${partWord} ${wasWere} fitted` : "Date the check was done"}</Label>
           <Input id="completed-at" type="date" value={date} max={today} onChange={(e) => setDate(e.target.value)} />
+          {isPart && (
+            <>
+              <Label htmlFor="next-expiry">Expiry date of the new {partWord}</Label>
+              <Input id="next-expiry" type="date" value={nextExpiry} min={date} onChange={(e) => setNextExpiry(e.target.value)} />
+            </>
+          )}
           {invalid ? (
             <p className="text-xs text-destructive">{invalid}</p>
+          ) : isPart ? (
+            <p className="text-xs text-muted-foreground">Next due {formatDay(nextExpiry)}, the date printed on the new {partWord}.</p>
           ) : item?.frequencyMonths ? (
             <p className="text-xs text-muted-foreground">
               Next due {formatDay(addMonthsToDay(date, item.frequencyMonths))} (every {item.frequencyMonths} month{item.frequencyMonths === 1 ? "" : "s"} from the date done).

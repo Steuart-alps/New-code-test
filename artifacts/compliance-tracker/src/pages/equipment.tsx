@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useListComplianceItems, useListSites,
-  type EquipmentItem, type EquipmentLabelTarget, type EquipmentType,
+  type EquipmentItem, type EquipmentLabelTarget, type EquipmentPart, type EquipmentPartState, type EquipmentType,
 } from "@workspace/api-client-react";
 import { AppLayout } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +27,7 @@ import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { downloadBlob } from "@/lib/download";
 import { Archive, ChevronDown, ChevronUp, Download, Flame, Loader2, Pencil, Plus, QrCode, RefreshCw, RotateCcw, Search } from "lucide-react";
 import { sortByLabel } from "@/lib/sort-options";
+import { formatDay, localToday } from "@/lib/onboarding";
 
 const TYPE_LABELS: Record<EquipmentType, string> = {
   cold_water_tank: "Cold water storage tank",
@@ -40,6 +41,7 @@ const TYPE_LABELS: Record<EquipmentType, string> = {
   gas_appliance: "Gas appliance",
   air_conditioning: "Air conditioning",
   fire_extinguisher: "Fire extinguisher",
+  defibrillator: "Defibrillator (AED)",
   ladder: "Ladder or step",
   other: "Other equipment",
 };
@@ -54,7 +56,50 @@ const TYPE_HINTS: Partial<Record<EquipmentType, string>> = {
   pressure_system: "Link its written scheme examination Compliance Check below so a scan shows whether it is in date.",
   gas_appliance: "Link its gas safety Compliance Check below so a scan shows whether it is in date.",
   fire_extinguisher: "Scanning the label shows the last extinguisher check for its location in FireTrack.",
+  defibrillator: "Enter the expiry dates printed on the pads and battery. Each one shows on the dashboard and under Compliance Checks, and the person below is reminded before it runs out. The regular \"defibrillator checked\" tick stays on the opening and closing checklists.",
 };
+
+/** Parts of an item with a printed expiry date, by type (matches the server). */
+const TYPE_PARTS: Partial<Record<EquipmentType, Array<{ part: EquipmentPart; label: string; hint: string }>>> = {
+  defibrillator: [
+    { part: "defib_pads", label: "Pads expire on", hint: "The date on the adult pads packet." },
+    { part: "defib_battery", label: "Battery expires on", hint: "The install-by or replace-by date on the battery." },
+    { part: "defib_child_pads", label: "Child pads expire on (if it has them)", hint: "Child pads, key or cartridge. Leave blank if there are none." },
+  ],
+};
+
+const PART_NAMES: Record<EquipmentPart, string> = { defib_pads: "Pads", defib_battery: "Battery", defib_child_pads: "Child pads" };
+
+/** How soon a part expires: red once expired, amber within 30 days. */
+function partState(part: EquipmentPartState, today: string): { text: string; tone: "red" | "amber" | "green" } {
+  if (!part.expiryDate) {
+    return { text: `${PART_NAMES[part.part]} replaced${part.lastReplaced ? ` ${formatDay(part.lastReplaced)}` : ""}: add the new expiry date`, tone: "amber" };
+  }
+  const days = Math.round((Date.parse(`${part.expiryDate}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
+  if (days < 0) return { text: `${PART_NAMES[part.part]} expired ${formatDay(part.expiryDate)}`, tone: "red" };
+  return { text: `${PART_NAMES[part.part]} expire${part.part === "defib_battery" ? "s" : ""} ${formatDay(part.expiryDate)}`, tone: days <= 30 ? "amber" : "green" };
+}
+
+const TONE_CLASSES = {
+  red: "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200",
+  amber: "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200",
+  green: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200",
+} as const;
+
+const NOBODY = "nobody";
+
+/** People who can be reminded about an item at a site (see lib/assignees.ts). */
+function usePeople(siteId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["assignees", siteId === NO_SITE ? null : Number(siteId)],
+    queryFn: async (): Promise<Array<{ id: number; name: string }>> => {
+      const res = await apiFetch(`/assignees${siteId === NO_SITE ? "" : `?siteId=${encodeURIComponent(siteId)}`}`);
+      return res.ok ? await res.json() : [];
+    },
+    enabled,
+    staleTime: 60_000,
+  });
+}
 
 const ALL = "all";
 const NO_SITE = "none";
@@ -124,12 +169,20 @@ function ItemDialog({ item, sites, defaultSite, open, onOpenChange, onSaved }: {
     model: item?.model ?? "",
     serialNo: item?.serialNo ?? "",
     notes: item?.notes ?? "",
-    checkIds: new Set((item?.complianceItems ?? []).map(check => check.id)),
+    checkIds: new Set((item?.complianceItems ?? [])
+      .filter(check => !(item?.parts ?? []).some(part => part.checkId === check.id))
+      .map(check => check.id)),
+    partDates: Object.fromEntries((item?.parts ?? []).map(part => [part.part, part.expiryDate ?? ""])) as Partial<Record<EquipmentPart, string>>,
+    partsAssignee: item?.partsAssigneeUserId != null ? String(item.partsAssigneeUserId) : NOBODY,
   }));
+  const typeParts = TYPE_PARTS[form.type] ?? [];
+  const { data: people = [] } = usePeople(form.siteId, open && typeParts.length > 0);
   const update = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => setForm(current => ({ ...current, [key]: value }));
   const { data: checks = [] } = useListComplianceItems(undefined, { query: { enabled: open } as never });
   // Checks at the item's site, or for the whole business.
+  // A part's own check (a defibrillator's pads) is kept by its expiry date, not ticked here.
   const siteChecks = checks
+    .filter(check => !check.equipmentPart)
     .filter(check => form.checkIds.has(check.id) || !check.siteId || String(check.siteId) === form.siteId)
     .sort((a, b) => a.title.localeCompare(b.title));
   const [checkSearch, setCheckSearch] = useState("");
@@ -147,9 +200,25 @@ function ItemDialog({ item, sites, defaultSite, open, onOpenChange, onSaved }: {
       toast({ title: "Give the item a name", variant: "destructive" });
       return;
     }
+    for (const { part } of typeParts) {
+      const date = form.partDates[part] ?? "";
+      if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        toast({ title: `Check the ${PART_NAMES[part].toLowerCase()} expiry date`, variant: "destructive" });
+        return;
+      }
+      if (date && date < "2000-01-01") {
+        toast({ title: `Check the ${PART_NAMES[part].toLowerCase()} expiry date`, description: `${formatDay(date)} looks wrong.`, variant: "destructive" });
+        return;
+      }
+    }
     setSaving(true);
     try {
+      const partFields = typeParts.length ? {
+        partExpiryDates: Object.fromEntries(typeParts.map(({ part }) => [part, form.partDates[part] || null])),
+        partsAssigneeUserId: form.partsAssignee === NOBODY ? null : Number(form.partsAssignee),
+      } : {};
       const payload = {
+        ...partFields,
         name: form.name.trim(),
         type: form.type,
         siteId: form.siteId === NO_SITE ? null : Number(form.siteId),
@@ -208,6 +277,30 @@ function ItemDialog({ item, sites, defaultSite, open, onOpenChange, onSaved }: {
             </Select>
           </div>
           {hint && <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground sm:col-span-2">{hint}</p>}
+          {typeParts.map(({ part, label, hint: partHint }) => (
+            <div key={part} className="space-y-1.5">
+              <Label htmlFor={`equipment-part-${part}`}>{label}</Label>
+              <Input id={`equipment-part-${part}`} type="date" value={form.partDates[part] ?? ""}
+                onChange={e => update("partDates", { ...form.partDates, [part]: e.target.value })} />
+              <p className="text-xs text-muted-foreground">{partHint}</p>
+            </div>
+          ))}
+          {typeParts.length > 0 && (
+            <div className="space-y-1.5">
+              <Label>Who replaces them?</Label>
+              <Select value={form.partsAssignee} onValueChange={value => update("partsAssignee", value)}>
+                <SelectTrigger aria-label="Who replaces the pads and battery"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NOBODY}>Not assigned</SelectItem>
+                  {sortByLabel(people, person => person.name).map(person => <SelectItem key={person.id} value={String(person.id)}>{person.name}</SelectItem>)}
+                  {form.partsAssignee !== NOBODY && !people.some(person => String(person.id) === form.partsAssignee) && (
+                    <SelectItem value={form.partsAssignee}>{item?.partsAssigneeName ?? "Former member"}</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Only this person is reminded before a date runs out. Not assigned: the track owner is.</p>
+            </div>
+          )}
           <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="equipment-location">Location</Label>
             <Input id="equipment-location" value={form.location} onChange={e => update("location", e.target.value)} placeholder="e.g. Plant room, roof void, kitchen corridor" />
@@ -345,6 +438,8 @@ function EquipmentList({ site, sites }: { site: string; sites: SiteOption[] }) {
   };
 
   const items = query.data ?? [];
+  const today = localToday();
+  const otherChecks = (item: EquipmentItem) => item.complianceItems.filter(check => !item.parts.some(part => part.checkId === check.id));
 
   return (
     <div className="space-y-3">
@@ -362,7 +457,7 @@ function EquipmentList({ site, sites }: { site: string; sites: SiteOption[] }) {
       {query.error && <Card className="p-6 text-sm text-red-700">{(query.error as Error).message}</Card>}
       {query.data && items.length === 0 && (
         <Card className="p-6 text-sm text-muted-foreground">
-          No equipment listed here yet. Add boilers, water tanks, calorifiers, lifts and anything else no track keeps a record of.
+          No equipment listed here yet. Add boilers, water tanks, calorifiers, lifts, defibrillators and anything else no track keeps a record of.
         </Card>
       )}
 
@@ -378,9 +473,22 @@ function EquipmentList({ site, sites }: { site: string; sites: SiteOption[] }) {
               <p className="text-sm text-muted-foreground">
                 {[item.siteName ?? "No particular site", item.location, [item.make, item.model].filter(Boolean).join(" "), item.serialNo ? `Serial ${item.serialNo}` : null].filter(Boolean).join(" · ")}
               </p>
-              {item.complianceItems.length > 0 && (
+              {item.parts.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {item.parts.map(part => {
+                    const state = partState(part, today);
+                    return (
+                      <Link key={part.part} href={`/items/${part.checkId}`}
+                        className={`rounded-full border px-2 py-0.5 text-xs font-medium hover:underline ${TONE_CLASSES[state.tone]}`}>
+                        {state.text}
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+              {otherChecks(item).length > 0 && (
                 <p className="text-xs text-muted-foreground">
-                  Checks: {item.complianceItems.map((check, index) => (
+                  Checks: {otherChecks(item).map((check, index) => (
                     <span key={check.id}>{index > 0 && ", "}<Link href={`/items/${check.id}`} className="text-primary hover:underline">{check.title}</Link></span>
                   ))}
                 </p>

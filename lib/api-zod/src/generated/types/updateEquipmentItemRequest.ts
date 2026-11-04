@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { EquipmentPartExpiryDates } from './equipmentPartExpiryDates';
 import type { EquipmentType } from './equipmentType';
 
 export interface UpdateEquipmentItemRequest {
@@ -18,4 +19,7 @@ export interface UpdateEquipmentItemRequest {
   notes?: string | null;
   active?: boolean;
   complianceItemIds?: number[];
+  partExpiryDates?: EquipmentPartExpiryDates;
+  /** The person who replaces the parts; their reminders reach them. */
+  partsAssigneeUserId?: number | null;
 }

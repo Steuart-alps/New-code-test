@@ -2312,6 +2312,18 @@ export const ComplianceItemPriority = {
   critical: 'critical',
 } as const;
 
+/**
+ * Set when this check is the replacement date of a part of an equipment list item (a defibrillator's pads or battery); its due date is the part's expiry date. Marking it done asks for the new part's expiry date (nextDueDate).
+ */
+export type ComplianceItemEquipmentPart = typeof ComplianceItemEquipmentPart[keyof typeof ComplianceItemEquipmentPart] | null;
+
+
+export const ComplianceItemEquipmentPart = {
+  defib_pads: 'defib_pads',
+  defib_battery: 'defib_battery',
+  defib_child_pads: 'defib_child_pads',
+} as const;
+
 export type ComplianceItemNeedsActionReason = typeof ComplianceItemNeedsActionReason[keyof typeof ComplianceItemNeedsActionReason] | null;
 
 
@@ -2350,6 +2362,8 @@ export interface ComplianceItem {
   completedAt?: string | null;
   /** The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it). */
   completedInHouseBy?: string | null;
+  /** Set when this check is the replacement date of a part of an equipment list item (a defibrillator's pads or battery); its due date is the part's expiry date. Marking it done asks for the new part's expiry date (nextDueDate). */
+  equipmentPart?: ComplianceItemEquipmentPart;
   notes?: string | null;
   /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date. */
   needsAction?: boolean;
@@ -2472,6 +2486,11 @@ export interface UpdateStatusRequest {
      * @maxLength 200
      */
   completedInHouseBy?: string | null;
+  /**
+     * Only with status completed, and only for a check with an equipmentPart. The expiry date of the new part (YYYY-MM-DD), after the date done; the check stays open, due on that date.
+     * @pattern ^\d{4}-\d{2}-\d{2}$
+     */
+  nextDueDate?: string | null;
 }
 
 export interface DashboardStats {
@@ -5267,9 +5286,42 @@ export const EquipmentType = {
   gas_appliance: 'gas_appliance',
   air_conditioning: 'air_conditioning',
   fire_extinguisher: 'fire_extinguisher',
+  defibrillator: 'defibrillator',
   ladder: 'ladder',
   other: 'other',
 } as const;
+
+export type EquipmentPart = typeof EquipmentPart[keyof typeof EquipmentPart];
+
+
+export const EquipmentPart = {
+  defib_pads: 'defib_pads',
+  defib_battery: 'defib_battery',
+  defib_child_pads: 'defib_child_pads',
+} as const;
+
+/**
+ * A part of the item that expires on a printed date, kept as a Compliance Check due on that date.
+ */
+export interface EquipmentPartState {
+  part: EquipmentPart;
+  label: string;
+  checkId: number;
+  /** YYYY-MM-DD; null once marked replaced without a new expiry date. */
+  expiryDate: string | null;
+  status: string;
+  /** YYYY-MM-DD the part was last replaced. */
+  lastReplaced: string | null;
+}
+
+/**
+ * Expiry dates (YYYY-MM-DD) of a defibrillator's parts; null clears one, a missing one is left as it is.
+ */
+export interface EquipmentPartExpiryDates {
+  defib_pads?: string | null;
+  defib_battery?: string | null;
+  defib_child_pads?: string | null;
+}
 
 export type EquipmentLabelKind = typeof EquipmentLabelKind[keyof typeof EquipmentLabelKind];
 
@@ -5307,6 +5359,9 @@ export interface EquipmentItem {
   active: boolean;
   complianceItems: EquipmentLinkedCheck[];
   labelCode: string | null;
+  parts: EquipmentPartState[];
+  partsAssigneeUserId: number | null;
+  partsAssigneeName: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -5322,6 +5377,9 @@ export interface EquipmentItemRequest {
   notes?: string | null;
   active?: boolean;
   complianceItemIds?: number[];
+  partExpiryDates?: EquipmentPartExpiryDates;
+  /** The person who replaces the parts; their reminders reach them. */
+  partsAssigneeUserId?: number | null;
 }
 
 export interface UpdateEquipmentItemRequest {
@@ -5335,6 +5393,9 @@ export interface UpdateEquipmentItemRequest {
   notes?: string | null;
   active?: boolean;
   complianceItemIds?: number[];
+  partExpiryDates?: EquipmentPartExpiryDates;
+  /** The person who replaces the parts; their reminders reach them. */
+  partsAssigneeUserId?: number | null;
 }
 
 export interface EquipmentLabelRef {

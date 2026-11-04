@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.2.0
  */
 import type { EquipmentLinkedCheck } from './equipmentLinkedCheck';
+import type { EquipmentPartState } from './equipmentPartState';
 import type { EquipmentType } from './equipmentType';
 
 export interface EquipmentItem {
@@ -23,6 +24,9 @@ export interface EquipmentItem {
   active: boolean;
   complianceItems: EquipmentLinkedCheck[];
   labelCode: string | null;
+  parts: EquipmentPartState[];
+  partsAssigneeUserId: number | null;
+  partsAssigneeName: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

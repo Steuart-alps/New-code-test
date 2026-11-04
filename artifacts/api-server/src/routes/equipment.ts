@@ -16,6 +16,8 @@ import {
   isLabelKind, listLabelTargets, normaliseLabelCode, replaceLabel, targetTrack, type LabelTarget,
 } from "../lib/equipmentLabels";
 import { createEquipmentLabelPdf } from "../lib/equipmentLabelPdf";
+import { resolveAssigneeChange } from "../lib/assignees";
+import { partSummaries, partsForType, syncPartChecks, type PartsSummary } from "../lib/equipmentParts";
 
 /**
  * The equipment list (plant no track keeps a record of) and QR labels for
@@ -29,6 +31,10 @@ const requireManager = requireRole("consultant", "client_admin", "client_manager
 type Row = Record<string, any>;
 const rowsOf = (result: unknown) => ((result as { rows?: Row[] }).rows ?? []) as Row[];
 
+/** A calendar date (YYYY-MM-DD) from 2000 on, or null to clear it. */
+const expiryDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine(v => v >= "2000-01-01" && v <= "2100-12-31" && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v, "Invalid date")
+  .nullable().optional();
 const text = (max: number) => z.string().trim().max(max).nullable().optional().transform(v => (v ? v : null));
 const itemBody = z.object({
   name: z.string().trim().min(1).max(200),
@@ -42,6 +48,14 @@ const itemBody = z.object({
   active: z.boolean().optional(),
   /** Compliance Checks for this item (gas safety, LOLER, service). */
   complianceItemIds: z.array(z.number().int().positive()).max(50).optional(),
+  /** Expiry dates of the parts a defibrillator has (pads, battery, child pads). */
+  partExpiryDates: z.object({
+    defib_pads: expiryDay,
+    defib_battery: expiryDay,
+    defib_child_pads: expiryDay,
+  }).strict().optional(),
+  /** The person who replaces the parts (their reminders reach them). */
+  partsAssigneeUserId: z.number().int().positive().nullable().optional(),
 });
 
 /** A site id from a body or query: the caller's own site, visible to their department. */
@@ -58,6 +72,13 @@ function siteQuery(raw: unknown): number | "none" | null | undefined {
   if (raw === "none") return "none";
   const id = Number(raw);
   return Number.isSafeInteger(id) && id > 0 ? id : undefined;
+}
+
+/** Refuse a parts assignee who cannot see the item's site, before anything is saved. */
+async function partsAssigneeError(clientId: number, siteId: number | null, userId: number | null | undefined): Promise<string | null> {
+  if (userId == null) return null;
+  const change = await resolveAssigneeChange(clientId, siteId, { assigneeUserId: userId });
+  return change.ok ? null : change.error;
 }
 
 async function linkedChecks(clientId: number, equipmentIds: number[]): Promise<Map<number, Array<{ id: number; title: string }>>> {
@@ -89,12 +110,12 @@ async function setLinkedChecks(req: Request, clientId: number, equipmentId: numb
   }
   await db.execute(sql`
     UPDATE compliance_items SET equipment_id = NULL
-    WHERE client_id = ${clientId} AND equipment_id = ${equipmentId}
+    WHERE client_id = ${clientId} AND equipment_id = ${equipmentId} AND equipment_part IS NULL
       ${unique.length ? sql`AND id NOT IN (${sql.join(unique.map(id => sql`${id}`), sql`, `)})` : sql``}`);
   if (unique.length) {
     await db.execute(sql`
       UPDATE compliance_items SET equipment_id = ${equipmentId}
-      WHERE client_id = ${clientId} AND id IN (${sql.join(unique.map(id => sql`${id}`), sql`, `)})`);
+      WHERE client_id = ${clientId} AND equipment_part IS NULL AND id IN (${sql.join(unique.map(id => sql`${id}`), sql`, `)})`);
   }
   return null;
 }
@@ -106,15 +127,22 @@ async function itemResponse(clientId: number, departmentId: number | null, id: n
   const [row] = rowsOf(await db.execute(sql`SELECT * FROM equipment_items WHERE id = ${id} AND client_id = ${clientId}`));
   const links = await linkedChecks(clientId, [id]);
   const labels = await activeLabels(clientId);
-  return serialiseItem(row, target.siteName, links.get(id) ?? [], labels.get(`equipment:${id}`)?.code ?? null);
+  const parts = await partSummaries(clientId, [id]);
+  return serialiseItem(row, target.siteName, links.get(id) ?? [], labels.get(`equipment:${id}`)?.code ?? null, parts.get(id));
 }
 
-function serialiseItem(row: Row, siteName: string | null, complianceItems: Array<{ id: number; title: string }>, labelCode: string | null) {
+function serialiseItem(row: Row, siteName: string | null, complianceItems: Array<{ id: number; title: string }>, labelCode: string | null, parts?: PartsSummary) {
+  // Only the parts this type of item has; a check left from an earlier type stays an ordinary linked check.
+  const allowed = new Set<string>(partsForType(String(row.type)));
+  const partChecks = (parts?.parts ?? []).filter(p => allowed.has(p.part));
   return {
     id: Number(row.id), siteId: row.site_id ?? null, siteName, name: row.name, type: row.type,
     typeLabel: EQUIPMENT_TYPE_LABELS[row.type as keyof typeof EQUIPMENT_TYPE_LABELS] ?? "Other equipment",
     location: row.location, make: row.make, model: row.model, serialNo: row.serial_no, notes: row.notes,
     active: row.active, complianceItems, labelCode,
+    parts: partChecks,
+    partsAssigneeUserId: partChecks.length ? parts?.assigneeUserId ?? null : null,
+    partsAssigneeName: partChecks.length ? parts?.assigneeName ?? null : null,
     createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
@@ -140,8 +168,9 @@ router.get("/equipment", requireAuth, async (req, res) => {
   const byId = new Map(rows.map(r => [Number(r.id), r]));
   const links = await linkedChecks(clientId, ids);
   const labels = await activeLabels(clientId);
+  const parts = await partSummaries(clientId, ids);
   res.json(targets.map(t => serialiseItem(byId.get(Number(t.ref))!, t.siteName, links.get(Number(t.ref)) ?? [],
-    labels.get(`equipment:${t.ref}`)?.code ?? null)));
+    labels.get(`equipment:${t.ref}`)?.code ?? null, parts.get(Number(t.ref)))));
 });
 
 router.post("/equipment", requireAuth, denyViewers, requireManager, async (req, res) => {
@@ -152,6 +181,8 @@ router.post("/equipment", requireAuth, denyViewers, requireManager, async (req, 
   const data = parsed.data;
   const access = await siteAllowed(req, clientId, data.siteId);
   if (access !== "ok") return res.status(access === "invalid" ? 400 : 403).json({ error: "Invalid site" });
+  const assigneeError = await partsAssigneeError(clientId, data.siteId ?? null, data.partsAssigneeUserId);
+  if (assigneeError) return res.status(400).json({ error: assigneeError });
   const [row] = rowsOf(await db.execute(sql`
     INSERT INTO equipment_items (client_id, site_id, name, type, location, make, model, serial_no, notes, active, created_by)
     VALUES (${clientId}, ${data.siteId ?? null}, ${data.name}, ${data.type}, ${data.location}, ${data.make}, ${data.model},
@@ -160,6 +191,14 @@ router.post("/equipment", requireAuth, denyViewers, requireManager, async (req, 
   if (data.complianceItemIds) {
     const error = await setLinkedChecks(req, clientId, Number(row.id), data.complianceItemIds);
     if (error) {
+      await db.execute(sql`DELETE FROM equipment_items WHERE id = ${row.id} AND client_id = ${clientId}`);
+      return res.status(400).json({ error });
+    }
+  }
+  if (data.partExpiryDates || data.partsAssigneeUserId !== undefined) {
+    const error = await syncPartChecks(req, clientId, row, { dates: data.partExpiryDates ?? {}, assigneeUserId: data.partsAssigneeUserId });
+    if (error) {
+      await db.execute(sql`DELETE FROM compliance_items WHERE client_id = ${clientId} AND equipment_id = ${row.id} AND equipment_part IS NOT NULL`);
       await db.execute(sql`DELETE FROM equipment_items WHERE id = ${row.id} AND client_id = ${clientId}`);
       return res.status(400).json({ error });
     }
@@ -184,6 +223,8 @@ router.put("/equipment/:id", requireAuth, denyViewers, requireManager, async (re
   }
   const [before] = rowsOf(await db.execute(sql`SELECT * FROM equipment_items WHERE id = ${id} AND client_id = ${clientId}`));
   const keep = <T,>(value: T | undefined, current: T) => (value === undefined ? current : value);
+  const assigneeError = await partsAssigneeError(clientId, keep(data.siteId, before.site_id), data.partsAssigneeUserId);
+  if (assigneeError) return res.status(400).json({ error: assigneeError });
   const [after] = rowsOf(await db.execute(sql`
     UPDATE equipment_items SET
       name = ${keep(data.name, before.name)}, type = ${keep(data.type, before.type)},
@@ -197,6 +238,9 @@ router.put("/equipment/:id", requireAuth, denyViewers, requireManager, async (re
     const error = await setLinkedChecks(req, clientId, id, data.complianceItemIds);
     if (error) return res.status(400).json({ error });
   }
+  // Part checks follow the item's name and site even when no date changes.
+  const partError = await syncPartChecks(req, clientId, after, { dates: data.partExpiryDates ?? {}, assigneeUserId: data.partsAssigneeUserId });
+  if (partError) return res.status(400).json({ error: partError });
   await appendAuditEvent(req, { clientId, entityType: "equipment_item", entityId: id, action: "updated", before, after });
   res.json(await itemResponse(clientId, departmentId, id));
 });

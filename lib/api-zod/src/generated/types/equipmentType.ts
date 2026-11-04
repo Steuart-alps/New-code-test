@@ -21,6 +21,7 @@ export const EquipmentType = {
   gas_appliance: 'gas_appliance',
   air_conditioning: 'air_conditioning',
   fire_extinguisher: 'fire_extinguisher',
+  defibrillator: 'defibrillator',
   ladder: 'ladder',
   other: 'other',
 } as const;
