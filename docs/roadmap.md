@@ -47,6 +47,7 @@ Wednesday 28 October.
 | 28 | Staff roster "Open kiosk": show the shift starts it records | After launch | None | Nothing; you decided to keep the button |
 | 29 | Management walk-round inspections for each track, plus one overall review | After launch | None | How often, who does them, and your existing checklists |
 | 30 | KitchenTrack HACCP plan builder from your ALPS template | After launch | None for stage 1; a few pence per AI draft in stage 2 | Your wording of the CCP questions |
+| 31 | Complete risk assessments inside ComplyTrack | After launch | None; a few pence per AI draft if added later | The RiskAssessor Pro layout you want to follow, and which assessments to start with |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -1172,6 +1173,61 @@ business's AI allowance. No extra hosting.
 
 ---
 
+## 31. Complete risk assessments inside ComplyTrack
+
+**When:** after launch. Your idea on 4 November: "allow users to complete risk
+assessments via complytrack", using RiskAssessor Pro as the template.
+
+Today risk assessments live in SafeTrack and DocTrack as uploaded documents.
+ComplyTrack keeps the title, status, who assessed it and the review date, and
+staff can read and sign them, but the assessment itself is written somewhere
+else. This item lets a business write the risk assessment inside ComplyTrack.
+
+**How it would work:**
+
+- **Start from a template:** a list of ready-made assessments (for example
+  manual handling, working at height, slips and trips, lone working, display
+  screen equipment, a new or expectant mother, young workers), laid out the
+  way you want from RiskAssessor Pro. A business can also start a blank one.
+- **Hazards and who could be harmed:** each hazard lists who is at risk
+  (staff, contractors, visitors, the public) and how.
+- **Scoring:** likelihood x severity before and after controls, shown red,
+  amber or green, using the same scoring style as the HACCP plan builder
+  (item 30) so the two feel the same.
+- **Controls and actions:** controls already in place, plus further actions,
+  each with a person responsible and a due date. Those actions go into the
+  normal actions list and that person's reminders.
+- **Links to the tracks:** an assessment can point at the checks that prove
+  its controls are working, for example the fire risk assessment pointing to
+  FireTrack's weekly alarm tests.
+- **Sign-off and review:** signed off with a version number, older versions
+  kept, a review date that reminds the right person, and an early review
+  prompted after an incident or a change on site.
+- **Staff read and sign:** as now, through DocTrack, plus a print and PDF.
+
+Later, for businesses with the AI add-on, ComplyTrack could draft an
+assessment from a short description of the task for the manager to check,
+change and sign. A competent person must always check it before it is used.
+
+**A note on RiskAssessor Pro:** we can follow its layout and the way it works
+as a guide, but we shouldn't copy its wording or hazard library word for word
+unless it is your own material or you have permission to use it. If the
+template is your own ALPS document, please send it over and it can be the
+starting point.
+
+**Questions for you:**
+
+1. Is RiskAssessor Pro a product you use, or your own template? Could you send
+   a blank copy or a screenshot of the layout?
+2. Which risk assessments should come ready-made first?
+3. Should ALPS consultants be able to write or approve assessments for their
+   clients?
+
+**Cost:** none. No extra hosting. An AI draft, if added later, would cost a
+few pence each from the business's AI allowance.
+
+---
+
 ## Future apps (separate from ComplyTrack)
 
 Ideas for separate apps, outside ComplyTrack itself. Logged only; nothing
@@ -1219,6 +1275,7 @@ work:
 | Supplier allergens and prices | Pennies per invoice or product read; nothing for a supplier file |
 | Recipe ideas for leftover kitchen stock | A few pence per set of ideas, from the AI allowance |
 | HACCP plan builder, stage 2 AI draft | A few pence per draft, from the AI allowance |
+| Risk assessment AI draft (if added later) | A few pence per draft, from the AI allowance |
 | Kitchen voice input | None |
 | Maintenance inventory | None |
 | Reorder the side menu | None |
