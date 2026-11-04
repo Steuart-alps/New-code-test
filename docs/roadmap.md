@@ -46,6 +46,7 @@ Wednesday 28 October.
 | 27 | One Owner login for several separate businesses | After launch | None | Your go-ahead |
 | 28 | Staff roster "Open kiosk": show the shift starts it records | After launch | None | Nothing; you decided to keep the button |
 | 29 | Management walk-round inspections for each track, plus one overall review | After launch | None | How often, who does them, and your existing checklists |
+| 30 | KitchenTrack HACCP plan builder from your ALPS template | After launch | None for stage 1; a few pence per AI draft in stage 2 | Your wording of the CCP questions |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -516,6 +517,22 @@ could run the chicken curry special") before suggesting new dishes.
 
 This needs the kitchen stock list first (dates and amounts), so it comes after
 kitchen stock control.
+
+### Gaps found when testing a game terrine (4 November)
+
+Writing up a real dish (a game terrine) showed three things kitchen records
+can't do yet. They also feed the HACCP plan builder (item 30):
+
+- **Recipes inside recipes ("sub-recipes"):** a prep made in the kitchen and
+  then used in a dish, such as a stock, a forcemeat or a jelly. Its allergens
+  should carry through to every dish that uses it, so the allergen chart stays
+  right without typing them twice.
+- **More than one time and temperature for a dish:** for example a cook
+  stage, then a chill, then a reheat, each with its own target, rather than
+  one setting per dish.
+- **A cure, batch and freeze/thaw log:** weighing what goes into a cure or a
+  batch, and recording when food goes into the freezer and when it comes out
+  to thaw, with the date it must be used by.
 
 ### Voice
 
@@ -1105,6 +1122,56 @@ into the responsible person's reminders, not to everyone.
 
 ---
 
+## 30. KitchenTrack HACCP plan builder
+
+**When:** after launch. You chose "Add it to the roadmap" on 4 November.
+The design is here: https://claude.ai/artifact/TMny7MkviszZaSt67nN7ZC
+
+A kitchen builds its HACCP plan inside ComplyTrack, laid out like your ALPS
+HACCP template, instead of keeping it as a separate document. Today a HACCP
+plan can already be uploaded and read and signed by staff through DocTrack
+(change #226). This item builds the plan itself.
+
+**Stage 1: build the plan by hand.**
+
+- **Process steps:** the steps food goes through (for example delivery,
+  storage, preparation, cooking, cooling, reheating, serving), each with four
+  hazard rows: biological, chemical, physical and allergen.
+- **Scoring:** each hazard scored likelihood x severity. A score above 3
+  counts as significant, and only significant hazards go on to the CCP
+  questions.
+- **The CCP questions:** your questions 1, 2, 2a, 3, 4 and 5, which decide
+  whether a step is a critical control point (CCP).
+- **CCP summary:** filled in from KitchenTrack's own records and temperature
+  rules (for example cooking to 75°C, cooling, fridge and hot holding limits),
+  so the plan and the daily checks say the same thing. Each CCP shows its
+  limit, how it is checked, what to do if it fails, and which KitchenTrack
+  record proves it.
+- **Sign-off with versions:** each change makes a new version that is signed
+  off. Older versions are kept for inspectors.
+- **Read and sign:** staff read and sign the current version through DocTrack,
+  as they do now for uploaded plans.
+- **Print:** a landscape print and PDF in the template's layout.
+
+**Stage 2: AI draft from a recipe.** For businesses with the AI add-on,
+ComplyTrack drafts the steps, hazards and scores from a recipe for the
+manager to check, change and sign. Nothing is used until a person has checked
+it, and allergens come from the kitchen's own ingredient records. Each draft
+is taken from the business's AI allowance.
+
+This works best once kitchens have sub-recipes and more than one time and
+temperature per dish (see "Gaps found when testing a game terrine" in item
+13).
+
+**Question for you:** please send the exact wording you want for your CCP
+questions 1, 2, 2a, 3, 4 and 5, so the plan asks them the way your template
+does.
+
+**Cost:** none for stage 1. Stage 2 costs a few pence per AI draft, from the
+business's AI allowance. No extra hosting.
+
+---
+
 ## Future apps (separate from ComplyTrack)
 
 Ideas for separate apps, outside ComplyTrack itself. Logged only; nothing
@@ -1151,6 +1218,7 @@ work:
 | Recipe spec sheet reading | A few pence per sheet |
 | Supplier allergens and prices | Pennies per invoice or product read; nothing for a supplier file |
 | Recipe ideas for leftover kitchen stock | A few pence per set of ideas, from the AI allowance |
+| HACCP plan builder, stage 2 AI draft | A few pence per draft, from the AI allowance |
 | Kitchen voice input | None |
 | Maintenance inventory | None |
 | Reorder the side menu | None |
