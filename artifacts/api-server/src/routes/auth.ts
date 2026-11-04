@@ -1150,11 +1150,11 @@ const MOBILE_SESSION_REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const MOBILE_SESSION_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 const MOBILE_LOGIN_CHALLENGE_INVALID_CODE = "MOBILE_LOGIN_CHALLENGE_INVALID";
 
-function hashMobileLoginChallenge(token: string): string {
+export function hashMobileLoginChallenge(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-async function issueMobileSession(user: {
+export async function issueMobileSession(user: {
   id: number;
   email: string;
   name: string;

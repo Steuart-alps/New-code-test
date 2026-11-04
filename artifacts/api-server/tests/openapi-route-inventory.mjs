@@ -28,6 +28,13 @@ const EXCLUDED = {
   "POST /api/inbound/certificate-email": excluded("Resend inbound email webhook; Resend signs and sends it"),
   "GET /api/internal/analytics/summary": excluded("operator report behind ANALYTICS_READ_TOKEN, not called by apps"),
   "POST /api/admin/seed-demo": excluded("one-off demo price seed behind DEMO_SEED_TOKEN"),
+  // Native passkey ceremonies: bodies are WebAuthn JSON passed straight between
+  // the phone's passkey API and @simplewebauthn/server; only the mobile app
+  // calls them, with apiFetch, never through the generated client.
+  "POST /api/auth/mobile-passkeys/authentication/options": excluded("mobile passkey ceremony (WebAuthn JSON)"),
+  "POST /api/auth/mobile-passkeys/authenticate": excluded("mobile passkey ceremony (WebAuthn JSON)"),
+  "POST /api/auth/mobile-passkeys/registration/options": excluded("mobile passkey ceremony (WebAuthn JSON)"),
+  "POST /api/auth/mobile-passkeys/registration/verify": excluded("mobile passkey ceremony (WebAuthn JSON)"),
   "GET /api/storage/download/:token": excluded("signed download link opened by the browser"),
   "GET /api/storage/public-objects/*filePath": fileStream,
   "GET /api/storage/objects/*path": fileStream,

@@ -24,6 +24,7 @@ import {
   clearPendingIssueUploadRecovery,
 } from './fixTrackRecovery';
 import { registerForPushNotifications, unregisterPushToken } from './push';
+import { signInWithPasskey } from './passkeys';
 
 const TOKEN_KEY = 'complytrack_mobile_token';
 const TOKEN_EXPIRY_KEY = 'complytrack_mobile_token_expiry';
@@ -121,8 +122,19 @@ interface AuthContextType {
     pendingToken?: string,
     code?: string,
   ) => Promise<{ pendingToken?: string; requires2faSetup?: boolean; setupUrl?: string }>;
+  /**
+   * Native passkey in place of email and password. The server treats it as a
+   * correct password: a session, a pendingToken for login()'s
+   * authenticator-code step, or the web two-factor setup link.
+   */
+  loginWithPasskey: () => Promise<{ pendingToken?: string; requires2faSetup?: boolean; setupUrl?: string }>;
   logout: () => Promise<void>;
 }
+
+type SignInResponse =
+  | { token: string; expiresAt: string; user: AuthUser }
+  | { pendingToken: string }
+  | { requires2faSetup: true; setupUrl?: string };
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
@@ -369,33 +381,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => { subscription.remove(); clearInterval(timer); };
   }, [acceptMe, applyToken, refreshSessionIfNeeded, setIsOffline, user]);
 
-  const login = useCallback(
+  // Runs one sign-in request (password, authenticator code or passkey) and,
+  // when the server answers with a session, makes it this device's session.
+  const completeSignIn = useCallback(
     async (
-      email: string,
-      password: string,
-      pendingToken?: string,
-      code?: string,
+      request: () => Promise<SignInResponse>,
     ): Promise<{ pendingToken?: string; requires2faSetup?: boolean; setupUrl?: string }> => {
       authGeneration.current += 1;
       const generation = authGeneration.current;
       kitchenOutbox.suspend();
       checkOutbox.suspend();
-      const res = pendingToken
-        ? await apiFetch<{ token: string; expiresAt: string; user: AuthUser }>(
-            '/api/auth/mobile-login/verify-totp',
-            {
-              method: 'POST',
-              body: JSON.stringify({ pendingToken, code }),
-            },
-          )
-        : await apiFetch<
-            | { token: string; expiresAt: string; user: AuthUser }
-            | { pendingToken: string }
-            | { requires2faSetup: true; setupUrl?: string }
-          >('/api/auth/mobile-login', {
-            method: 'POST',
-            body: JSON.stringify({ email, password }),
-          });
+      const res = await request();
       if ('pendingToken' in res) {
         return { pendingToken: res.pendingToken };
       }
@@ -442,6 +438,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [applyToken, setIsOffline],
   );
 
+  const login = useCallback(
+    (email: string, password: string, pendingToken?: string, code?: string) =>
+      completeSignIn(() => (pendingToken
+        ? apiFetch<SignInResponse>('/api/auth/mobile-login/verify-totp', {
+            method: 'POST',
+            body: JSON.stringify({ pendingToken, code }),
+          })
+        : apiFetch<SignInResponse>('/api/auth/mobile-login', {
+            method: 'POST',
+            body: JSON.stringify({ email, password }),
+          }))),
+    [completeSignIn],
+  );
+
+  const loginWithPasskey = useCallback(
+    () => completeSignIn(signInWithPasskey),
+    [completeSignIn],
+  );
+
   const logout = useCallback(async () => {
     // Cancel any detached restore/refresh before the first asynchronous step.
     authGeneration.current += 1;
@@ -470,7 +485,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, isLoading, isAuthenticated: !!user, isOffline, services, hasService, login, logout }}
+      value={{
+        user, isLoading, isAuthenticated: !!user, isOffline, services, hasService, login, loginWithPasskey, logout,
+      }}
     >
       {children}
     </AuthContext.Provider>

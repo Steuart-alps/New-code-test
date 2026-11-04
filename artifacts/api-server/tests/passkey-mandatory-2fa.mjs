@@ -31,10 +31,22 @@ assert.match(auth, /if \(!user\.totpEnabled\)/);
 assert.doesNotMatch(mandatoryUi, /passkeys\/registration/);
 assert.match(passkeyCard, /do not replace two-factor authentication/);
 assert.match(passkeyCard, /still enter your authenticator code/);
-assert.match(passkeyCard, /Mobile sign-in supports the authenticator code \(TOTP\) only/);
+assert.match(passkeyCard, /mobile app, a passkey saved on your phone can replace your password; with two-factor authentication on, you still enter your authenticator code/);
 assert.doesNotMatch(passkeyCard, /instead of typing a one-time code/);
 assert.match(loginUi, /data\.requires2faSetup/);
 assert.match(mobileBlock, /totpEnabled && result\.user\.totpSecret/);
 assert.match(mobileBlock, /requires2faSetup/);
+
+// Native mobile passkeys replace the password only: they hand over to the
+// TOTP challenge or web setup exactly where a password would.
+const mobilePasskeys = await readFile(new URL("../src/routes/mobilePasskeys.ts", import.meta.url), "utf8");
+assert.match(mobilePasskeys, /INSERT INTO mobile_login_challenges/);
+assert.match(mobilePasskeys, /requires2faSetup: true/);
+assert.doesNotMatch(mobilePasskeys, /INSERT INTO mobile_sessions/);
+// A session is only issued after the TOTP handoff and the business's
+// two-factor requirement have both been checked, as for a password.
+const passkeyTail = mobilePasskeys.slice(mobilePasskeys.indexOf("user.totpEnabled && user.totpSecret"));
+assert.ok(passkeyTail.indexOf("isTwoFactorRequired(user)") > 0);
+assert.ok(passkeyTail.indexOf("issueMobileSession(user)") > passkeyTail.indexOf("isTwoFactorRequired(user)"));
 
 console.log("passkey mandatory-2FA regression checks passed");

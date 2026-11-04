@@ -1345,6 +1345,7 @@ async function runRuntimeMigrationsOnce() {
     await migrateFixTrackV2();
     await migrateMobileSessions();
     await migrateMobileLoginChallenges();
+    await migrateMobilePasskeyChallenges();
     await migrateIncidents();
     await migrateComplianceAuditTrail();
     // Before the audit-log migration, which installs its triggers.
@@ -5669,6 +5670,33 @@ async function migrateMobileLoginChallenges() {
     ON "mobile_login_challenges" ("expires_at")
   `);
 }
+
+// Single-use WebAuthn challenges for the mobile app's native passkey flows.
+// Bearer clients have no cookie session to hold the challenge, so only a digest
+// of the token handed to the app is stored. Sign-in challenges have no user
+// (discoverable credentials); registration challenges belong to the signed-in user.
+async function migrateMobilePasskeyChallenges() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "mobile_passkey_challenges" (
+      "id"         serial PRIMARY KEY,
+      "purpose"    text NOT NULL CHECK ("purpose" IN ('authentication', 'registration')),
+      "user_id"    integer REFERENCES "users"("id") ON DELETE CASCADE,
+      "token_hash" text NOT NULL,
+      "challenge"  text NOT NULL,
+      "expires_at" timestamp NOT NULL,
+      "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "IDX_mobile_passkey_challenges_token_hash"
+    ON "mobile_passkey_challenges" ("token_hash")
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_mobile_passkey_challenges_expiry"
+    ON "mobile_passkey_challenges" ("expires_at")
+  `);
+}
+
 // KitchenTrack non-operating days (lib/db/src/schema/kitchen-closed-days.ts).
 // Removal is a soft delete, so the partial unique indexes only cover active
 // closures; one per scope and day, scoped like the diary's own indexes.

@@ -101,6 +101,7 @@ const runnerLocked = new Set([
   "test:daily-checklist-reports",
   "test:privacy-governance:ci", "test:staff-roster-reconciliation",
   "test:staff-pin", "test:staff-attribution", "test:mandatory-2fa",
+  "test:mobile-passkeys",
   "test:generic-document-object-acl", "test:track-evidence",
   "test:track-export-isolation", "test:pat-export-attachments",
   "test:storage-happy-path", "test:storage-outage-routes",
