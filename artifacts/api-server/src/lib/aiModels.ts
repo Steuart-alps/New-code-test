@@ -7,7 +7,7 @@
 //   Claude Haiku 5.5, low effort.
 // - Certificates and PAT registers: Claude Sonnet 5.5, low effort.
 // - Audit and inspection reports: Claude Opus 5.5, medium effort.
-// - COSHH drafts (not built yet): Claude Opus 5.5, high effort.
+// - COSHH drafts from a safety data sheet: Claude Opus 5.5, high effort.
 // - The help chat (not built yet): low effort.
 // Each feature's model and effort can be changed on Render without a release
 // (the *_MODEL and *_EFFORT variables below). Letting businesses choose for

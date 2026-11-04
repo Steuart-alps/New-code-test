@@ -11,6 +11,10 @@ on:
       - "artifacts/compliance-tracker/src/context/auth-context.tsx"
       - "artifacts/compliance-tracker/src/App.tsx"
       - "artifacts/compliance-tracker/tests/coshh-register-browser.test.mjs"
+      - "artifacts/compliance-tracker/tests/coshh-sds-drop-browser.test.mjs"
+      - "artifacts/compliance-tracker/src/components/coshh-sds-drop.tsx"
+      - "artifacts/compliance-tracker/src/lib/certificate-files.ts"
+      - "artifacts/compliance-tracker/src/hooks/use-file-drop.ts"
       - "artifacts/compliance-tracker/package.json"
       - "package.json"
       - "pnpm-lock.yaml"
@@ -26,6 +30,10 @@ on:
       - "artifacts/compliance-tracker/src/context/auth-context.tsx"
       - "artifacts/compliance-tracker/src/App.tsx"
       - "artifacts/compliance-tracker/tests/coshh-register-browser.test.mjs"
+      - "artifacts/compliance-tracker/tests/coshh-sds-drop-browser.test.mjs"
+      - "artifacts/compliance-tracker/src/components/coshh-sds-drop.tsx"
+      - "artifacts/compliance-tracker/src/lib/certificate-files.ts"
+      - "artifacts/compliance-tracker/src/hooks/use-file-drop.ts"
       - "artifacts/compliance-tracker/package.json"
       - "package.json"
       - "pnpm-lock.yaml"
@@ -59,3 +67,6 @@ jobs:
 
       - name: Run COSHH register checks
         run: pnpm --filter @workspace/compliance-tracker run test:coshh-register-browser
+
+      - name: Run COSHH safety data sheet drop checks
+        run: pnpm --filter @workspace/compliance-tracker run test:coshh-sds-drop-browser

@@ -75,11 +75,11 @@ function serve(dir) {
   const server = http.createServer(async (req, res) => {
     const file = path.join(dir, decodeURIComponent(new URL(req.url, "http://x").pathname));
     if (!file.startsWith(dir)) return void res.writeHead(403).end();
-    try {
-      res.writeHead(200, { "Content-Type": types[path.extname(file)] ?? "application/octet-stream" }).end(await readFile(file));
-    } catch {
-      res.writeHead(404).end();
-    }
+    // Read first: a missing file (a favicon, say) must answer 404, not throw
+    // after the 200 headers have gone and crash the run.
+    let body;
+    try { body = await readFile(file); } catch { return void res.writeHead(404).end(); }
+    res.writeHead(200, { "Content-Type": types[path.extname(file)] ?? "application/octet-stream" }).end(body);
   });
   return new Promise(resolve => server.listen(0, "127.0.0.1", () => resolve(server)));
 }
