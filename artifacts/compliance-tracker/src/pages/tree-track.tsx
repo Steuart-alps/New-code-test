@@ -35,6 +35,7 @@ import { useSayItFill, withSpokenNote, matchSpokenItem } from "@/lib/say-it-fill
 import { sortByLabel } from "@/lib/sort-options";
 import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import { RecordSignedBy } from "@/components/record-signature";
+import { RecordSiteField } from "@/components/record-site-field";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1208,20 +1209,8 @@ export default function TreeTrackPage() {
                 className="mt-1 rounded-sm" />
             </div>
 
-            {/* Site */}
-            {sites.length > 0 && (
-              <div>
-                <Label>Site</Label>
-                <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}
-                  disabled={!!form.treeId && !!activeTrees.find(t => String(t.id) === form.treeId)?.siteId}>
-                  <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No specific site</SelectItem>
-                    {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            <RecordSiteField value={form.siteId} onChange={id => setForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+              keepSiteId={editItem ? editItem.siteId ?? null : activeTrees.find(t => String(t.id) === form.treeId)?.siteId ?? undefined} />
 
             {/* Follow-up date */}
             <div>
@@ -1271,18 +1260,9 @@ export default function TreeTrackPage() {
                   onChange={e => setTreeForm(f => ({ ...f, species: e.target.value }))} className="mt-1 rounded-sm" />
               </div>
             </div>
-            {sites.length > 0 && (
-              <div>
-                <Label>Site</Label>
-                <Select value={treeForm.siteId || "none"} onValueChange={v => setTreeForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
-                  <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No specific site</SelectItem>
-                    {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            <RecordSiteField value={treeForm.siteId} onChange={id => setTreeForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+              pageSiteId={filterSite !== "all" ? Number(filterSite) : null}
+              keepSiteId={editTree ? editTree.siteId ?? null : undefined} />
             <LocationFields
               location={treeForm.location} what3words={treeForm.what3words}
               latitude={treeForm.latitude} longitude={treeForm.longitude}

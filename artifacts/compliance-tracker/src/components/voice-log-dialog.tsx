@@ -29,6 +29,7 @@ import {
 import { FORM_EXAMPLES, FORM_TRACKS, OPEN_FORM_TRACKS, readSayItForm, type SayItFormReading } from "@/lib/voice-forms";
 import { sendSayItFill } from "@/lib/say-it-fill";
 import { cn } from "@/lib/utils";
+import { RecordSiteField } from "@/components/record-site-field";
 
 type Outlet = OutletOption & { siteId: number | null; checkTypeForOutlet: string };
 type Limits = { min?: number | null; max?: number | null };
@@ -443,15 +444,7 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId, pageTrack }: {
         ) : (
           <div className="space-y-4">
             {sites.length > 1 && (
-              <div className="space-y-1.5">
-                <Label htmlFor="voice-log-site">Site</Label>
-                <Select value={siteId === null ? "" : String(siteId)} onValueChange={(value) => { setSiteId(Number(value)); }}>
-                  <SelectTrigger id="voice-log-site"><SelectValue placeholder="Choose the site" /></SelectTrigger>
-                  <SelectContent>
-                    {sites.map((site) => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
+              <RecordSiteField value={siteId} onChange={id => setSiteId(id ?? null)} pageSiteId={defaultSiteId} testId="voice-log-site" />
             )}
 
             {dictationSupported && (

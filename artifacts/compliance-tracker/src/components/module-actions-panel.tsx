@@ -20,6 +20,7 @@ import { ActionMedia, reportActionMediaResult, uploadActionMedia } from "@/compo
 import { PendingMediaPicker } from "@/components/pending-media-picker";
 import { cn } from "@/lib/utils";
 import { AssigneeField, assigneeFields, type AssigneeValue } from "@/components/assignee-field";
+import { RecordSiteField } from "@/components/record-site-field";
 
 type Severity = "monitor" | "action_required" | "urgent";
 type ActionStatus = "open" | "in_progress" | "resolved";
@@ -288,7 +289,7 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
                <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="action-title">Action title</Label><Input id="action-title" dictation required disabled={!!draft.templateId} value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} placeholder="Describe the corrective action" /></div>
                <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="action-instruction">Instruction snapshot <span className="text-muted-foreground">(optional)</span></Label><Textarea id="action-instruction" disabled={!!draft.templateId} value={draft.instruction} onChange={event => setDraft({ ...draft, instruction: event.target.value })} placeholder="What needs to be done and how" /></div>
                <div className="space-y-1.5"><Label htmlFor="action-severity">Severity</Label><Select disabled={!!draft.templateId} value={draft.severity} onValueChange={value => setDraft({ ...draft, severity: value as Severity })}><SelectTrigger id="action-severity"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="monitor">Monitor</SelectItem><SelectItem value="action_required">Action required</SelectItem><SelectItem value="urgent">Urgent</SelectItem></SelectContent></Select></div>
-               <div className="space-y-1.5"><Label htmlFor="action-site">Site <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.siteId || "none"} onValueChange={value => setDraft({ ...draft, siteId: value === "none" ? "" : value, templateId: "" })}><SelectTrigger id="action-site"><SelectValue placeholder="No site" /></SelectTrigger><SelectContent><SelectItem value="none">No site</SelectItem>{sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}</SelectContent></Select></div>
+               <RecordSiteField value={draft.siteId} onChange={id => setDraft({ ...draft, siteId: id ? String(id) : "", templateId: "" })} testId="action-site" />
                <div className="space-y-1.5"><Label htmlFor="action-owner">Assigned to <span className="text-muted-foreground">(optional)</span></Label><AssigneeField id="action-owner" siteId={draft.siteId ? Number(draft.siteId) : null} value={draft.owner} onChange={owner => setDraft({ ...draft, owner })} /></div>
                <div className="space-y-1.5"><Label htmlFor="action-due-date">Due date <span className="text-muted-foreground">(optional)</span></Label><Input id="action-due-date" disabled={!!draft.templateId} type="date" value={draft.dueDate} onChange={event => setDraft({ ...draft, dueDate: event.target.value })} /></div>
                <div className="sm:col-span-2"><PendingMediaPicker files={draftMedia} onChange={setDraftMedia} disabled={submitting} testId="new-action-media" /></div>

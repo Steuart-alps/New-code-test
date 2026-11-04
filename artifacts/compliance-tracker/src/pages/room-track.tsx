@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 import { RecordSignedBy } from "@/components/record-signature";
+import { RecordSiteField } from "@/components/record-site-field";
 
 type CheckValues = { clean: boolean; tidy: boolean; toStandard: boolean };
 
@@ -130,16 +131,8 @@ function RoomDialog({ room, sites, open, onOpenChange, onSaved }: {
           <div className="space-y-1.5"><Label htmlFor="room-number">Room number</Label><Input id="room-number" value={form.roomNumber} onChange={e => update("roomNumber", e.target.value)} placeholder="e.g. 204" /></div>
           <div className="space-y-1.5"><Label htmlFor="room-name">Room name</Label><Input id="room-name" value={form.name} onChange={e => update("name", e.target.value)} placeholder="e.g. Bluebell suite" /></div>
           <div className="space-y-1.5"><Label htmlFor="room-floor">Floor</Label><Input id="room-floor" value={form.floor} onChange={e => update("floor", e.target.value)} placeholder="e.g. First floor" /></div>
-          <div className="space-y-1.5">
-            <Label>Site</Label>
-            <Select value={form.siteId} onValueChange={value => update("siteId", value)}>
-              <SelectTrigger aria-label="Room site"><SelectValue placeholder="No site assigned" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">No site assigned</SelectItem>
-                {sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
+          <RecordSiteField value={form.siteId} onChange={id => update("siteId", id ? String(id) : "__none__")}
+            keepSiteId={room ? room.siteId ?? null : undefined} testId="room-site" />
           <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="room-notes">Room notes</Label><Textarea id="room-notes" value={form.notes} onChange={e => update("notes", e.target.value)} placeholder="Access, equipment or housekeeping notes" rows={3} /></div>
         </div>
         <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button><Button onClick={save} disabled={saving}>{saving ? "Saving…" : "Save room"}</Button></DialogFooter>

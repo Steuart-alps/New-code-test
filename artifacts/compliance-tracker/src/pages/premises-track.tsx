@@ -35,6 +35,7 @@ import { sortByLabel } from "@/lib/sort-options";
 import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { RecordSignedBy } from "@/components/record-signature";
+import { RecordSiteField } from "@/components/record-site-field";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -265,18 +266,8 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites, spoken }:
           <div className="space-y-1.5">
             <StaffPerformerSelect label="Inspected by" value={form.inspectedBy} onChange={(value) => setForm((current) => ({ ...current, inspectedBy: value }))} onRosterIdChange={(value) => setForm((current) => ({ ...current, staffRosterId: value }))} />
           </div>
-          {sites.length > 0 && (
-            <div className="space-y-1.5">
-              <Label>Site</Label>
-              <Select value={form.siteId} onValueChange={v => setForm(f => ({ ...f, siteId: v }))}>
-                <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All sites</SelectItem>
-                  {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <RecordSiteField value={form.siteId} onChange={id => setForm(f => ({ ...f, siteId: id ? String(id) : "all" }))}
+            keepSiteId={inspection ? inspection.siteId ?? null : undefined} />
           <div className="space-y-1.5">
             <Label>Status</Label>
             <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v }))}>

@@ -25,6 +25,7 @@ import {
 } from "@/lib/certificate-files";
 import { cn } from "@/lib/utils";
 import { sortByLabel } from "@/lib/sort-options";
+import { RecordSiteField } from "@/components/record-site-field";
 
 /** Codes that are remedial work by default; C3s never are (Steuart, 2026-10-27). */
 const WORK_CODES = new Set<string>(["C1", "C2", "FI", "ID", "AR"]);
@@ -541,13 +542,8 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null, inb
                     <Label htmlFor="reader-new-title">New check title *</Label>
                     <Input id="reader-new-title" value={draft.newTitle} maxLength={200} onChange={(e) => update({ newTitle: e.target.value })} />
                   </div>
-                  <div className="sm:col-span-2 space-y-1">
-                    <Label htmlFor="reader-new-site">Site</Label>
-                    <select id="reader-new-site" className={selectClass} value={draft.newSiteId} onChange={(e) => update({ newSiteId: e.target.value })}>
-                      <option value="">All sites</option>
-                      {sites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
-                    </select>
-                  </div>
+                  <RecordSiteField className="sm:col-span-2" testId="reader-new-site" value={draft.newSiteId}
+                    onChange={(siteId) => update({ newSiteId: siteId ? String(siteId) : "" })} businessWide="All sites" />
                   <div className="space-y-1">
                     <Label htmlFor="reader-new-frequency">Repeat (months)</Label>
                     <Input id="reader-new-frequency" type="number" min={1} max={120} value={draft.newFrequency}

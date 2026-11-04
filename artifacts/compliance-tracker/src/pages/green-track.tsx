@@ -64,6 +64,7 @@ import { sortByLabel, sortedEntries } from "@/lib/sort-options";
 import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import { RecordSignedBy } from "@/components/record-signature";
 import { GREEN_SERVICE_CHECKLIST, type GreenServiceChecklistLine, type GreenServiceResult } from "@workspace/api-client-react";
+import { RecordSiteField } from "@/components/record-site-field";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -614,16 +615,8 @@ function MachineDialog({
               <Input className="mt-1 rounded-sm" value={form.regNo}
                 onChange={e => setForm(f => ({ ...f, regNo: e.target.value }))} placeholder="e.g. GT01" />
             </div>
-            <div>
-              <Label>Site <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Select value={form.siteId || "_none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "_none" ? "" : v }))}>
-                <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="_none">— No site —</SelectItem>
-                  {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
+            <RecordSiteField value={form.siteId} onChange={id => setForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+              keepSiteId={machine ? machine.siteId ?? null : undefined} />
             {isEdit && (
               <div className="flex items-center gap-2 pt-1">
                 <input type="checkbox" id="active" checked={form.active}

@@ -327,6 +327,9 @@ jobs:
       - name: Departments under sites tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:departments-under-sites
 
+      - name: Own-site records tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:own-site-records
+
       - name: One Owner login for several businesses (production schema base)
         run: pnpm --filter @workspace/api-server run test:owner-several-businesses
 

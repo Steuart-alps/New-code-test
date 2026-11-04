@@ -40,6 +40,7 @@ import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActive
 import { sortByLabel } from "@/lib/sort-options";
 import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import { RecordSignedBy } from "@/components/record-signature";
+import { RecordSiteField } from "@/components/record-site-field";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -261,18 +262,8 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
             <Label>Contractor company</Label>
             <Input value={form.contractorCompany} onChange={set("contractorCompany")} placeholder="e.g. ABC Pest Control" className="rounded-sm" />
           </div>
-          {sites.length > 0 && (
-            <div className="space-y-1.5">
-              <Label>Site</Label>
-              <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
-                <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">All sites</SelectItem>
-                  {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <RecordSiteField value={form.siteId} onChange={id => setForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+            keepSiteId={visit ? visit.siteId ?? null : undefined} />
           <div className="space-y-1.5">
             <StaffPerformerSelect label="Signed off by" value={form.signedOffBy} onChange={(value) => setForm((current) => ({ ...current, signedOffBy: value }))} onRosterIdChange={(value) => setForm((current) => ({ ...current, signedOffByRosterId: value }))} />
           </div>
@@ -447,18 +438,8 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites, spoken }: {
           <div className="space-y-1.5">
             <StaffPerformerSelect label="Recorded by" value={form.recordedBy} onChange={(value) => setForm((current) => ({ ...current, recordedBy: value }))} onRosterIdChange={(value) => setForm((current) => ({ ...current, recordedByRosterId: value }))} />
           </div>
-          {sites.length > 0 && (
-            <div className="space-y-1.5">
-              <Label>Site</Label>
-              <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
-                <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">All sites</SelectItem>
-                  {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <RecordSiteField value={form.siteId} onChange={id => setForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+            keepSiteId={activity ? activity.siteId ?? null : undefined} />
           <div className="col-span-full space-y-1.5">
             <Label>Action taken</Label>
             <Textarea rows={2} value={form.actionTaken} onChange={set("actionTaken")} placeholder="What was done in response?" className="rounded-sm" />

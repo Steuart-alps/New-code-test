@@ -2,6 +2,7 @@ import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { useForm } from "react-hook-form";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { AuthProvider } from "../src/context/auth-context";
 import { CoshhSpeakListDialog } from "../src/components/coshh-speak-list-dialog";
 import { SpeakToPickDialog } from "../src/components/speak-to-pick-dialog";
 import { Button } from "../src/components/ui/button";
@@ -88,6 +89,8 @@ function PickDialog() {
 
 createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={queryClient}>
+    {/* The list dialog's Site box reads the signed-in user's working site. */}
+    <AuthProvider>
     <div className="max-w-lg space-y-6 p-6">
       <StateBox />
       <HookFormBox />
@@ -107,5 +110,6 @@ createRoot(document.getElementById("root")!).render(
       <PickDialog />
     </div>
     <Toaster />
+    </AuthProvider>
   </QueryClientProvider>,
 );

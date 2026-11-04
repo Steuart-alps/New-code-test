@@ -47,6 +47,7 @@ import { WalkRoundDialog, type WalkRoundPoint } from "@/components/walk-round-di
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 import { useSiteFilterId, useWorkingSiteId } from "@/hooks/use-working-site";
 import { sortByLabel } from "@/lib/sort-options";
+import { RecordSiteField } from "@/components/record-site-field";
 import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import { RecordSignedBy } from "@/components/record-signature";
 import { ImportCsvButton } from "@/components/import-csv-dialog";
@@ -493,7 +494,6 @@ function AddOutletDialog({ open, onClose, onSuccess, siteId }: {
   const [outletSite, setOutletSite] = useState<number | undefined>(siteId ?? workingSiteId ?? undefined);
   const [busy, setBusy] = useState(false);
   const { toast } = useToast();
-  const { data: sites } = useListSites();
 
   const handleSave = async () => {
     if (!name.trim()) return;
@@ -501,7 +501,7 @@ function AddOutletDialog({ open, onClose, onSuccess, siteId }: {
     const r = await apiFetch("/legionella/outlets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim(), type, location: location.trim() || null, siteId: siteId ?? outletSite ?? null }),
+      body: JSON.stringify({ name: name.trim(), type, location: location.trim() || null, siteId: outletSite ?? null }),
     });
     setBusy(false);
     if (r.ok) {
@@ -543,18 +543,7 @@ function AddOutletDialog({ open, onClose, onSuccess, siteId }: {
             <Input value={location} onChange={e => setLocation(e.target.value)}
               placeholder="e.g. Male toilets, ground floor" />
           </div>
-          {siteId == null && (sites?.length ?? 0) > 0 && (
-            <div className="space-y-1.5">
-              <Label>Site</Label>
-              <Select value={outletSite ? String(outletSite) : "none"} onValueChange={v => setOutletSite(v === "none" ? undefined : Number(v))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No specific site</SelectItem>
-                  {sites?.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <RecordSiteField value={outletSite} onChange={setOutletSite} pageSiteId={siteId} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -714,7 +703,6 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
   const [walkRoundOpen, setWalkRoundOpen] = useState(false);
   const [walkSite, setWalkSite] = useState<number | undefined>(undefined);
   const workingSiteId = useWorkingSiteId();
-  const { data: sites } = useListSites();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -746,7 +734,7 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
         const r = await apiFetch("/legionella/outlets", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: point.name, type, location: point.location || null, siteId: siteId ?? walkSite ?? null, sortOrder: sortOrder++ }),
+          body: JSON.stringify({ name: point.name, type, location: point.location || null, siteId: walkSite ?? null, sortOrder: sortOrder++ }),
         });
         if (!r.ok) {
           await refresh();
@@ -925,18 +913,7 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
             "Outlet 3, assisted bathroom, TMV",
           ]}
           existingNames={outlets.map(o => o.name)}
-          before={siteId == null && (sites?.length ?? 0) > 0 ? (
-            <div className="space-y-1.5">
-              <Label>Site</Label>
-              <Select value={walkSite ? String(walkSite) : "none"} onValueChange={v => setWalkSite(v === "none" ? undefined : Number(v))}>
-                <SelectTrigger data-testid="walk-round-site"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No specific site</SelectItem>
-                  {sites?.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          ) : undefined}
+          before={<RecordSiteField value={walkSite} onChange={setWalkSite} pageSiteId={siteId} testId="walk-round-site" />}
           onSave={saveWalkRound} />
       )}
       {canAdmin && addOpen && (
@@ -1007,7 +984,6 @@ function RecordCheckDialog({
   const queryClient = useQueryClient();
   const createCheck = useCreateLegionellaCheck();
   const media = useRecordMedia("legionella_check", { disabled: createCheck.isPending });
-  const { data: sites } = useListSites();
   const { data: config } = useGetLegionellaConfig();
   const { data: allUnits } = useLegionellaUnits();
   const siteUnits = siteUnitsFor(allUnits, checkType, selectedSite);
@@ -1175,23 +1151,12 @@ function RecordCheckDialog({
             </div>
           )}
 
-          {sites && sites.length > 0 && (
-            <div className="space-y-1.5">
-              <Label>Site (optional)</Label>
-              <Select
-                value={selectedSite ? String(selectedSite) : "none"}
-                onValueChange={(v) => { setSelectedSite(v === "none" ? undefined : Number(v)); setEquipment(null); }}
-              >
-                <SelectTrigger><SelectValue placeholder="All sites" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No specific site</SelectItem>
-                  {sites.map((s) => (
-                    <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <RecordSiteField
+            value={selectedSite}
+            onChange={site => { if (site !== selectedSite) { setSelectedSite(site); setEquipment(null); } }}
+            pageSiteId={siteId}
+            keepSiteId={preset?.siteId}
+          />
 
           {equipment && !siteUnits.some(u => u.id === equipment.id) ? (
             <div className="flex items-center justify-between gap-2 rounded-sm border bg-muted/40 px-3 py-2 text-sm">
@@ -1248,7 +1213,6 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const updateCheck = useUpdateLegionellaCheck();
-  const { data: sites } = useListSites();
 
   const isTemperatureCheck = TEMPERATURE_TYPES.has(check.checkType as LegionellaCheckType);
 
@@ -1343,23 +1307,7 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
             </div>
           )}
 
-          {sites && sites.length > 0 && (
-            <div className="space-y-1.5">
-              <Label>Site (optional)</Label>
-              <Select
-                value={selectedSite ? String(selectedSite) : "none"}
-                onValueChange={(v) => setSelectedSite(v === "none" ? undefined : Number(v))}
-              >
-                <SelectTrigger><SelectValue placeholder="All sites" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No specific site</SelectItem>
-                  {sites.map((s) => (
-                    <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <RecordSiteField value={selectedSite} onChange={setSelectedSite} keepSiteId={check.siteId ?? null} />
 
           <LegionellaUnitPicker
             checkType={check.checkType}

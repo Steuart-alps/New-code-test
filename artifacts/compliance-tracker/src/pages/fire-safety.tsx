@@ -75,6 +75,7 @@ import {
   EscapeRouteListEditor, NIGHT_WALK_TIMES, NightWalksCard, useSiteEscapeRoutes, type NightWalkPreset, type NightWalkTime,
 } from "@/components/fire-night-walks";
 import { RecordSignedBy } from "@/components/record-signature";
+import { RecordSiteField } from "@/components/record-site-field";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
@@ -1262,18 +1263,8 @@ function RecordCheckDialog({
             </div>
           </div>
 
-          {sites && sites.length > 0 && (
-            <div className="space-y-1.5">
-              <Label>Site {checkType !== "night_walk" && <span className="text-muted-foreground text-xs">optional</span>}</Label>
-              <Select value={selectedSite ? String(selectedSite) : "none"} onValueChange={v => changeSite(v === "none" ? undefined : Number(v))}>
-                <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No specific site</SelectItem>
-                  {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <RecordSiteField value={selectedSite} onChange={id => changeSite(id ?? undefined)}
+            keepSiteId={preset?.siteId} pageSiteId={siteId} />
 
           {checkType === "alarm" && (
             <>
@@ -1568,18 +1559,8 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
             </div>
           </div>
 
-          {sites && sites.length > 0 && (
-            <div className="space-y-1.5">
-              <Label>Site</Label>
-              <Select value={selectedSite ? String(selectedSite) : "none"} onValueChange={v => changeSite(v === "none" ? undefined : Number(v))}>
-                <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No specific site</SelectItem>
-                  {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <RecordSiteField value={selectedSite} onChange={id => changeSite(id ?? undefined)}
+            keepSiteId={check.siteId ?? null} pageSiteId={siteId} />
 
           {isAlarm && (
             <CallPointPicker siteId={selectedSite} sites={sites} open={open} callPointId={callPointChoice.callPointId}

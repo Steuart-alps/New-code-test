@@ -10,6 +10,7 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import { sessionMiddleware } from "./lib/session";
 import { loadUser, enforceClientAccess, enforceTwoFactorEnrollment } from "./middleware/requireAuth";
+import { enforceOwnSite } from "./middleware/ownSiteGate";
 import { enforceTrialLock } from "./middleware/trialLock";
 import { enforceDailyEntryCutoff } from "./middleware/dailyEntryCutoff";
 import { requireRecordSignature } from "./middleware/recordSignatureGate";
@@ -304,6 +305,8 @@ app.use(csrfProtection);
 app.use(loadUser);
 app.use(enforceTwoFactorEnrollment);
 app.use(enforceClientAccess);
+// Staff and Managers tied to a site save records to that site only.
+app.use("/api", enforceOwnSite);
 // A fail is answered with its corrective action first, then the check is signed.
 app.use("/api", requireCorrectiveActions);
 // Before the late-edit reason, so a reason is asked (and audited) only once.

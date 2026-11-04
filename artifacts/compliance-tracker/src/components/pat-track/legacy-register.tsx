@@ -21,6 +21,7 @@ import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActive
 import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 import { sortByLabel } from "@/lib/sort-options";
 import { RecordSignedBy } from "@/components/record-signature";
+import { RecordSiteField } from "@/components/record-site-field";
 
 const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 const types = ["AV Equipment", "Class I", "Class II", "Class III", "Cleaning Equipment", "Extension Lead", "IT Equipment", "Kitchen Appliance", "Portable Tool", "Other"];
@@ -80,7 +81,7 @@ function RecordDialog({ open, close, appliance, sites, config, saved }: { open: 
     <div className="grid grid-cols-2 gap-3"><div><Label>Appliance type</Label><select data-testid="select-legacy-appliance-type" className="mt-1 h-10 w-full rounded-sm border bg-background px-3 text-sm" value={form.applianceType} onChange={e => setForm({ ...form, applianceType: e.target.value })}>{types.map(x => <option key={x}>{x}</option>)}</select></div><Field label="Asset tag" value={form.assetTag} set={assetTag => setForm({ ...form, assetTag })} /></div>
     <div><datalist id="legacy-pat-locations">{locations(config).map((x: string) => <option key={x} value={x}/>)}</datalist><Label>Location / area</Label><Input data-testid="input-legacy-appliance-location" list="legacy-pat-locations" className="mt-1" value={form.location} onChange={e => setForm({ ...form, location: e.target.value })}/></div>
     <Field label="Description / serial number" value={form.description} set={description => setForm({ ...form, description })} />
-    <div><Label>Site</Label><select data-testid="select-legacy-appliance-site" className="mt-1 h-10 w-full rounded-sm border bg-background px-3 text-sm" value={form.siteId} onChange={e => setForm({ ...form, siteId: e.target.value })}><option value="">All sites</option>{sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+    <RecordSiteField testId="select-legacy-appliance-site" value={form.siteId} onChange={id => setForm({ ...form, siteId: id ? String(id) : "" })} keepSiteId={appliance ? appliance.site_id ?? null : undefined} businessWide="All sites" />
     {appliance && <label className="flex items-center justify-between rounded-sm border p-3 text-sm"><span>Active appliance</span><Switch data-testid="switch-legacy-appliance-active" checked={form.active} onCheckedChange={active => setForm({ ...form, active })}/></label>}
   </div><DialogFooter><Button data-testid="button-cancel-legacy-appliance" variant="outline" onClick={close}>Cancel</Button><Button data-testid="button-save-legacy-appliance" disabled={!form.name.trim() || saving} onClick={save}>{saving ? "Saving…" : "Save appliance"}</Button></DialogFooter></DialogContent></Dialog>;
 }

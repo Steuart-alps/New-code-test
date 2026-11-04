@@ -31,6 +31,7 @@ import { compareTrainingExpiry, getTrainingExpiry } from "@/lib/training-expiry"
 import { useLocalToday } from "@/hooks/use-local-today";
 import { INDUCTION_SECTIONS, parseChecklist, renderInductionHtml, type InductionChecklist, type SectionKey, type ChecklistItem } from "@/lib/induction-print";
 import { assertWithinUploadLimit } from "@/lib/upload-limits";
+import { RecordSiteField } from "@/components/record-site-field";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -437,20 +438,6 @@ function ListTable({ headers, rows, photoEntityType, onEdit, onDelete, onDownloa
   );
 }
 
-// ── Shared site picker ────────────────────────────────────────────────────────
-
-function SiteSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const { data: sites = [] } = useListSites();
-  return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger><SelectValue placeholder="All sites" /></SelectTrigger>
-      <SelectContent>
-        <SelectItem value="__none__">All sites (no assignment)</SelectItem>
-        {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-      </SelectContent>
-    </Select>
-  );
-}
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -813,10 +800,8 @@ export default function SafeTrackPage() {
             {tab === "training" && <TrainingForm form={form} setForm={setForm} />}
             {tab === "inductions" && <InductionForm form={form} setForm={setForm} />}
 
-            <div className="space-y-1.5">
-              <Label>Site (optional)</Label>
-              <SiteSelect value={form.siteId ?? "__none__"} onChange={v => setForm({ ...form, siteId: v })} />
-            </div>
+            <RecordSiteField value={form.siteId} onChange={id => setForm({ ...form, siteId: id ? String(id) : "__none__" })}
+              keepSiteId={editing ? editing.siteId ?? null : undefined} businessWide="All sites (no assignment)" />
 
             {/* Required reading toggle */}
             {!["training", "inductions"].includes(tab) && <div className="flex items-center gap-2 pt-1">

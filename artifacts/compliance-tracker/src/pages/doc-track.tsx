@@ -31,6 +31,7 @@ import { DepartmentNameSelect } from "@/components/department-name-select";
 import { AcknowledgementsDialog, type StaffMember } from "@/components/acknowledgements-dialog";
 import { assertWithinUploadLimit } from "@/lib/upload-limits";
 import { sortByLabel } from "@/lib/sort-options";
+import { RecordSiteField } from "@/components/record-site-field";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -494,18 +495,7 @@ function UploadDialog({
           </div>
 
           {/* Site */}
-          {sites.length > 0 && (
-            <div className="space-y-1.5">
-              <Label>Site <span className="text-muted-foreground text-xs">(optional)</span></Label>
-              <Select value={siteId} onValueChange={setSiteId}>
-                <SelectTrigger><SelectValue placeholder="Not site-specific" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Not site-specific</SelectItem>
-                  {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <RecordSiteField value={siteId} onChange={id => setSiteId(id ? String(id) : "none")} businessWide="Not site-specific" />
 
           {/* Department */}
           <div className="space-y-1.5">

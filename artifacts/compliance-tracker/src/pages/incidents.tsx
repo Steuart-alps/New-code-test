@@ -49,6 +49,7 @@ import { localDate } from "@/lib/voice-log";
 import { useManagedBy } from "@/components/managed-by-badge";
 import { VIDEO_PATH } from "@/lib/media-upload";
 import { takeLinkParams } from "@/lib/deep-link";
+import { RecordSiteField } from "@/components/record-site-field";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1302,18 +1303,8 @@ ${rows.map(r => `<tr>
                       );
                     })()}
                   </div>
-                  {sites.length > 0 && (
-                    <div>
-                      <Label>Site</Label>
-                      <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
-                        <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">No specific site</SelectItem>
-                          {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
+                  <RecordSiteField value={form.siteId} onChange={id => setForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
+                    keepSiteId={editItem ? editItem.siteId ?? null : undefined} />
                 </div>
 
                 {/* Description */}

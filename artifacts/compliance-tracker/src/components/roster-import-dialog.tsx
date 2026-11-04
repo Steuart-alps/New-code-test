@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { downloadExcel, readSpreadsheet } from "@/lib/spreadsheet";
 import { SpreadsheetDropZone, isSpreadsheetFile, usePastedFile } from "@/components/spreadsheet-drop-zone";
 import { ListReadNote, ListReadingPanel, isPhotoOrPdf, useListReading, type ListReadResult } from "@/components/ai-list-reader";
+import { RecordSiteField } from "@/components/record-site-field";
 
 // Replace a site's (or the whole business's) staff roster with an uploaded
 // one: from Staff Roster (Owners), and from the monthly roster check when the
@@ -322,16 +323,8 @@ export function RosterImportDialog({ open, onClose, onImported, sites, fixedSite
           )}
 
           {sites.length > 0 && !fixedSite && (
-            <div className="space-y-1.5">
-              <Label>Assign all to site <span className="text-muted-foreground text-xs">(optional)</span></Label>
-              <Select value={siteId} onValueChange={value => { setSiteId(value); setReconciliation(null); }}>
-                <SelectTrigger><SelectValue placeholder="All sites" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">All sites</SelectItem>
-                  {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
+            <RecordSiteField label="Assign all to site" value={siteId} businessWide="All sites"
+              onChange={id => { setSiteId(id ? String(id) : "none"); setReconciliation(null); }} />
           )}
           <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
             This is a complete replacement for {chosenSiteId === "none" ? "the whole current roster" : fixedSite ? `${fixedSite.name}'s current roster` : "the selected site's current roster"}. Staff missing from the file will be marked as left, never deleted. Their training and compliance history will remain.

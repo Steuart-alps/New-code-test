@@ -178,6 +178,8 @@ try {
   assert.equal(savedDocs[1].department, null, "All departments saves no department");
 
   // ─── Staff Roster ───
+  // A new record is saved to the site that's selected, so work at the Hotel.
+  await page.evaluate(() => window.localStorage.setItem("complytrack.working-site.1.7", "2"));
   await page.goto(`${baseUrl}/staff-roster`);
   await page.getByRole("button", { name: "Add Staff" }).first().click();
   const staffDialog = page.getByRole("dialog");
