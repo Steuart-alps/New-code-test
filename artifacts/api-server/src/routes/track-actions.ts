@@ -1,10 +1,10 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { auditEventsTable, departmentsTable, fixTrackIssueActivityTable, fixTrackIssuesTable, sitesTable, trackActionTemplatesTable, trackActionsTable, trackEvidenceTable } from "@workspace/db/schema";
+import { auditEventsTable, departmentsTable, fixTrackIssueActivityTable, fixTrackIssuesTable, sitesTable, trackActionTemplatesTable, trackActionsTable } from "@workspace/db/schema";
 import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { denyViewers, getActiveDepartmentId, getClientId, requireAuth, requireClientAdmin } from "../middleware/requireAuth";
-import { isInspectionReportSource, missingEvidenceForAction } from "../lib/trackEvidenceRequirements";
+import { isInspectionReportSource } from "../lib/trackEvidenceRequirements";
 import { departmentSiteId, sitesTableVisibleTo, siteVisibleToDepartment } from "../lib/departmentSites";
 import { resolveAssigneeChange } from "../lib/assignees";
 import {
@@ -408,45 +408,10 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     if (nextStatus === "resolved" && (!filled(parsed.data.remedialAction ?? current.remedialAction) || !filled(parsed.data.evidenceReference ?? current.evidenceReference) || !filled(parsed.data.resolutionNotes ?? current.resolutionNotes) || !parsed.data.resolverSignature)) {
       return { status: 400 as const, error: "remedialAction, evidenceReference, resolutionNotes and a drawn signature are required to resolve an action" };
     }
-    if (nextStatus === "resolved") {
-      if (kitchenFailure) {
-        const proof = await tx.select({ id: trackEvidenceTable.id }).from(trackEvidenceTable).where(and(
-          eq(trackEvidenceTable.clientId, clientId), eq(trackEvidenceTable.actionId, current.id),
-          eq(trackEvidenceTable.module, "kitchen"), eq(trackEvidenceTable.requirementKey, "temperature_control_restored"),
-          eq(trackEvidenceTable.evidenceType, "verification"), ne(trackEvidenceTable.reviewStatus, "rejected"),
-        )).for("share");
-        if (!proof.length) return { status: 400 as const, error: "Record corrective-action verification evidence before manager sign-off" };
-      }
-      const missingEvidence = await missingEvidenceForAction(clientId, current);
-      if (missingEvidence.length) {
-        return {
-          status: 400 as const,
-          error: "Required inspection evidence is missing or not independently verified",
-          missingEvidence: missingEvidence.map(item => ({
-            requirementKey: item.requirementKey,
-            title: item.title,
-            evidenceType: item.evidenceType,
-            reviewRequired: item.reviewRequired,
-          })),
-        };
-      }
-      if (current.severity === "urgent") {
-        const [reviewedEvidence] = await tx.select({ id: trackEvidenceTable.id })
-          .from(trackEvidenceTable)
-          .where(and(
-            eq(trackEvidenceTable.clientId, clientId),
-            eq(trackEvidenceTable.actionId, current.id),
-            eq(trackEvidenceTable.reviewStatus, "verified"),
-          ))
-          .limit(1);
-        if (!reviewedEvidence) {
-          return {
-            status: 400 as const,
-            error: "Urgent actions require at least one independently reviewed evidence record before resolution",
-          };
-        }
-      }
-    }
+    // Sign-off is the remedial action, evidence reference, notes and the
+    // resolver's drawn signature above (failed temperatures: a manager's). The
+    // separate "Inspection evidence" profile and its independent reviews were
+    // removed (Steuart, 5 Nov 2026: "covered elsewhere and is unnecessary").
     const updates: Record<string, unknown> = { ...parsed.data, updatedAt: new Date() };
     if ("assigneeUserId" in parsed.data || "ownerName" in parsed.data || "siteId" in parsed.data) {
       const assignee = await resolveAssigneeChange(clientId, "siteId" in parsed.data ? parsed.data.siteId ?? null : current.siteId, {

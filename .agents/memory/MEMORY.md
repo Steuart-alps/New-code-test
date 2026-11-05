@@ -53,7 +53,7 @@
 - [Custom form-option semantics](custom-form-option-semantics.md) — customize only business vocabularies; new records use active values, while edits preserve disabled legacy values.
 - [Track record lock](daily-entry-cutoff.md) — staff get the scheduled day plus one correction day; older records lock, while client admins and consultants can change them only with an audited X-Override-Reason.
 - [Browser CSRF and test sessions](csrf-test-sessions.md) — production cookie mutations require a session-bound header; legacy integration fixtures need the explicit test-only bypass.
-- [Track evidence profiles](track-evidence-profiles.md) — source-linked Fire/Legionella action sign-off requires structured, independently reviewed profile evidence; manual actions retain the generic contract.
+- [Track evidence profiles](track-evidence-profiles.md) — REMOVED Nov 2026: Inspection evidence panel and its sign-off gates are gone; actions sign off with the resolve form and signature.
 - [OpenAPI nullable object generation](openapi-nullable-object-generation.md) — keep referenced object schemas non-nullable; put nullability on the containing property to avoid invalid generated TypeScript.
 - [Contractor calendar semantics](contractor-calendar.md) — date-only targets are all-day events; revised invitations retain identity and resends still require approval.
 - [Contractor warning windows](contractor-warning-windows.md) — contractor expiry reminders use a separate client setting; absent or blank means 30 days, while legacy DBS age stays fixed.
