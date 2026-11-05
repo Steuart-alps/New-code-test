@@ -35,7 +35,7 @@ const INVENTORY = {
   "certificates.ts POST /items/:itemId/certificates/:id/defects": adminOnly("certificate defects"),
   "checklist-templates.ts PUT /checklist-templates": adminOnly("checklist template editor"),
   "compliance-items.ts PATCH /compliance-items/:id/status": notAMove("status-only; checks the item's stored site"),
-  "compliance-items.ts PUT /compliance-items/:id": adminOnly("compliance item editor"),
+  "compliance-items.ts PUT /compliance-items/:id": covered("Manager can't move a check to a site they can't see", "manager-role.mjs"),
   "contractor-visits.ts PUT /contractor-visits": adminOnly("chooses the contractor reminded about a visit at a site"),
   "contractor-sign-in.ts POST /:token/sign-in": notAMove("contractor signs in at the link's own site; no site comes from the caller"),
   "contractor-sign-in.ts POST /:token/visit": notAMove("reads the contractor's own visit at the link's site"),

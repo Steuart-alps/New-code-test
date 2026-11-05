@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation, useRoute, useSearch } from "wouter";
 import { AppLayout } from "@/components/layout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ItemFormDialog } from "@/components/item-form-dialog";
+import { ItemFormDialog, type ItemFormField } from "@/components/item-form-dialog";
 import { CertificateFormDialog } from "@/components/certificate-form-dialog";
 import { CertificateReaderButton, CertificateReaderDialog } from "@/components/certificate-reader-dialog";
 import { useFileDrop } from "@/hooks/use-file-drop";
@@ -23,7 +23,7 @@ import {
   useListCategories,
 } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
-import { useAuth, useCanAdmin, useCanEdit } from "@/context/auth-context";
+import { useAuth, useCanAdmin, useCanChangeChecks, useCanEdit } from "@/context/auth-context";
 import { apiFetch } from "@/lib/api";
 import { LoadError } from "@/components/load-error";
 import { format } from "date-fns";
@@ -41,6 +41,43 @@ import {
 function fmt(d: any) {
   if (!d) return "—";
   try { return format(new Date(d), "EEE, d MMM yyyy"); } catch { return "—"; }
+}
+
+/**
+ * One detail box on the check (Due date, Repeats, Contractor...). For those
+ * who can edit, the whole box is a button that opens "Make changes" on that
+ * box, and says "Change" so it is obvious on phones too (no hover there).
+ */
+function DetailBox({ icon, label, labelClassName, onChange, children }: {
+  icon: ReactNode;
+  label: string;
+  labelClassName?: string;
+  onChange?: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className={cn(
+      "relative flex items-start gap-3 rounded-lg p-3 -m-1",
+      onChange && "group border border-border hover:border-foreground/40 hover:bg-muted/40 transition-colors",
+    )}>
+      {onChange && (
+        // Covers the box so a tap anywhere opens the form; links inside sit above it.
+        <button type="button" onClick={onChange} aria-label={`Change ${label.toLowerCase()}`}
+          data-testid={`change-${label.toLowerCase().replace(/[^a-z]+/g, "-")}`}
+          className="absolute inset-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" />
+      )}
+      <span className="mt-0.5 shrink-0">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <p className={cn("text-xs uppercase tracking-wider text-muted-foreground font-semibold", labelClassName)}>{label}</p>
+        {children}
+      </div>
+      {onChange && (
+        <span aria-hidden className="pointer-events-none shrink-0 inline-flex items-center gap-1 text-xs font-semibold text-foreground/70 underline underline-offset-2 group-hover:text-foreground">
+          <Pencil className="w-3 h-3" /> Change
+        </span>
+      )}
+    </div>
+  );
 }
 
 type AuditEvent = {
@@ -97,6 +134,7 @@ export default function ItemDetailPage() {
   const { activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
   const canEdit = useCanEdit();
+  const canChange = useCanChangeChecks();
   const queryClient = useQueryClient();
   const search = useSearch();
   const [, navigate] = useLocation();
@@ -105,6 +143,8 @@ export default function ItemDetailPage() {
   const [defectBusy, setDefectBusy] = useState<number | null>(null);
 
   const [editOpen, setEditOpen] = useState(false);
+  const [editFocus, setEditFocus] = useState<ItemFormField | null>(null);
+  const openEdit = (field: ItemFormField | null = null) => { setEditFocus(field); setEditOpen(true); };
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [certOpen, setCertOpen] = useState(false);
   const [editingCert, setEditingCert] = useState<any>(null);
@@ -183,6 +223,8 @@ export default function ItemDetailPage() {
   const contractor = contractors.find(c => c.id === item.contractorId);
   const site = sites.find(s => s.id === item.siteId);
   const category = categories.find(c => c.id === item.categoryId);
+  // Owners, ALPS consultants and Managers can change a check (the server agrees).
+  const change = (field: ItemFormField) => (canChange ? () => openEdit(field) : undefined);
 
   return (
     <AppLayout title={item.title}>
@@ -196,7 +238,7 @@ export default function ItemDetailPage() {
         {/* Main column */}
         <div className="lg:col-span-2 space-y-6">
           <Card className="p-6 shadow-lg border-border/50">
-            <div className="flex items-start justify-between gap-4 mb-5">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-5">
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-2 mb-2">
                   {category && (
@@ -215,18 +257,22 @@ export default function ItemDetailPage() {
                   <p className="text-muted-foreground mt-2 whitespace-pre-line">{item.description}</p>
                 )}
               </div>
-              <div className="flex gap-2 flex-shrink-0">
+              <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
                 {canEdit && (
                   <Button variant="outline" size="sm" onClick={() => setCompleteOpen(true)} title="Mark as done">
                     <CheckCircle2 className="w-4 h-4 mr-1.5 text-emerald-600" /> Mark done
                   </Button>
                 )}
-                <Button variant="ghost" size="icon" onClick={() => setEditOpen(true)} title="Edit">
-                  <Pencil className="w-4 h-4" />
-                </Button>
-                <Button variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setDeleteConfirm(true)} title="Delete">
-                  <Trash2 className="w-4 h-4" />
-                </Button>
+                {canChange && (
+                  <Button variant="outline" size="sm" onClick={() => openEdit()} data-testid="make-changes">
+                    <Pencil className="w-4 h-4 mr-1.5" /> Make changes
+                  </Button>
+                )}
+                {canAdmin && (
+                  <Button variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setDeleteConfirm(true)} title="Delete" aria-label="Delete check">
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                )}
               </div>
             </div>
 
@@ -246,79 +292,59 @@ export default function ItemDetailPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-x-6 gap-y-4 pt-4 border-t border-border/50">
-              <div className="flex items-start gap-3">
-                <Calendar className="w-4 h-4 mt-0.5 text-muted-foreground" />
-                <div>
-                  <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Due Date</p>
-                  <p className="text-sm font-medium">{item.dueDate ? fmt(item.dueDate) : "Not set — enter it from your last service date"}</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3">
-                <Repeat className="w-4 h-4 mt-0.5 text-muted-foreground" />
-                <div>
-                  <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Repeats</p>
-                  <p className="text-sm font-medium">
-                    {item.frequencyMonths
-                      ? `Every ${item.frequencyMonths} month${item.frequencyMonths === 1 ? "" : "s"}`
-                      : "One-off"}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3">
-                <Clock className="w-4 h-4 mt-0.5 text-muted-foreground" />
-                <div>
-                  <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Reminder Lead Time</p>
-                  <p className="text-sm font-medium">{item.leadTimeDays ? `${item.leadTimeDays} day${item.leadTimeDays === 1 ? "" : "s"} before` : "—"}</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3">
-                <Briefcase className="w-4 h-4 mt-0.5 text-muted-foreground" />
-                <div>
-                  <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Contractor</p>
-                  {contractor ? (
-                    <Link href={`/contractors/${contractor.id}`} className="text-sm font-medium text-primary hover:underline">
-                      {contractor.name}{contractor.company ? ` — ${contractor.company}` : ""}
-                    </Link>
-                  ) : <p className="text-sm text-muted-foreground italic">Unassigned</p>}
-                  {contractor?.email && (
-                    <p className="text-xs text-muted-foreground flex items-center mt-0.5"><Mail className="w-3 h-3 mr-1" />{contractor.email}</p>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-start gap-3">
-                <MapPin className="w-4 h-4 mt-0.5 text-muted-foreground" />
-                <div>
-                  <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Site</p>
-                  <p className="text-sm font-medium">{site?.name ?? "—"}</p>
-                </div>
-              </div>
-              {item.assignedTo && (
-                <div className="flex items-start gap-3">
-                  <User className="w-4 h-4 mt-0.5 text-muted-foreground" />
-                  <div>
-                    <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Assigned To</p>
-                    <p className="text-sm font-medium">{item.assignedTo}</p>
-                  </div>
-                </div>
+            {canChange && (
+              <p className="pt-4 border-t border-border/50 mb-3 text-xs text-muted-foreground">
+                Tap any box below to change it.
+              </p>
+            )}
+            <div className={cn("grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4", !canChange && "pt-4 border-t border-border/50")}>
+              <DetailBox icon={<Calendar className="w-4 h-4 text-muted-foreground" />} label="Due Date" onChange={change("dueDate")}>
+                <p className="text-sm font-medium">{item.dueDate ? fmt(item.dueDate) : "Not set — enter it from your last service date"}</p>
+              </DetailBox>
+              <DetailBox icon={<Repeat className="w-4 h-4 text-muted-foreground" />} label="Repeats" onChange={change("frequencyMonths")}>
+                <p className="text-sm font-medium">
+                  {item.frequencyMonths
+                    ? `Every ${item.frequencyMonths} month${item.frequencyMonths === 1 ? "" : "s"}`
+                    : "One-off"}
+                </p>
+              </DetailBox>
+              <DetailBox icon={<Clock className="w-4 h-4 text-muted-foreground" />} label="Reminder Lead Time" onChange={change("leadTimeDays")}>
+                <p className="text-sm font-medium">{item.leadTimeDays ? `${item.leadTimeDays} day${item.leadTimeDays === 1 ? "" : "s"} before` : "—"}</p>
+              </DetailBox>
+              <DetailBox icon={<Briefcase className="w-4 h-4 text-muted-foreground" />} label="Contractor" onChange={change("item-contractor")}>
+                {contractor ? (
+                  <Link href={`/contractors/${contractor.id}`} className="relative z-10 text-sm font-medium text-primary hover:underline">
+                    {contractor.name}{contractor.company ? ` — ${contractor.company}` : ""}
+                  </Link>
+                ) : <p className="text-sm text-muted-foreground italic">Unassigned</p>}
+                {contractor?.email && (
+                  <p className="text-xs text-muted-foreground flex items-center mt-0.5 break-all"><Mail className="w-3 h-3 mr-1 shrink-0" />{contractor.email}</p>
+                )}
+              </DetailBox>
+              <DetailBox icon={<MapPin className="w-4 h-4 text-muted-foreground" />} label="Site" onChange={change("item-site")}>
+                <p className="text-sm font-medium">{site?.name ?? "—"}</p>
+              </DetailBox>
+              {(item.assignedTo || canChange) && (
+                <DetailBox icon={<User className="w-4 h-4 text-muted-foreground" />} label="Assigned To" onChange={change("item-assignee")}>
+                  {item.assignedTo
+                    ? <p className="text-sm font-medium">{item.assignedTo}</p>
+                    : <p className="text-sm text-muted-foreground italic">Not assigned</p>}
+                </DetailBox>
               )}
               {(item as any).visitScheduledAt && (
-                <div className="flex items-start gap-3">
-                  <Calendar className="w-4 h-4 mt-0.5 text-emerald-600" />
-                  <div>
-                    <p className="text-xs uppercase tracking-wider text-emerald-700 font-semibold">Visit Scheduled</p>
-                    <p className="text-sm font-medium">{fmt((item as any).visitScheduledAt)}</p>
-                  </div>
-                </div>
+                <DetailBox icon={<Calendar className="w-4 h-4 text-emerald-600" />} label="Visit Scheduled" labelClassName="text-emerald-700">
+                  <p className="text-sm font-medium">{fmt((item as any).visitScheduledAt)}</p>
+                </DetailBox>
               )}
             </div>
 
-            {item.notes && (
+            {(item.notes || canChange) && (
               <div className="mt-6 pt-4 border-t border-border/50">
-                <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-2 flex items-center gap-1.5">
-                  <ClipboardList className="w-3.5 h-3.5" /> Notes
-                </p>
-                <p className="text-sm whitespace-pre-line">{item.notes}</p>
+                <DetailBox icon={<ClipboardList className="w-4 h-4 text-muted-foreground" />} label="Notes" onChange={change("notes")}>
+                  {item.notes
+                    ? <p className="text-sm whitespace-pre-line mt-1">{item.notes}</p>
+                    : <p className="text-sm text-muted-foreground italic mt-1">No notes yet</p>}
+                </DetailBox>
               </div>
             )}
           </Card>
@@ -474,7 +500,7 @@ export default function ItemDetailPage() {
         </div>
       </div>
 
-      <ItemFormDialog isOpen={editOpen} onClose={() => setEditOpen(false)} item={item as any} />
+      <ItemFormDialog isOpen={editOpen} onClose={() => setEditOpen(false)} item={item as any} focusField={editFocus} />
       {droppedForReader && (
         <CertificateReaderDialog open onOpenChange={(open) => { if (!open) setDroppedForReader(null); }}
           itemId={item.id} initialFiles={droppedForReader} />
