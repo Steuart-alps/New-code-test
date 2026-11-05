@@ -38,13 +38,16 @@ export const FIRE_CHECK_TYPES = [
 export type FireCheckType = (typeof FIRE_CHECK_TYPES)[number];
 
 /**
- * Check types FireTrack no longer records (Oct 2026), because another check
- * already covers them: the alarm panel is looked at on every premises opening
- * and closing check, and the contractor services (the 6-monthly fire alarm
- * service, the annual extinguisher service and the annual 3-hour emergency
- * lighting test) are their compliance checks, which FireTrack shows with the
- * checks' own status. Older records stay in the log and can still be edited;
- * they are never due, overdue or reminded about.
+ * FireTrack checks with no due date of their own in FireTrack, because
+ * another check already covers it: the alarm panel is looked at on every
+ * premises opening and closing check, and the contractor services (the
+ * 6-monthly fire alarm service, the annual extinguisher service and the annual
+ * 3-hour emergency lighting test) are due by their compliance checks, which
+ * FireTrack shows with the checks' own status. They were not recorded in
+ * FireTrack from Oct 2026; since Nov 2026 they can be again (every check can
+ * be recorded in its own track), and a passed contractor service marks its
+ * compliance check done (lib/trackTaskLink.ts). They are never due, overdue or
+ * reminded about here.
  */
 export const RETIRED_FIRE_CHECK_TYPES: readonly FireCheckType[] = [
   "alarm_panel", "alarm_service", "extinguisher_service", "emergency_lights_annual",

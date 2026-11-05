@@ -1,7 +1,7 @@
 import type { Request } from "express";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
-import { complianceItemsTable, contractorsTable, legionellaChecksTable, pestVisitsTable, sitesTable } from "@workspace/db/schema";
+import { complianceItemsTable, contractorsTable, fireSafetyChecksTable, legionellaChecksTable, pestVisitsTable, sitesTable } from "@workspace/db/schema";
 import { appendAuditEvent } from "./audit";
 import { completionDateFromDay, completionFields } from "./complianceCompletion";
 import { supersedeStaleReminderCycles } from "./reminderCycles";
@@ -18,11 +18,17 @@ import { defaultNextVisitDate } from "./pestVisitFrequency";
  * - completing the task records the job, as a pass, in the track's log.
  *
  * FireTrack's contractor services (the fire alarm and extinguisher services
- * and the annual 3-hour emergency lighting test) were linked this way until
- * Oct 2026. They are now kept only as their compliance checks, which FireTrack
- * shows (RETIRED_FIRE_CHECK_TYPES in lib/checkReminders.ts).
+ * and the annual 3-hour emergency lighting test) are due by their compliance
+ * checks, which FireTrack shows (RETIRED_FIRE_CHECK_TYPES in
+ * lib/checkReminders.ts), and can also be recorded in FireTrack (Nov 2026).
+ * They are judged per site, like the water log.
  */
 export const TRACK_TASK_LINKS = {
+  fire: {
+    emergency_lights_annual: "Emergency Light Maintenance",
+    alarm_service: "Fire Alarm Maintenance",
+    extinguisher_service: "Fire Extinguishers Maintenance",
+  },
   legionella: {
     cold_tank_clean: "Clean & Disinfect Water Tanks",
     calorifier_inspection: "Calorifier Inspection",
@@ -37,10 +43,12 @@ export const TRACK_TASK_LINKS = {
 export type LinkedTrack = keyof typeof TRACK_TASK_LINKS;
 
 const AUDIT_SOURCE_KEY: Record<LinkedTrack, string> = {
+  fire: "fromFireSafetyCheck",
   legionella: "fromLegionellaCheck",
   pest: "fromPestVisit",
 };
 const AUDIT_ENTITY_TYPE: Record<LinkedTrack, string> = {
+  fire: "fire_safety_check",
   legionella: "legionella_check",
   pest: "pest_visit",
 };
@@ -78,8 +86,8 @@ type TrackCheck = { id: number; clientId: number; siteId: number | null; checkTy
  * A passed track record completes the linked ComplyTrack task(s) for the same
  * site. A task with no site covers the whole business, so one site's record
  * completes it only when the business has a single site; otherwise that
- * site's record would make every other site look done. Water records are
- * judged per site, so one with no site completes only business-wide tasks. A failed record completes nothing, and a task already completed on
+ * site's record would make every other site look done. Fire and water records
+ * are judged per site, so one with no site completes only business-wide tasks. A failed record completes nothing, and a task already completed on
  * or after the record's date is left alone. Returns the ids of the tasks
  * completed.
  */
@@ -135,7 +143,7 @@ export async function completeLinkedTasksFromCheck(req: Request, track: LinkedTr
  * Completing a linked ComplyTrack task records the job in the track's log (a
  * pass on the date done, at the task's site), unless that site already has
  * one on that date — for instance the record that completed the task. The
- * water log and PestTrack are kept per site, so a business-wide task is
+ * fire and water logs and PestTrack are kept per site, so a business-wide task is
  * recorded only at a business with a single site. A pest visit recorded this
  * way is due again after the business's visit frequency. Returns the new
  * record, if one was made.
@@ -158,7 +166,19 @@ export async function recordTrackCheckFromTask(req: Request, task: Task, complet
   };
 
   let inserted: { id: number } | undefined;
-  if (track === "pest") {
+  if (track === "fire") {
+    const [already] = await db.select({ id: fireSafetyChecksTable.id }).from(fireSafetyChecksTable).where(and(
+      eq(fireSafetyChecksTable.clientId, task.clientId),
+      eq(fireSafetyChecksTable.checkType, checkType),
+      eq(fireSafetyChecksTable.checkDate, checkDate),
+      eq(fireSafetyChecksTable.siteId, siteId),
+    )).limit(1);
+    if (already) return null;
+    [inserted] = await db.insert(fireSafetyChecksTable).values({
+      ...values,
+      performedBy: task.completedInHouseBy ?? null,
+    }).returning();
+  } else if (track === "pest") {
     const [already] = await db.select({ id: pestVisitsTable.id }).from(pestVisitsTable).where(and(
       eq(pestVisitsTable.clientId, task.clientId),
       eq(pestVisitsTable.visitDate, checkDate),
