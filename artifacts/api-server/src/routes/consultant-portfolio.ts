@@ -75,10 +75,10 @@ router.get("/portfolio", requireAuth, requireConsultant, async (req, res) => {
 
   const [clients, sites, overdueChecks, actions, activity] = await Promise.all([
     db.execute(sql`
-      SELECT id, name, active, trial_ends_at, stripe_customer_id, cancelled_at
+      SELECT id, name, active, trial_ends_at, stripe_customer_id, cancelled_at, created_at
       FROM clients WHERE id IN (${idList}) AND data_deleted_at IS NULL ORDER BY lower(name), id
     `),
-    db.execute(sql`SELECT id, client_id, name FROM sites WHERE client_id IN (${idList}) ORDER BY lower(name), id`),
+    db.execute(sql`SELECT id, client_id, name, created_at FROM sites WHERE client_id IN (${idList}) ORDER BY lower(name), id`),
     // Same rule as the dashboard stats: past due and not completed counts as overdue.
     db.execute(sql`
       SELECT client_id, count(*) AS n FROM compliance_items
@@ -107,12 +107,12 @@ router.get("/portfolio", requireAuth, requireConsultant, async (req, res) => {
     `),
   ]);
 
-  const clientRows = rowsOf<{ id: number; name: string; active: boolean; trial_ends_at: Date | null; stripe_customer_id: string | null; cancelled_at: Date | null }>(clients);
+  const clientRows = rowsOf<{ id: number; name: string; active: boolean; trial_ends_at: Date | null; stripe_customer_id: string | null; cancelled_at: Date | null; created_at: Date | string }>(clients);
   const subscriptions = await liveSubscriptions([...new Set(clientRows.map((row) => row.stripe_customer_id).filter((id): id is string => !!id))]);
-  const siteLists = new Map<number, Array<{ id: number; name: string }>>();
-  for (const site of rowsOf<{ id: number; client_id: number; name: string }>(sites)) {
+  const siteLists = new Map<number, Array<{ id: number; name: string; createdAt: Date | string }>>();
+  for (const site of rowsOf<{ id: number; client_id: number; name: string; created_at: Date | string }>(sites)) {
     const clientId = Number(site.client_id);
-    siteLists.set(clientId, [...(siteLists.get(clientId) ?? []), { id: Number(site.id), name: site.name }]);
+    siteLists.set(clientId, [...(siteLists.get(clientId) ?? []), { id: Number(site.id), name: site.name, createdAt: site.created_at }]);
   }
   const overdueCounts = countMap(rowsOf(overdueChecks));
   const actionCounts = new Map(rowsOf<{ client_id: number; open: string; overdue: string }>(actions)
@@ -133,6 +133,7 @@ router.get("/portfolio", requireAuth, requireConsultant, async (req, res) => {
       lastActivityAt: lastActivity.get(Number(client.id)) ?? null,
       subscription: subscriptionState(client, subscriptions),
       trialEndsAt: client.trial_ends_at,
+      createdAt: client.created_at,
     })),
   });
 });
