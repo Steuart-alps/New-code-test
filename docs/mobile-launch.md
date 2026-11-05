@@ -204,27 +204,27 @@ The app can't create accounts; it only signs in to accounts set up on the web. E
 
 ## 6. App Review notes (Apple) / App access (Google)
 
-Mandatory two-factor sign-in is enforced by `isTwoFactorRequired` in `artifacts/api-server/src/lib/twoFactorPolicy.ts`.
+Two-factor sign-in is optional by default. `isTwoFactorRequired` in `artifacts/api-server/src/lib/twoFactorPolicy.ts` decides when it is required.
 
-- **How the code decides:** a user can skip TOTP only when **every** business they belong to has the setting `requireTwoFactor` set to `"false"`. Consultants also count their linked clients. Without that, the app asks for a 6-digit authenticator code. If the user hasn't enrolled yet, the app shows "Set up two-factor authentication" and links to the web.
-- **Turning it off:** an owner can switch it off for one business in web **Settings > Require two-factor authentication** (`PUT /api/settings`, `client_admin` or consultant).
+- **How the code decides:** a user must use TOTP when **any** business they belong to has the setting `requireTwoFactor` set to `"true"`. Consultants also count their linked clients. A user who has turned on two-factor for their own account is always asked for the 6-digit code. Otherwise a password (plus a passkey, if they added one) is enough. If 2FA is required and the user hasn't enrolled yet, the app shows "Set up two-factor authentication" and links to the web.
+- **Turning it on or off:** an owner switches it for one business in web **Settings > Require two-factor authentication** (`PUT /api/settings`, `client_admin` or consultant).
 
-Reviewers can't easily use an authenticator app, so the approach that exists in the code is a **dedicated demo business with two-factor turned off**:
+Reviewers can't easily use an authenticator app, so use a **dedicated demo business that doesn't require two-factor**:
 
 1. On the web, as consultant, create a client business "ComplyTrack Demo". Make sure it's on an active plan or consultant-managed, so the trial lock doesn't block it.
 2. Add one or two sites and some sample records: a few checks, an open issue, an incident, PAT appliances, and a document or two.
 3. Create staff tasks assigned to the reviewer account, due daily, so "My tasks today" has items.
-4. In that business's Settings, switch off **Require two-factor authentication**.
+4. In that business's Settings, leave **Require two-factor authentication** off (the default).
 5. Create a **client_admin** user, for example `appreview@…`, belonging **only** to that business, with a strong password.
-   - It must not be a consultant linked to other businesses, or 2FA comes back.
+   - It must not be a consultant linked to other businesses that require 2FA, and must not turn on 2FA for its own account.
    - Choose client_admin so the reviewer sees the full app and the owner's deletion screen. Staff accounts can't see the business erasure flow.
 6. Give the reviewer the email and password in App Store Connect (App Review Information > Sign-in required) and in Play Console (App content > App access).
 
 Suggested note:
 
-> ComplyTrack is a business health and safety compliance tool. Accounts are created by the employer or their consultant on the web; the app has no sign-up. Use the demo account below, which belongs to a demo business with two-factor authentication turned off for review (real customer accounts must use an authenticator app). Profile > Delete my account shows the account deletion route: owners request erasure of the business's data; staff accounts are removed by their manager. Photos are only used as evidence attached to issue reports and check records. The app uses HTTPS only (no non-exempt encryption).
+> ComplyTrack is a business health and safety compliance tool. Accounts are created by the employer or their consultant on the web; the app has no sign-up. Use the demo account below, which belongs to a demo business that doesn't require two-factor authentication (businesses can require an authenticator app for all their users). Profile > Delete my account shows the account deletion route: owners request erasure of the business's data; staff accounts are removed by their manager. Photos are only used as evidence attached to issue reports and check records. The app uses HTTPS only (no non-exempt encryption).
 
-The demo business stores sample data only; don't put real customer data in it. Turn two-factor back on, or delete the account, if the app is ever removed.
+The demo business stores sample data only; don't put real customer data in it. Delete the account if the app is ever removed.
 
 ## 7. Age rating
 
@@ -269,7 +269,7 @@ App Store Connect needs 3 to 10 screenshots per size. iPad screenshots aren't ne
 - [ ] `npx expo-doctor` is clean. Offline, it can only fail the two checks that need exp.host / reactnative.directory.
 - [ ] `eas init` is done and `extra.eas.projectId` is committed. Push permission prompts appear on a real device.
 - [ ] The privacy policy page is updated (section 4) and `https://complytrack.alpsconsultancy.co.uk/privacy` and `/terms` load.
-- [ ] Demo review business and account are set up, with 2FA off for that business only (section 6).
+- [ ] Demo review business and account are set up, with 2FA not required for that business (section 6).
 - [ ] `ios.buildNumber` / `android.versionCode` are higher than any previous upload.
 - [ ] **iPhone smoke test:** work through `/mnt/project-files/mobile/iphone-smoke-test.md` on the **TestFlight** build. That checklist was written for Expo Go; for the TestFlight build, skip its "Start the app" section. Do the same checks on Android internal testing:
   - opens and signs in

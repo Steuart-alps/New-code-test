@@ -7,7 +7,7 @@ import { riddorDeadline, ukToday, type RiddorDeadlineState } from "./riddor";
 import { addCalendarDays, addCalendarMonths, siteScopeSql, type SiteAccessScope } from "./siteAccessScope";
 import { actionStateLabel, itemActionStates } from "./certificateOutcomes";
 import { SOUND_LEVEL_MIN_DB, soundLevelLowText } from "./fireSoundLevel";
-import { RETIRED_FIRE_CHECK_TYPES } from "./checkReminders";
+import { RETIRED_FIRE_CHECK_TYPES, SLEEPING_ACCOMMODATION_FIRE_CHECK_TYPES } from "./checkReminders";
 
 /**
  * Data for the one-click inspection pack (GET /reports/inspection-pack): a
@@ -128,7 +128,8 @@ const FIRE_TYPES: Record<string, { label: string; days: number }> = {
   emergency_lights: { label: "Monthly emergency lighting flick test", days: 30 },
   extinguishers: { label: "Weekly extinguisher visual check", days: 7 },
   fire_doors: { label: "Fire door check", days: 90 },
-  fire_drill: { label: "Fire drill (6-monthly, with night staff)", days: 180 },
+  fire_drill: { label: "Fire drill", days: 180 },
+  fire_drill_night: { label: "Fire drill - night staff", days: 180 },
   fire_walk: { label: "Fire walk — escape route sign-off", days: 7 },
   alarm_panel: { label: "Alarm panel check", days: 7 },
   emergency_lights_annual: { label: "Annual 3-hour emergency lighting discharge test", days: 365 },
@@ -323,15 +324,15 @@ async function fireSection(scope: SiteAccessScope, from: string, to: string, tod
   for (const siteId of siteIds) {
     const profile = profiles.find(row => Number(row.site_id) === siteId)?.profile ?? null;
     const frequencies = fireFrequencies(setting[0]?.value, profile);
-    // The escape route sign-off is only due at sites with sleeping
-    // accommodation (or, not yet answered, where fire walks were recorded),
+    // The escape route sign-off and the night staff drill are only due at
+    // sites with sleeping accommodation (or, not yet answered, where they were recorded),
     // as on FireTrack (lib/checkReminders.ts).
     const sleepingAnswer = sleeping.find(row => Number(row.id) === siteId)?.sleeping_accommodation;
     for (const key of Object.keys(FIRE_TYPES)) {
       const last = latest.find(row => Number(row.site_id) === siteId && row.check_type === key);
       // A retired check (now covered elsewhere) is never due.
       const retired = (RETIRED_FIRE_CHECK_TYPES as readonly string[]).includes(key);
-      const applies = !retired && (key !== "fire_walk" || sleepingAnswer === true || (sleepingAnswer == null && Boolean(last)));
+      const applies = !retired && (!SLEEPING_ACCOMMODATION_FIRE_CHECK_TYPES.includes(key) || sleepingAnswer === true || (sleepingAnswer == null && Boolean(last)));
       state.set(`${siteId}:${key}`, { lastDone: text(last?.last_done), frequency: applies ? frequencies[key] : null });
     }
   }

@@ -69,8 +69,8 @@ const SETTING_KEYS = [
   // otherwise new uploads stop there. Owners and consultants only.
   STORAGE_AUTO_TOP_UP_SETTING,
   ACCOUNT_TIMEZONE_SETTING,
-  // "false" lets login accounts in this business skip the authenticator app;
-  // absent or "true" keeps two-factor authentication mandatory.
+  // "true" makes every login account in this business enrol an authenticator
+  // app; absent or "false" leaves two-factor authentication optional per user.
   REQUIRE_TWO_FACTOR_SETTING,
   // JSON {managers, maintenance, staff}: who besides Owners sees the
   // dashboard's "Today by department" card (lib/todayByDepartment.ts).

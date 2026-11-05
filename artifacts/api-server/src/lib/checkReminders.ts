@@ -34,8 +34,20 @@ export const FIRE_CHECK_TYPES = [
   "alarm", "emergency_lights", "extinguishers",
   "fire_doors", "fire_drill", "fire_walk", "alarm_panel",
   "emergency_lights_annual", "alarm_service", "extinguisher_service",
+  "fire_drill_night",
 ] as const;
 export type FireCheckType = (typeof FIRE_CHECK_TYPES)[number];
+
+/** Fire drills: the everyday drill and the night staff drill. Both record the
+ *  time, the evacuation time, the staff present and the improvements needed. */
+export const FIRE_DRILL_TYPES: readonly string[] = ["fire_drill", "fire_drill_night"];
+
+/**
+ * Checks only due at sites with sleeping accommodation: the escape route
+ * sign-off and the night staff fire drill. A site not yet asked keeps one only
+ * if it has already been recorded there, so nothing new appears unasked.
+ */
+export const SLEEPING_ACCOMMODATION_FIRE_CHECK_TYPES: readonly string[] = ["fire_walk", "fire_drill_night"];
 
 /**
  * Check types FireTrack no longer records (Oct 2026), because another check
@@ -59,6 +71,7 @@ export const FIRE_FREQUENCY_DAYS: Record<FireCheckType, number> = {
   alarm: 7, emergency_lights: 30, extinguishers: 7,
   fire_doors: 90, fire_drill: 180, fire_walk: 7, alarm_panel: 7,
   emergency_lights_annual: 365, alarm_service: 180, extinguisher_service: 365,
+  fire_drill_night: 180,
 };
 
 /**
@@ -87,6 +100,7 @@ export const FIRE_LABELS: Record<string, string> = {
   extinguishers: "Fire extinguisher check",
   fire_doors: "Fire door inspection",
   fire_drill: "Fire drill",
+  fire_drill_night: "Fire drill - night staff",
   fire_walk: "Fire walk",
   alarm_panel: "Alarm panel check",
   emergency_lights_annual: "Annual 3-hour emergency lighting discharge test",
@@ -305,10 +319,10 @@ async function fireSiteStatusesFor(
     for (const checkType of ACTIVE_FIRE_CHECK_TYPES) {
       const own = unit.id == null ? undefined : latest.get(`${unit.id}:${checkType}`);
       const unassigned = latest.get(`none:${checkType}`);
-      // The escape route sign-off is only for sites with sleeping
-      // accommodation. A site not yet answered keeps it only if fire walks
-      // have been recorded for it, so nothing new appears unasked.
-      if (checkType === "fire_walk") {
+      // The escape route sign-off and the night staff drill are only for
+      // sites with sleeping accommodation. A site not yet answered keeps one
+      // only if it has been recorded for it, so nothing new appears unasked.
+      if (SLEEPING_ACCOMMODATION_FIRE_CHECK_TYPES.includes(checkType)) {
         const answer = unit.id == null ? null : sleeping.get(unit.id) ?? null;
         if (answer === false || (answer === null && !own && !unassigned)) continue;
       }

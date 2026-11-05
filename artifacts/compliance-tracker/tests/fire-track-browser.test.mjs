@@ -19,8 +19,10 @@ import { chromium } from "@playwright/test";
 //   - "Performed by" offers everyone with a login (not the roster, which can
 //     run to dozens), so a Manager can be chosen and roster staff typed in;
 //   - a drill cannot be saved until it gives the time of the drill, the time
-//     taken to evacuate, "Night staff included?" (Yes / No / N/A) and the
-//     improvements required; it sends the roster staff ticked as present;
+//     taken to evacuate and the improvements required, and no longer asks
+//     about night staff; it sends the roster staff ticked as present;
+//   - "Fire drill - night staff" is its own check, offered only once the site
+//     has sleeping accommodation;
 //   - history shows the call point and drill details, and a card lists roster
 //     staff not in a drill in the last 12 months;
 //   - managers add call points with a location under Template, Call points,
@@ -196,7 +198,7 @@ async function routeApi(route) {
       case "/api/fire-safety/drill-attendance": return json(route, {
         periodMonths: 12,
         staff: roster.map(person => {
-          const dates = checks.filter(c => c.checkType === "fire_drill" && c.staffPresent.some(p => p.staffRosterId === person.id)).map(c => c.checkDate).sort();
+          const dates = checks.filter(c => c.checkType.startsWith("fire_drill") && c.staffPresent.some(p => p.staffRosterId === person.id)).map(c => c.checkDate).sort();
           const lastDrillDate = dates.at(-1) ?? null;
           return { staffRosterId: person.id, name: person.name, siteId: person.site_id, siteName: person.site_name, lastDrillDate, due: !lastDrillDate || lastDrillDate <= localDate(-365) };
         }),
@@ -262,9 +264,9 @@ async function routeApi(route) {
       callPointId: body.checkType === "alarm" ? body.callPointId ?? null : null,
       callPoint: body.checkType === "alarm" ? point?.name ?? body.callPoint ?? null : null,
       nightStaff: body.checkType === "fire_drill" ? body.nightStaff ?? null : null,
-      drillTime: body.checkType === "fire_drill" ? body.drillTime ?? null : null,
-      evacuationSeconds: body.checkType === "fire_drill" ? body.evacuationSeconds ?? null : null,
-      staffPresent: body.checkType === "fire_drill"
+      drillTime: body.checkType.startsWith("fire_drill") ? body.drillTime ?? null : null,
+      evacuationSeconds: body.checkType.startsWith("fire_drill") ? body.evacuationSeconds ?? null : null,
+      staffPresent: body.checkType.startsWith("fire_drill")
         ? roster.filter(p => (body.staffPresentIds ?? []).includes(p.id)).map(p => ({ staffRosterId: p.id, name: p.name })) : [],
       soundLevelDb: body.checkType === "alarm" ? body.soundLevelDb ?? null : null,
       soundLevelMethod: body.checkType === "alarm" ? body.soundLevelMethod ?? null : null,
@@ -314,7 +316,7 @@ async function openRecordDialog(page, checkTypeLabel) {
   await dialog.getByText("Record Fire Safety Check").waitFor();
   if (checkTypeLabel) {
     await dialog.getByRole("combobox").first().click();
-    await page.getByRole("option", { name: checkTypeLabel }).click();
+    await page.getByRole("option", { name: checkTypeLabel, exact: true }).click();
   }
   return dialog;
 }
@@ -335,7 +337,8 @@ try {
   const cardText = await page.locator("body").innerText();
   assert.match(cardText, /Weekly fire alarm test\s+\S*\s*OK\s+Weekly/);
   assert.match(cardText, /Monthly emergency lighting flick test[\s\S]*?Monthly/);
-  assert.match(cardText, /Fire drill \(6-monthly, with night staff\)[\s\S]*?At least every 6 months/);
+  assert.match(cardText, /Fire drill\s[\s\S]*?At least every 6 months/);
+  assert.doesNotMatch(cardText, /with night staff/);
   // ── History shows call points and night staff ────────────────────────────
   assert.match(cardText, /Call point: CP1 – Reception/);
   assert.match(cardText, /Night staff included: No/);
@@ -394,9 +397,20 @@ try {
   assert.equal(await bedhead.getAttribute("data-state"), "checked", "a sleeping-area call point sets the bedhead limit");
   const measure = dialog.getByTestId("button-measure-sound");
   await measure.click();
-  await page.waitForFunction(() => /^\d+$/.test(document.querySelector('[data-testid="input-sound-level"]')?.value ?? ""), null, { timeout: 15_000 });
+  // It listens for 10 seconds, stops on its own and puts the average in the box.
+  const startedAt = Date.now();
+  await page.waitForFunction(() => /^\d+$/.test(document.querySelector('[data-testid="input-sound-level"]')?.value ?? ""), null, { timeout: 25_000 });
+  assert.ok(Date.now() - startedAt >= 9_000, "listens for about 10 seconds");
+  assert.match(await dialog.getByTestId("sound-level-measured").innerText(), /Average over 10 seconds put in the box/);
   assert.match(await dialog.getByTestId("select-sound-level-method").innerText(), /phone \(rough guide\)/);
   assert.match(await dialog.getByTestId("sound-level-field").innerText(), /isn't set up yet/);
+  // Stopping early keeps the average so far instead of throwing it away.
+  await dialog.getByTestId("input-sound-level").fill("");
+  await measure.click();
+  await page.waitForTimeout(2_500);
+  await dialog.getByTestId("button-stop-sound").click();
+  await page.waitForFunction(() => /^\d+$/.test(document.querySelector('[data-testid="input-sound-level"]')?.value ?? ""), null, { timeout: 5_000 });
+  assert.match(await dialog.getByTestId("sound-level-measured").innerText(), /Average over [23] seconds/);
   await dialog.getByTestId("input-sound-level").fill("70");
   await dialog.getByTestId("select-sound-level-method").click();
   await page.getByRole("option", { name: "From a sound meter" }).click();
@@ -469,8 +483,16 @@ try {
   await shot(page, "7-contractor-checks");
   console.log("ok - FireTrack shows its contractor services red, amber or green from their compliance checks, each opening the check");
 
-  // ── Drill: night staff answer required ───────────────────────────────────
-  dialog = await openRecordDialog(page, "Fire drill (6-monthly, with night staff)");
+  // ── Drill: plain "Fire drill"; the night staff drill needs sleeping accommodation ──
+  await page.getByRole("button", { name: "Record Check" }).click();
+  await page.getByRole("dialog").getByRole("combobox").first().click();
+  await page.getByRole("option", { name: "Fire drill", exact: true }).waitFor();
+  assert.equal(await page.getByRole("option", { name: "Fire drill - night staff" }).count(), 0,
+    "the night staff drill is not offered at a site without sleeping accommodation");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await page.getByRole("dialog").waitFor({ state: "hidden" });
+  dialog = await openRecordDialog(page, "Fire drill");
   const save = dialog.getByRole("button", { name: "Record Check" });
   assert.equal(await save.isDisabled(), true, "a drill cannot be saved without its details");
   await dialog.getByText("Give the time of the drill").waitFor();
@@ -480,18 +502,8 @@ try {
   await dialog.getByTestId("input-evacuation-seconds").fill("75");
   await dialog.getByText("Enter minutes, and seconds from 0 to 59.").waitFor();
   await dialog.getByTestId("input-evacuation-seconds").fill("35");
-  await dialog.getByText("Say whether night staff were included (Yes, No or N/A)").waitFor();
-  await dialog.getByText("Night staff included?").waitFor();
-  assert.deepEqual(
-    await dialog.getByRole("radiogroup", { name: "Night staff included" }).getByRole("radio").allInnerTexts(),
-    ["Yes", "No", "N/A"]);
-  await dialog.getByTestId("night-staff-no_night_staff").click();
-  await dialog.getByText("N/A: this site has no night staff.").waitFor();
-  await dialog.getByTestId("night-staff-not_included").click();
-  await dialog.getByText("Plan the next drill so night staff take part.").waitFor();
-  await shot(page, "4-drill-night-staff");
-  await dialog.getByTestId("night-staff-included").click();
   await dialog.getByText("Write the improvements required, or notes").waitFor();
+  assert.equal(await dialog.getByText("Night staff included?").count(), 0, "the everyday drill doesn't ask about night staff");
   assert.equal(await save.isDisabled(), true, "the improvements required / notes box is required on a drill");
   // The one site is chosen, so its staff and staff with no site are listed.
   const picker = dialog.getByTestId("drill-staff-picker");
@@ -507,13 +519,35 @@ try {
   await dialog.waitFor({ state: "hidden" });
   const sent = posts.at(-1).body;
   assert.equal(sent.checkType, "fire_drill");
-  assert.equal(sent.nightStaff, "included");
+  assert.equal(sent.nightStaff, undefined);
   assert.equal(sent.drillTime, "14:30");
   assert.equal(sent.evacuationSeconds, 155);
   assert.deepEqual(sent.staffPresentIds, [31, 32]);
   assert.equal(sent.notes, "Fire door on the first floor slow to close");
   await page.getByTestId("drill-attendance-card").getByText("1 of 3 staff has not taken part").waitFor();
-  console.log("ok - a drill records its time, evacuation time, night staff (Yes, No or N/A), staff present and the improvements required");
+  console.log("ok - a fire drill records its time, evacuation time, staff present and the improvements required");
+
+  // ── Once the site has sleeping accommodation, the night staff drill is offered ──
+  SITE.sleepingAccommodation = true;
+  SITE.nightPorter = false;
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByText("Monthly emergency lighting flick test").first().waitFor();
+  dialog = await openRecordDialog(page, "Fire drill - night staff");
+  await dialog.getByTestId("night-drill-guide").waitFor();
+  await dialog.getByTestId("input-drill-time").fill("02:30");
+  await dialog.getByTestId("input-evacuation-minutes").fill("3");
+  await dialog.getByTestId("input-evacuation-seconds").fill("10");
+  await dialog.getByTestId("drill-staff-33").click();
+  await dialog.getByLabel("Improvements required / notes").fill("Night porter used the PA well");
+  await shot(page, "4-night-staff-drill");
+  await dialog.getByRole("button", { name: "Record Check" }).click();
+  await dialog.waitFor({ state: "hidden" });
+  const sentNight = posts.at(-1).body;
+  assert.deepEqual([sentNight.checkType, sentNight.drillTime, sentNight.evacuationSeconds, sentNight.staffPresentIds],
+    ["fire_drill_night", "02:30", 190, [33]]);
+  delete SITE.sleepingAccommodation;
+  delete SITE.nightPorter;
+  console.log("ok - the night staff drill is its own record, offered at sites with sleeping accommodation");
 
   // ── Without a list, the call point is typed in and required ──────────────
   callPoints.splice(0, callPoints.length);

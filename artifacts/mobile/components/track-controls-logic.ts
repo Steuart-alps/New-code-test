@@ -50,6 +50,7 @@ export const FIRE_CHECK_LABELS: Record<string, string> = {
   fire_doors: 'Fire doors',
   fire_walk: 'Fire walk (escape routes)',
   fire_drill: 'Fire drill',
+  fire_drill_night: 'Fire drill - night staff',
 };
 
 export const WATER_CHECK_LABELS: Record<string, string> = {

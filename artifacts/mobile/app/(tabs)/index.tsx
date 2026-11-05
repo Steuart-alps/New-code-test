@@ -19,6 +19,7 @@ import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { IssueCard, type FixTrackIssue } from '@/components/IssueCard';
 import { TodayTasks } from '@/components/TodayTasks';
+import { TwoStepRecommendation } from '@/components/TwoStepRecommendation';
 import { localIsoDate } from '@/components/date-stepper-logic';
 
 interface Site {
@@ -291,6 +292,8 @@ export default function TodayScreen() {
           </ScrollView>
         )}
       </View>
+
+      <TwoStepRecommendation />
 
       <TodayTasks />
 
