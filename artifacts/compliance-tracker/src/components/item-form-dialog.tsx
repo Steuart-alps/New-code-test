@@ -21,6 +21,20 @@ import { ComplianceItem, useListCategories, useListSites, useListContractors } f
 
 const ALL_SITES = "__all__";
 
+/** A YYYY-MM-DD day plus whole months, kept to the month's last day (as the server counts). */
+function addMonthsToDay(day: string, months: number): string {
+  const [year, month, date] = day.split("-").map(Number);
+  const first = new Date(Date.UTC(year, month - 1 + months, 1));
+  const lastDay = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+  first.setUTCDate(Math.min(date, lastDay));
+  return first.toISOString().slice(0, 10);
+}
+
+/** 2027-11-05 -> 5 Nov 2027 */
+function ukDay(day: string): string {
+  return format(new Date(`${day}T12:00:00`), "d MMM yyyy");
+}
+
 const formSchema = z.object({
   title: z.string().min(1, "Title is required"),
   description: z.string().optional(),
@@ -70,6 +84,9 @@ export function ItemFormDialog({
   // like the "Mark done" dialog; the next due date is counted from it.
   const [completedDay, setCompletedDay] = useState(localToday());
   const [assignee, setAssignee] = useState<AssigneeValue>(emptyAssignee);
+  // A repeating check is due the interval after it was last done, so it
+  // asks when it was last done instead of a due date.
+  const [lastDone, setLastDone] = useState("");
   const form = useForm<FormInput, unknown, FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -104,6 +121,7 @@ export function ItemFormDialog({
       });
     }
     setAssignee(item ? { assigneeUserId: item.assigneeUserId ?? null, name: item.assignedTo ?? "" } : emptyAssignee);
+    setLastDone(item?.completedAt ? new Date(item.completedAt).toISOString().slice(0, 10) : "");
     setCompletedDay(localToday());
   }, [item, isOpen, form, defaultCategoryId, defaultSiteId]);
 
@@ -117,21 +135,50 @@ export function ItemFormDialog({
   const watchedFrequency = rawFrequency === "" || rawFrequency == null || !Number.isInteger(Number(rawFrequency)) || Number(rawFrequency) < 1
     ? null : Number(rawFrequency);
 
+  // A contractor check is the contractor's job, so it has no "Assigned to".
+  const hasContractor = !!form.watch("contractorId");
+
+  const initialLastDone = item?.completedAt ? new Date(item.completedAt).toISOString().slice(0, 10) : "";
+  const repeatChanged = !item || (item.frequencyMonths ?? null) !== watchedFrequency;
+  const lastDoneChanged = lastDone !== initialLastDone;
+  const lastDoneError = !watchedFrequency || completing || !lastDone ? null
+    : !/^\d{4}-\d{2}-\d{2}$/.test(lastDone) ? "Enter the date it was last done"
+    : lastDone > localToday() ? "The date last done cannot be in the future" : null;
+  // The next due date shown on the form: the interval after it was last done,
+  // else after today for a new check (or a changed interval with no date done),
+  // else the check keeps the due date it has.
+  const nextDueDay = !watchedFrequency || completing ? null
+    : lastDone && !lastDoneError && (lastDoneChanged || repeatChanged) ? addMonthsToDay(lastDone, watchedFrequency)
+    : !lastDone && repeatChanged ? addMonthsToDay(localToday(), watchedFrequency)
+    : item?.dueDate ? new Date(item.dueDate).toISOString().slice(0, 10) : null;
+
   const onSubmit = async (data: FormValues) => {
-    if (completedDayError) return;
+    if (completedDayError || lastDoneError) return;
     try {
       const isAllSites = data.siteId === ALL_SITES;
       const numericSiteId =
         data.siteId && data.siteId !== ALL_SITES ? parseInt(data.siteId, 10) : null;
 
+      const repeating = !!data.frequencyMonths;
+      const { dueDate: _typedDue, ...rest } = data;
+      // Repeating checks: the server counts the due date from the date last
+      // done; with none, from today. An unchanged check keeps its due date.
+      const dates = !repeating
+        ? { dueDate: data.dueDate ? new Date(data.dueDate).toISOString() : null }
+        : completing ? {}
+        : lastDone && (lastDoneChanged || repeatChanged) ? { lastDone }
+        : !lastDone && repeatChanged ? { dueDate: `${addMonthsToDay(localToday(), data.frequencyMonths!)}T00:00:00.000Z` }
+        : {};
       const basePayload = {
-        ...data,
+        ...rest,
         categoryId: data.categoryId || null,
         contractorId: data.contractorId || null,
         leadTimeDays: data.leadTimeDays || null,
         frequencyMonths: data.frequencyMonths ?? null,
-        ...assigneeFields(assignee, "assignedTo"),
-        dueDate: data.dueDate ? new Date(data.dueDate).toISOString() : null,
+        // With a contractor the person assigned is left as it was (existing
+        // checks keep theirs); without one the form sets it.
+        ...(data.contractorId ? {} : assigneeFields(assignee, "assignedTo")),
+        ...dates,
       };
 
       if (item) {
@@ -149,10 +196,12 @@ export function ItemFormDialog({
 
         if (isAllSites) {
           const otherSites = sites.filter((s) => s.id !== item.siteId);
+          // Copies of an unchanged repeating check start with its due date.
+          const copyDue = "lastDone" in dates || "dueDate" in dates || !nextDueDay ? {} : { dueDate: `${nextDueDay}T00:00:00.000Z` };
           for (const s of otherSites) {
             // Copies start unassigned: the person picked may not see every site.
             await createItem.mutateAsync({
-              data: { ...basePayload, assigneeUserId: null, assignedTo: null, siteId: s.id } as any,
+              data: { ...basePayload, ...copyDue, assigneeUserId: null, assignedTo: null, siteId: s.id } as any,
             });
           }
         }
@@ -300,28 +349,20 @@ export function ItemFormDialog({
               </Select>
             </div>
 
-            <div className="space-y-1">
-              <Label htmlFor="item-assignee" className="text-xs font-medium">Assigned to</Label>
-              <AssigneeField
-                id="item-assignee"
-                siteId={(() => {
-                  const site = form.watch("siteId");
-                  return site && site !== ALL_SITES ? parseInt(site, 10) : null;
-                })()}
-                value={assignee}
-                onChange={setAssignee}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-xs font-medium">Due Date</Label>
-              <Input type="datetime-local" id="dueDate" {...form.register("dueDate")} className="bg-background h-9 w-full" />
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-xs font-medium">Alert Lead Time (Days)</Label>
-              <Input type="number" {...form.register("leadTimeDays")} className="bg-background h-9" placeholder="7" />
-            </div>
+            {!hasContractor && (
+              <div className="space-y-1">
+                <Label htmlFor="item-assignee" className="text-xs font-medium">Assigned to</Label>
+                <AssigneeField
+                  id="item-assignee"
+                  siteId={(() => {
+                    const site = form.watch("siteId");
+                    return site && site !== ALL_SITES ? parseInt(site, 10) : null;
+                  })()}
+                  value={assignee}
+                  onChange={setAssignee}
+                />
+              </div>
+            )}
 
             <div className="col-span-2 space-y-1">
               <Label htmlFor="frequencyMonths" className="text-xs font-medium">Repeat every (months)</Label>
@@ -344,6 +385,34 @@ export function ItemFormDialog({
                     : "Leave blank for a one-off check. Set the interval your contractor, competent person or guidance recommends for your premises."}
                 </p>
               )}
+            </div>
+
+            {watchedFrequency ? (
+              completing ? null : (
+                <div className="space-y-1">
+                  <Label htmlFor="lastDone" className="text-xs font-medium">Last done</Label>
+                  <Input id="lastDone" type="date" value={lastDone} max={localToday()}
+                    onChange={(e) => setLastDone(e.target.value)} className="bg-background h-9 w-full" />
+                  {lastDoneError ? (
+                    <p className="text-xs text-destructive">{lastDoneError}</p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground" data-testid="item-next-due">
+                      {nextDueDay ? `Next due ${ukDay(nextDueDay)}, worked out from Repeat.` : "Next due is worked out from Repeat."}
+                      {!lastDone && !item ? " Leave blank to count from today." : ""}
+                    </p>
+                  )}
+                </div>
+              )
+            ) : (
+              <div className="space-y-1">
+                <Label htmlFor="dueDate" className="text-xs font-medium">Due Date</Label>
+                <Input type="datetime-local" id="dueDate" {...form.register("dueDate")} className="bg-background h-9 w-full" />
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <Label className="text-xs font-medium">Alert Lead Time (Days)</Label>
+              <Input type="number" {...form.register("leadTimeDays")} className="bg-background h-9" placeholder="7" />
             </div>
 
             <div className="col-span-2 space-y-1">

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test:check-form-dates-browser": "node tests/check-form-dates-browser.test.mjs",
     "dev": "node scripts/generate-seo.mjs && vite --config vite.config.ts --host 0.0.0.0",
     "build": "node scripts/generate-seo.mjs && vite build --config vite.config.ts",
     "generate-seo": "node scripts/generate-seo.mjs",

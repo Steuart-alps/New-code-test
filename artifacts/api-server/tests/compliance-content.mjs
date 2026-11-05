@@ -108,6 +108,27 @@ async function recurrence(owner) {
       && isoDay(withInterval.data?.dueDate) === isoDay(addMonthsUtc(new Date(oneOffDone.data?.completedAt), 6)),
     JSON.stringify(withInterval.data));
 
+  // The add/edit form asks when a repeating check was last done, not for a due date.
+  const lastDone = daysAgo(40);
+  const fromLastDone = await owner("POST", "/compliance-items", { title: "EICR from last done", frequencyMonths: 12, lastDone, dueDate: pastDue });
+  check("last done: a new repeating check is due the interval after it was last done",
+    fromLastDone.status === 201 && fromLastDone.data?.status === "pending"
+      && isoDay(fromLastDone.data?.completedAt) === lastDone
+      && isoDay(fromLastDone.data?.dueDate) === isoDay(addMonthsUtc(new Date(`${lastDone}T00:00:00Z`), 12)),
+    JSON.stringify(fromLastDone.data));
+  const laterDone = daysAgo(5);
+  const changedLastDone = await owner("PUT", `/compliance-items/${fromLastDone.data?.id}`, { lastDone: laterDone, frequencyMonths: 6 });
+  check("last done: changing the date last done and the interval moves the due date",
+    changedLastDone.status === 200 && isoDay(changedLastDone.data?.completedAt) === laterDone
+      && isoDay(changedLastDone.data?.dueDate) === isoDay(addMonthsUtc(new Date(`${laterDone}T00:00:00Z`), 6)),
+    JSON.stringify(changedLastDone.data));
+  check("last done: a future date is rejected",
+    (await owner("PUT", `/compliance-items/${fromLastDone.data?.id}`, { lastDone: plusDays(daysAgo(0), 3) })).status === 400);
+  const oneOffLastDone = await owner("POST", "/compliance-items", { title: "One-off with last done", lastDone, dueDate: pastDue });
+  check("last done: ignored on a one-off check",
+    oneOffLastDone.status === 201 && oneOffLastDone.data?.completedAt == null && isoDay(oneOffLastDone.data?.dueDate) === isoDay(pastDue),
+    JSON.stringify(oneOffLastDone.data));
+
   check("recurrence: fractional interval rejected",
     (await owner("POST", "/compliance-items", { title: "Bad interval", frequencyMonths: 1.5 })).status === 400);
   check("recurrence: zero interval rejected",

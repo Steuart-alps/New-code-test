@@ -9791,6 +9791,11 @@ components:
           minimum: 1
           maximum: 120
           description: Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
+        lastDone:
+          type: string
+          nullable: true
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: Date a repeating check was last done (YYYY-MM-DD), not in the future. With a repeat interval it is recorded as the last completion and the due date becomes that date plus the interval, overriding dueDate. Ignored without an interval or when the check is being completed.
         notes:
           type: string
           nullable: true
@@ -9840,6 +9845,11 @@ components:
           minimum: 1
           maximum: 120
           description: Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
+        lastDone:
+          type: string
+          nullable: true
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: Date a repeating check was last done (YYYY-MM-DD), not in the future. With a repeat interval it is recorded as the last completion and the due date becomes that date plus the interval, overriding dueDate. Ignored without an interval or when the check is being completed.
         notes:
           type: string
           nullable: true

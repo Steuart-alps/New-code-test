@@ -2213,6 +2213,7 @@ export const createComplianceItemBodyStatusDefault = `pending`;
 export const createComplianceItemBodyPriorityDefault = `medium`;
 export const createComplianceItemBodyFrequencyMonthsMax = 120;
 
+export const createComplianceItemBodyLastDoneRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
 
 
 export const CreateComplianceItemBody = zod.object({
@@ -2228,6 +2229,7 @@ export const CreateComplianceItemBody = zod.object({
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(createComplianceItemBodyFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
+  "lastDone": zod.string().regex(createComplianceItemBodyLastDoneRegExp).nullish().describe('Date a repeating check was last done (YYYY-MM-DD), not in the future. With a repeat interval it is recorded as the last completion and the due date becomes that date plus the interval, overriding dueDate. Ignored without an interval or when the check is being completed.'),
   "notes": zod.string().nullish()
 })
 
@@ -2319,6 +2321,7 @@ export const UpdateComplianceItemParams = zod.object({
 
 export const updateComplianceItemBodyFrequencyMonthsMax = 120;
 
+export const updateComplianceItemBodyLastDoneRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
 
 
 export const UpdateComplianceItemBody = zod.object({
@@ -2334,6 +2337,7 @@ export const UpdateComplianceItemBody = zod.object({
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(updateComplianceItemBodyFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
+  "lastDone": zod.string().regex(updateComplianceItemBodyLastDoneRegExp).nullish().describe('Date a repeating check was last done (YYYY-MM-DD), not in the future. With a repeat interval it is recorded as the last completion and the due date becomes that date plus the interval, overriding dueDate. Ignored without an interval or when the check is being completed.'),
   "notes": zod.string().nullish()
 })
 
