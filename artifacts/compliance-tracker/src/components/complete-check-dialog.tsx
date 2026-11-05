@@ -27,6 +27,28 @@ function addMonthsToDay(day: string, months: number): string {
  * annual emergency lighting test, say) instead of by a contractor: their name
  * is kept with the completion and no contractor certificate is chased for it.
  */
+/** What the dialog asks for a part check (lib/equipmentParts.ts on the server). */
+function partWording(equipmentPart: string | null | undefined) {
+  switch (equipmentPart) {
+    case "ppe_examination":
+      return { doneLabel: "Date it was examined", nextLabel: "Next thorough examination due", order: "The next examination must be after the date it was examined", note: "the date the competent person gave for the next examination" };
+    case "rpe_filters":
+      return { doneLabel: "Date the new filters were fitted", nextLabel: "Replace-by date of the new filters", order: "The new filters must expire after the date they were fitted", note: "the date on the new filters" };
+    case "ppe_replace_by":
+      return { doneLabel: "Date it was replaced", nextLabel: "Replace-by date of the new one", order: "The new one must expire after the date it was replaced", note: "the date printed on the new one" };
+    default: {
+      const word = equipmentPart === "defib_battery" ? "battery" : equipmentPart === "defib_child_pads" ? "child pads" : "pads";
+      const battery = word === "battery";
+      return {
+        doneLabel: `Date the new ${word} ${battery ? "was" : "were"} fitted`,
+        nextLabel: `Expiry date of the new ${word}`,
+        order: `The new ${word} must expire after the date ${battery ? "it was" : "they were"} fitted`,
+        note: `the date printed on the new ${word}`,
+      };
+    }
+  }
+}
+
 export function CompleteCheckDialog({
   item,
   onClose,
@@ -44,8 +66,7 @@ export function CompleteCheckDialog({
   // A replaced part (a defibrillator's pads or battery) is next due on the new part's expiry date.
   const [nextExpiry, setNextExpiry] = useState("");
   const isPart = !!item?.equipmentPart;
-  const partWord = item?.equipmentPart === "defib_battery" ? "battery" : item?.equipmentPart === "defib_child_pads" ? "child pads" : "pads";
-  const wasWere = partWord === "battery" ? "was" : "were";
+  const part = partWording(item?.equipmentPart);
   const today = localToday();
 
   useEffect(() => {
@@ -61,8 +82,8 @@ export function CompleteCheckDialog({
     : date > today ? "The date done cannot be in the future"
     : date < "2000-01-01" ? "Enter a date after 2000"
     : inHouse && !competentPerson.trim() ? "Enter the name of the competent person who did it"
-    : isPart && !/^\d{4}-\d{2}-\d{2}$/.test(nextExpiry) ? `Enter the expiry date of the new ${partWord}`
-    : isPart && nextExpiry <= date ? `The new ${partWord} must expire after the date ${partWord === "battery" ? "it was" : "they were"} fitted` : null;
+    : isPart && !/^\d{4}-\d{2}-\d{2}$/.test(nextExpiry) ? `Enter the ${part.nextLabel.toLowerCase()}`
+    : isPart && nextExpiry <= date ? part.order : null;
 
   const submit = async (thenCertificate: boolean) => {
     if (!item || invalid) return;
@@ -90,18 +111,18 @@ export function CompleteCheckDialog({
           <DialogDescription>{item?.title}</DialogDescription>
         </DialogHeader>
         <div className="space-y-2 py-2">
-          <Label htmlFor="completed-at">{isPart ? `Date the new ${partWord} ${wasWere} fitted` : "Date the check was done"}</Label>
+          <Label htmlFor="completed-at">{isPart ? part.doneLabel : "Date the check was done"}</Label>
           <Input id="completed-at" type="date" value={date} max={today} onChange={(e) => setDate(e.target.value)} />
           {isPart && (
             <>
-              <Label htmlFor="next-expiry">Expiry date of the new {partWord}</Label>
+              <Label htmlFor="next-expiry">{part.nextLabel}</Label>
               <Input id="next-expiry" type="date" value={nextExpiry} min={date} onChange={(e) => setNextExpiry(e.target.value)} />
             </>
           )}
           {invalid ? (
             <p className="text-xs text-destructive">{invalid}</p>
           ) : isPart ? (
-            <p className="text-xs text-muted-foreground">Next due {formatDay(nextExpiry)}, the date printed on the new {partWord}.</p>
+            <p className="text-xs text-muted-foreground">Next due {formatDay(nextExpiry)}, {part.note}.</p>
           ) : item?.frequencyMonths ? (
             <p className="text-xs text-muted-foreground">
               Next due {formatDay(addMonthsToDay(date, item.frequencyMonths))} (every {item.frequencyMonths} month{item.frequencyMonths === 1 ? "" : "s"} from the date done).

@@ -24,6 +24,9 @@ export const EQUIPMENT_TYPES = [
   "air_conditioning",
   "fire_extinguisher",
   "defibrillator",
+  "fall_arrest",
+  "hard_hat",
+  "respirator",
   "ladder",
   "other",
 ] as const;
@@ -32,17 +35,26 @@ export type EquipmentType = (typeof EQUIPMENT_TYPES)[number];
 
 /**
  * Parts of an item that expire on a printed date and must be replaced, such
- * as a defibrillator's pads and battery. Each one with a date is kept as a
+ * as a defibrillator's pads and battery or a harness's replace-by date, and
+ * PPE's next thorough examination. Each one with a date is kept as a
  * Compliance Check (compliance_items.equipment_part) due on that date, so it
  * shows on the dashboard and its reminders go to the person responsible.
  */
-export const EQUIPMENT_PARTS = ["defib_pads", "defib_battery", "defib_child_pads"] as const;
+export const EQUIPMENT_PARTS = [
+  "defib_pads", "defib_battery", "defib_child_pads",
+  "ppe_examination", "rpe_filters", "ppe_replace_by",
+] as const;
 
 export type EquipmentPart = (typeof EQUIPMENT_PARTS)[number];
 
 /** The parts each type of item has, in the order they are shown. */
 export const EQUIPMENT_TYPE_PARTS: Partial<Record<EquipmentType, readonly EquipmentPart[]>> = {
   defibrillator: ["defib_pads", "defib_battery", "defib_child_pads"],
+  // PPE: harnesses and lanyards are thoroughly examined at least every six
+  // months (LOLER reg 9, Work at Height Regs) and retired on the maker's date.
+  fall_arrest: ["ppe_examination", "ppe_replace_by"],
+  hard_hat: ["ppe_replace_by"],
+  respirator: ["rpe_filters", "ppe_examination", "ppe_replace_by"],
 };
 
 export const equipmentItemsTable = pgTable("equipment_items", {

@@ -34,6 +34,21 @@ export const EQUIPMENT_PART_INFO: Record<EquipmentPart, { label: string; title: 
     title: "Replace defibrillator child pads",
     description: "Fit new child (paediatric) pads, or a new child key or cartridge, before the expiry date printed on the packet. When you mark this done, enter the expiry date of the new ones.",
   },
+  ppe_examination: {
+    label: "Thorough examination",
+    title: "PPE thorough examination",
+    description: "A competent person thoroughly examines this PPE and records the result. Harnesses, lanyards and other fall-arrest kit need one at least every six months (LOLER 1998 reg 9, Work at Height Regulations 2005); reusable respirators need one at the intervals the COSHH or maker's guidance sets. Take it out of use if it fails. When you mark this done, enter the date the next examination is due.",
+  },
+  rpe_filters: {
+    label: "Filters",
+    title: "Replace respirator filters",
+    description: "Fit new filters or cartridges before the replace-by date (the date on the pack, or sooner if breathing gets harder or the wearer can smell or taste the substance). When you mark this done, enter the date the new filters must be replaced by.",
+  },
+  ppe_replace_by: {
+    label: "Replace by",
+    title: "Replace PPE (end of life)",
+    description: "Take this PPE out of use and replace it by the maker's replace-by or end-of-life date (printed inside a hard hat, or on a harness or lanyard label), or straight away if it is damaged or has arrested a fall. When you mark this done, enter the replace-by date of the new one.",
+  },
 };
 
 export function partsForType(type: string): readonly EquipmentPart[] {

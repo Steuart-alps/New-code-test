@@ -180,6 +180,9 @@ export const EQUIPMENT_TYPE_LABELS: Record<EquipmentType, string> = {
   air_conditioning: "Air conditioning",
   fire_extinguisher: "Fire extinguisher",
   defibrillator: "Defibrillator (AED)",
+  fall_arrest: "Harness, lanyard or fall-arrest kit",
+  hard_hat: "Hard hat or safety helmet",
+  respirator: "Respirator (RPE)",
   ladder: "Ladder or step",
   other: "Other equipment",
 };

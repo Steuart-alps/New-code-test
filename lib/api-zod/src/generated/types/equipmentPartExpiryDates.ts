@@ -7,10 +7,13 @@
  */
 
 /**
- * Expiry dates (YYYY-MM-DD) of a defibrillator's parts; null clears one, a missing one is left as it is.
+ * Dates (YYYY-MM-DD) of the item's parts (a defibrillator's pads and battery; PPE's next thorough examination, filters and replace-by date); null clears one, a missing one is left as it is.
  */
 export interface EquipmentPartExpiryDates {
   defib_pads?: string | null;
   defib_battery?: string | null;
   defib_child_pads?: string | null;
+  ppe_examination?: string | null;
+  rpe_filters?: string | null;
+  ppe_replace_by?: string | null;
 }

@@ -110,6 +110,41 @@ try {
   const scan = ok(await staff.request('GET', `/equipment-labels/scan/${code}`));
   assert.ok(scan.statuses.some(s => s.label === 'Replace defibrillator pads — Bar AED'), JSON.stringify(scan.statuses));
   console.log('ok - scanning the defibrillator label shows its pads and battery');
+
+  // PPE: a harness's next thorough examination and replace-by date, a hard
+  // hat's replace-by date, a respirator's filters. Same part checks.
+  const examDue = isoDay(10);
+  const harness = ok(await owner.request('POST', '/equipment', {
+    name: 'Harness 3', type: 'fall_arrest', siteId: site.id,
+    partExpiryDates: { ppe_examination: examDue, ppe_replace_by: isoDay(1500) },
+    partsAssigneeUserId: managerPerson.id,
+  }), 201);
+  assert.equal(harness.typeLabel, 'Harness, lanyard or fall-arrest kit');
+  assert.deepEqual(harness.parts.map(p => [p.part, p.expiryDate]), [['ppe_examination', examDue], ['ppe_replace_by', isoDay(1500)]]);
+  const exam = harness.parts.find(p => p.part === 'ppe_examination');
+  const examCheck = ok(await owner.request('GET', `/compliance-items/${exam.checkId}`));
+  assert.equal(examCheck.title, 'PPE thorough examination — Harness 3');
+  assert.equal(String(examCheck.dueDate).slice(0, 10), examDue);
+  assert.equal(examCheck.assigneeUserId, managerPerson.id);
+  const examined = ok(await staff.request('PATCH', `/compliance-items/${exam.checkId}/status`, {
+    status: 'completed', completedAt: isoDay(), nextDueDate: isoDay(182), completedInHouseBy: 'Sam Patel',
+  }));
+  assert.equal(String(examined.dueDate).slice(0, 10), isoDay(182));
+
+  const hat = ok(await owner.request('POST', '/equipment', {
+    name: 'Hard hats (grounds team)', type: 'hard_hat', siteId: site.id, partExpiryDates: { ppe_replace_by: isoDay(700) },
+  }), 201);
+  assert.deepEqual(hat.parts.map(p => p.part), ['ppe_replace_by']);
+  // A part the type does not have is ignored (a hard hat has no filters).
+  const hatAgain = ok(await owner.request('PUT', `/equipment/${hat.id}`, { partExpiryDates: { rpe_filters: isoDay(30) } }));
+  assert.deepEqual(hatAgain.parts.map(p => p.part), ['ppe_replace_by']);
+
+  const mask = ok(await owner.request('POST', '/equipment', {
+    name: 'Spray mask', type: 'respirator', siteId: site.id,
+    partExpiryDates: { rpe_filters: isoDay(60), ppe_examination: null, ppe_replace_by: null },
+  }), 201);
+  assert.deepEqual(mask.parts.map(p => p.part), ['rpe_filters']);
+  console.log('ok - harness, hard hat and respirator dates become Compliance Checks too');
 } finally {
   await pool.end();
 }

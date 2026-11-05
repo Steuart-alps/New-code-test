@@ -48,11 +48,14 @@ const itemBody = z.object({
   active: z.boolean().optional(),
   /** Compliance Checks for this item (gas safety, LOLER, service). */
   complianceItemIds: z.array(z.number().int().positive()).max(50).optional(),
-  /** Expiry dates of the parts a defibrillator has (pads, battery, child pads). */
+  /** Dates of the parts the item's type has (a defibrillator's pads, PPE's next examination). */
   partExpiryDates: z.object({
     defib_pads: expiryDay,
     defib_battery: expiryDay,
     defib_child_pads: expiryDay,
+    ppe_examination: expiryDay,
+    rpe_filters: expiryDay,
+    ppe_replace_by: expiryDay,
   }).strict().optional(),
   /** The person who replaces the parts (their reminders reach them). */
   partsAssigneeUserId: z.number().int().positive().nullable().optional(),
