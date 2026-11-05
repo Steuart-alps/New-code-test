@@ -194,7 +194,7 @@ function PreStartList({ date, siteId, isToday, onCheck }: {
         </div>
         {data && (
           <span className="text-xs text-muted-foreground">
-            {data.checked}/{data.total} checked · {data.notInUse} not in use
+            {data.checked}/{data.total} checked · {data.total - data.notInUse} in use
             {data.todo > 0 && <span className="font-medium text-amber-700"> · {data.todo} to do</span>}
           </span>
         )}

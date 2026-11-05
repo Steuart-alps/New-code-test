@@ -13,10 +13,10 @@ import {
   UpdateComplianceItemStatusParams,
   ListComplianceItemsQueryParams,
 } from "@workspace/api-zod";
-import { requireAuth, requireClientAdmin, getClientId, canAccessClient, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, requireRole, getClientId, canAccessClient, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { filterName } from "../lib/contentFilter";
 import { appendAuditEvent } from "../lib/audit";
-import { completionFields, completionDateFromDay } from "../lib/complianceCompletion";
+import { addMonthsUtc, completionFields, completionDateFromDay } from "../lib/complianceCompletion";
 import { NO_ACTION, itemActionState, itemActionStates, type ItemActionState } from "../lib/certificateOutcomes";
 import { getAccountToday } from "../lib/accountClock";
 import { recordTrackCheckFromTask } from "../lib/trackTaskLink";
@@ -259,7 +259,24 @@ router.post("/compliance-items", requireAuth, denyViewers, requireClientAdmin, a
   }
 
   // A check created as already completed is a completion like any other.
-  const createCompletion = body.status === "completed" ? completionFields(body.frequencyMonths, new Date()).fields : {};
+  // Otherwise a repeating check given the date it was last done is due that
+  // date plus the interval (as setup stores "last done"), instead of a typed due date.
+  const { lastDone, ...fields } = body;
+  const lastDoneDay = CompletedDay.safeParse(lastDone);
+  if (!lastDoneDay.success) {
+    res.status(400).json({ error: "lastDone must be a date (YYYY-MM-DD)" });
+    return;
+  }
+  let createCompletion: Record<string, unknown> = {};
+  if (fields.status === "completed") createCompletion = completionFields(fields.frequencyMonths, new Date()).fields;
+  else if (lastDoneDay.data && fields.frequencyMonths) {
+    if (lastDoneDay.data > await getAccountToday(clientId)) {
+      res.status(400).json({ error: "The date last done cannot be in the future", code: "CHECK_DATE_IN_FUTURE" });
+      return;
+    }
+    const completedAt = completionDateFromDay(lastDoneDay.data);
+    createCompletion = { completedAt, dueDate: addMonthsUtc(completedAt, fields.frequencyMonths) };
+  }
 
   // "All Sites" mode: create one independent compliance check per site so each
   // can have its own certificate, due date, contractor etc.
@@ -269,7 +286,7 @@ router.post("/compliance-items", requireAuth, denyViewers, requireClientAdmin, a
       res.status(400).json({ error: "No sites exist yet — add a site before using 'All Sites'." });
       return;
     }
-    const { siteId: _ignored, ...rest } = body;
+    const { siteId: _ignored, ...rest } = fields;
     const inserted = await db
       .insert(complianceItemsTable)
       .values(sites.map(s => ({ ...rest, ...createCompletion, siteId: s.id, clientId, updatedAt: new Date() })))
@@ -288,7 +305,7 @@ router.post("/compliance-items", requireAuth, denyViewers, requireClientAdmin, a
 
   const [item] = await db
     .insert(complianceItemsTable)
-    .values({ ...body, ...createCompletion, clientId, updatedAt: new Date() })
+    .values({ ...fields, ...createCompletion, clientId, updatedAt: new Date() })
     .returning();
 
   const joined = await fetchJoinedItem(item.id);
@@ -329,7 +346,11 @@ router.get("/compliance-items/:id", requireAuth, async (req, res) => {
     await itemActionState(joined.item.clientId, joined.item.id)));
 });
 
-router.put("/compliance-items/:id", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+// Owners, consultants and Managers (including Maintenance managers) can change a
+// check; a Manager only on the sites their departments can see.
+const requireCheckEditor = requireRole("consultant", "client_admin", "client_manager");
+
+router.put("/compliance-items/:id", requireAuth, denyViewers, requireCheckEditor, async (req, res) => {
   const { id } = UpdateComplianceItemParams.parse({ id: Number(req.params.id) });
   // Read the date done before the generic date coercion turns it into a Date.
   const completedDay = CompletedDay.safeParse(req.body?.completedAt);
@@ -365,10 +386,26 @@ router.put("/compliance-items/:id", requireAuth, denyViewers, requireClientAdmin
     return;
   }
 
+  const deptId = getActiveDepartmentId(req);
+  if (deptId !== null && existing[0].siteId != null) {
+    const [itemSite] = await db
+      .select({ id: sitesTable.id, departmentId: sitesTable.departmentId })
+      .from(sitesTable)
+      .where(eq(sitesTable.id, existing[0].siteId))
+      .limit(1);
+    if (itemSite && !(await siteVisibleToDepartment(itemSite, deptId))) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+  }
   if (body.siteId != null) {
     const [s] = await db.select().from(sitesTable).where(eq(sitesTable.id, body.siteId));
     if (!s || s.clientId !== existing[0].clientId) {
       res.status(400).json({ error: "Invalid siteId" });
+      return;
+    }
+    if (!(await siteVisibleToDepartment({ id: s.id, departmentId: s.departmentId }, deptId))) {
+      res.status(403).json({ error: "You can only move a check to one of your own sites" });
       return;
     }
   }
@@ -387,7 +424,13 @@ router.put("/compliance-items/:id", requireAuth, denyViewers, requireClientAdmin
     }
   }
 
-  const updateData: Record<string, unknown> = { ...body, updatedAt: new Date() };
+  const { lastDone, ...fields } = body;
+  const lastDoneDay = CompletedDay.safeParse(lastDone);
+  if (!lastDoneDay.success) {
+    res.status(400).json({ error: "lastDone must be a date (YYYY-MM-DD)" });
+    return;
+  }
+  const updateData: Record<string, unknown> = { ...fields, updatedAt: new Date() };
   if ("assigneeUserId" in body || "assignedTo" in body || "siteId" in body) {
     const assignee = await resolveAssigneeChange(existing[0].clientId,
       "siteId" in body ? body.siteId ?? null : existing[0].siteId, {
@@ -424,6 +467,21 @@ router.put("/compliance-items/:id", requireAuth, denyViewers, requireClientAdmin
     if (completion.recurring) recurrence = { completedAt, nextDueDate: completion.fields.dueDate };
     // A new completion from the edit form says nothing about who did it.
     if (String(completion.fields.completedAt) !== String(existing[0].completedAt)) updateData.completedInHouseBy = null;
+  }
+  // A repeating check given the date it was last done: that is its latest
+  // completion, and it falls due that date plus the interval.
+  else if (lastDoneDay.data && (fields.frequencyMonths !== undefined ? fields.frequencyMonths : existing[0].frequencyMonths)) {
+    const today = await getAccountToday(existing[0].clientId);
+    if (lastDoneDay.data > today) {
+      res.status(400).json({ error: "The date last done cannot be in the future", code: "CHECK_DATE_IN_FUTURE", today });
+      return;
+    }
+    const frequency = (fields.frequencyMonths !== undefined ? fields.frequencyMonths : existing[0].frequencyMonths)!;
+    const completedAt = completionDateFromDay(lastDoneDay.data);
+    updateData.completedAt = completedAt;
+    updateData.dueDate = addMonthsUtc(completedAt, frequency);
+    if (existing[0].status === "completed") updateData.status = "pending";
+    if (String(completedAt) !== String(existing[0].completedAt)) updateData.completedInHouseBy = null;
   }
   // The edit form always re-sends the status. Only reopening a completed
   // one-off check clears its completion; a repeating check keeps its "last

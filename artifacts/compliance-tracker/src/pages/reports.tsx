@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -341,6 +342,16 @@ function ComplianceTab({
   const [loading,      setLoading]      = useState(false);
   const [error,        setError]        = useState<string | null>(null);
   const [data,         setData]         = useState<ReportData | null>(null);
+  const R_TH = "pb-2 pr-4 font-medium";
+  const dailyTable = useListTable(data?.dailyChecklists, [
+    ...(data?.departmentName ? [{ key: "department", label: "Department", className: R_TH, value: (r: DailyRow) => r.departmentName, sort: "text", filter: "choice" } satisfies ListColumn<DailyRow>] : []),
+    { key: "site", label: "Site", className: R_TH, value: r => r.siteName, sort: "text", filter: "choice" },
+    { key: "type", label: "Type", className: R_TH, value: r => r.type.toUpperCase(), sort: "text", filter: "choice" },
+    { key: "expected", label: "Expected", className: `${R_TH} text-right`, value: r => r.expected, sort: "number" },
+    { key: "submitted", label: "Submitted", className: `${R_TH} text-right`, value: r => r.submitted, sort: "number" },
+    { key: "missed", label: "Missed", className: `${R_TH} text-right`, value: r => r.missed, sort: ["Fewest first", "Most first"] },
+    { key: "pct", label: "Compliance", className: "pb-2 font-medium text-right", value: r => r.pct, sort: "number" },
+  ] satisfies ListColumn<DailyRow>[]);
 
   const runReport = useCallback(async () => {
     setError(null); setLoading(true);
@@ -462,20 +473,12 @@ function ComplianceTab({
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b text-left text-muted-foreground">
-                      {data.departmentName && <th className="pb-2 pr-4 font-medium">Department</th>}
-                      <th className="pb-2 pr-4 font-medium">Site</th>
-                      <th className="pb-2 pr-4 font-medium">Type</th>
-                      <th className="pb-2 pr-4 font-medium text-right">Expected</th>
-                      <th className="pb-2 pr-4 font-medium text-right">Submitted</th>
-                      <th className="pb-2 pr-4 font-medium text-right">Missed</th>
-                      <th className="pb-2 font-medium text-right">Compliance</th>
-                    </tr>
+                    <tr className="border-b text-left text-muted-foreground"><ListTableHeadings table={dailyTable} /></tr>
                   </thead>
                   <tbody>
                     {data.dailyChecklists.length === 0 ? (
                       <tr><td colSpan={data.departmentName ? 7 : 6} className="py-6 text-center text-muted-foreground">No daily checklist data for this period</td></tr>
-                    ) : data.dailyChecklists.map((r, i) => (
+                    ) : <><ListTableNoMatches table={dailyTable} colSpan={data.departmentName ? 7 : 6} />{dailyTable.rows.map((r, i) => (
                       <tr key={i} className="border-b last:border-0 hover:bg-muted/30">
                         {data.departmentName && <td className="py-2 pr-4">{r.departmentName}</td>}
                         <td className="py-2 pr-4 font-medium">{r.siteName}</td>
@@ -493,7 +496,7 @@ function ComplianceTab({
                           </span>
                         </td>
                       </tr>
-                    ))}
+                    ))}</>}
                   </tbody>
                 </table>
               </div>

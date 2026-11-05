@@ -26,6 +26,7 @@ import { ObjectPermission } from "../lib/objectAcl";
 import { createDownloadMeter } from "../lib/downloadUsage";
 import { hasTenantAttachmentReference } from "../lib/attachmentReferences";
 import { sendReportActionPlanEmails } from "../lib/reportActionEmails";
+import { raiseFixTrackJobForAction } from "../lib/trackActionFixTrack";
 import { resolveAssigneeChange } from "../lib/assignees";
 import { AiUnavailableError, claimAiUse, getAiStatus, settleAiUse } from "../lib/aiAllowance";
 
@@ -64,6 +65,8 @@ const draftActionSchema = z.object({
   assignedUserId: z.number().int().positive().nullable().optional(),
   reportReference: z.string().trim().max(200).nullable().optional(),
   draftSource: z.enum(["ai", "manual"]).default("manual"),
+  /** "Send to FixTrack?" — only ever the person's choice; No unless they pick Yes. */
+  sendToFixTrack: z.boolean().optional(),
 }).strict();
 const draftListSchema = z.object({ actions: z.array(draftActionSchema).max(200) }).strict();
 const createSchema = z.object({
@@ -143,6 +146,8 @@ async function checkDraftActions(clientId: number, departmentId: number | null, 
   for (const [index, action] of actions.entries()) {
     const which = `Action ${index + 1}`;
     if (!moduleKeys.has(action.module)) return { error: `${which}: this business does not use that track` };
+    if (action.sendToFixTrack && !moduleKeys.has("fix")) return { error: `${which}: this business does not use FixTrack` };
+    if (action.sendToFixTrack && (action.module === "fix" || action.module === "green")) return { error: `${which}: ${action.module === "fix" ? "this action is already in FixTrack" : "GreenTrack actions stay within GreenTrack"}` };
     if (action.siteId != null && !siteIds.has(action.siteId)) return { error: `${which}: site not found` };
     if (action.assignedUserId != null && !names.has(action.assignedUserId)) return { error: `${which}: assign it to an Owner or Manager of this business` };
     if (action.assignedUserId != null) {
@@ -151,7 +156,7 @@ async function checkDraftActions(clientId: number, departmentId: number | null, 
       if (!assignee.ok) return { error: `${which}: ${assignee.error}` };
     }
   }
-  return { names };
+  return { names, usesFixTrack: moduleKeys.has("fix") };
 }
 
 function toDraft(action: z.infer<typeof draftActionSchema>): InspectionReportDraftAction {
@@ -159,7 +164,7 @@ function toDraft(action: z.infer<typeof draftActionSchema>): InspectionReportDra
     title: action.title, instruction: action.instruction?.trim() || null, module: action.module,
     severity: action.severity, siteId: action.siteId ?? null, dueDate: action.dueDate ?? null,
     assignedUserId: action.assignedUserId ?? null, reportReference: action.reportReference?.trim() || null,
-    draftSource: action.draftSource,
+    draftSource: action.draftSource, sendToFixTrack: action.sendToFixTrack === true,
   };
 }
 
@@ -317,7 +322,9 @@ router.post("/inspection-reports/:id/read", requireAuth, denyViewers, canManageR
     const [modules, sites] = await Promise.all([moduleChoices(clientId), visibleSites(clientId, departmentId)]);
     const result = await readReportForActions({
       bytes, mimeType: report.mimeType ?? "", reportTypeLabel: REPORT_TYPE_LABELS[report.reportType] ?? "Report",
-      reportTitle: report.title, reportDate: report.reportDate, today, modules, sites, defaultSiteId: report.siteId,
+      reportTitle: report.title, reportDate: report.reportDate, today,
+      // Each action goes to the track it belongs to; FixTrack is the person's "Send to FixTrack?" choice, never Claude's.
+      modules: modules.filter((module) => module.key !== "fix"), sites, defaultSiteId: report.siteId,
     });
     const draft: InspectionReportDraftAction[] = result.actions.map((action) => ({
       title: action.title, instruction: action.instruction || null, module: action.module, severity: action.severity,
@@ -388,8 +395,21 @@ router.post("/inspection-reports/:id/confirm", requireAuth, denyViewers, canMana
       dueDate: action.dueDate ?? null, status: "open", createdBy: req.currentUser!.id,
       draftSource: action.draftSource, confirmedByName: confirmer,
     }))).returning();
+    // FixTrack is the person's choice per action: Yes raises the job now, No keeps the action in its track
+    // (the track still offers "Send to FixTrack" later). Nothing is sent without a Yes.
+    const usesFixTrack = checked.usesFixTrack;
+    const result = [];
+    for (const [index, row] of rows.entries()) {
+      if (!usesFixTrack || row.module === "fix" || row.module === "green") { result.push(row); continue; }
+      if (parsed.data.actions[index].sendToFixTrack) {
+        result.push(await raiseFixTrackJobForAction(tx, { action: row, clientId, userId: req.currentUser!.id, reportedBy: confirmer }) ?? row);
+      } else {
+        const [kept] = await tx.update(trackActionsTable).set({ fixTrackDisposition: "not_needed" }).where(eq(trackActionsTable.id, row.id)).returning();
+        result.push(kept ?? row);
+      }
+    }
     await tx.update(inspectionReportsTable).set({ draftActions: [], updatedAt: new Date() }).where(eq(inspectionReportsTable.id, id));
-    return rows;
+    return result;
   });
   if (!created) return res.status(404).json({ error: "Report not found" });
   // Same day: the Owners, Managers and linked consultants get the action plan, with a button to assign each action.

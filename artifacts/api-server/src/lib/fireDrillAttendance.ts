@@ -114,7 +114,7 @@ export async function staffDrillStatuses(
       SELECT max(f.check_date)::text AS last_drill_date
       FROM fire_drill_attendance a
       JOIN fire_safety_checks f ON f.id = a.fire_check_id AND f.client_id = a.client_id
-      WHERE a.client_id = ${clientId} AND a.staff_roster_id = sr.id AND f.check_type = 'fire_drill'
+      WHERE a.client_id = ${clientId} AND a.staff_roster_id = sr.id AND f.check_type IN ('fire_drill', 'fire_drill_night')
     ) last ON true
     WHERE sr.client_id = ${clientId} AND sr.active = true
       ${departmentId === null ? sql`` : sql`AND (sr.site_id IS NULL OR sr.site_id IN (${visibleSiteIdsSql(clientId, departmentId)}))`}

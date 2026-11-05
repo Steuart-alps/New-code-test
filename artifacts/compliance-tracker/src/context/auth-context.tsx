@@ -430,6 +430,13 @@ export function useCanManageUsers() {
   return user.role === "consultant" || user.role === "client_admin" || user.role === "client_manager";
 }
 
+/** Owners, consultants and Managers (incl. Maintenance managers) can change a compliance check. */
+export function useCanChangeChecks() {
+  const { user } = useAuth();
+  if (!user) return false;
+  return user.role === "consultant" || user.role === "client_admin" || user.role === "client_manager";
+}
+
 export function useIsManager() {
   const { user } = useAuth();
   return user?.role === "client_manager";

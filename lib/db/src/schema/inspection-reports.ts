@@ -20,6 +20,8 @@ export interface InspectionReportDraftAction {
   assignedUserId: number | null;
   reportReference: string | null;
   draftSource: "ai" | "manual";
+  /** "Send to FixTrack?" chosen on the review screen (absent = No). */
+  sendToFixTrack?: boolean;
 }
 
 /**

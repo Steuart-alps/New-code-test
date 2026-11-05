@@ -29,6 +29,12 @@
       "env": {
         "EXPO_PUBLIC_DOMAIN": "complytrack.alpsconsultancy.co.uk"
       }
+    },
+    "testflight": {
+      "extends": "production",
+      "ios": {
+        "credentialsSource": "local"
+      }
     }
   },
   "submit": {

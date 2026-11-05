@@ -1,4 +1,8 @@
 import { useState } from "react";
+import { ListSortSelect } from "@/components/list-table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { rankIn, sortRows, type SortState } from "@/lib/table-sort";
+import { sortByLabel } from "@/lib/sort-options";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation, useSearch } from "wouter";
 import { AppLayout } from "@/components/layout";
@@ -47,6 +51,9 @@ interface VisitSummary { visitKey: string; contractorId: number | null }
 export default function ContractorsPage() {
   const [search, setSearch] = useState("");
   const [showNonCompliantOnly, setShowNonCompliantOnly] = useState(false);
+  const [tradeFilter, setTradeFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sort, setSort] = useState<SortState>({ key: "name", dir: "asc" });
   const [isFormOpen, setIsFormOpen] = useState(false);
   const { activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
@@ -96,8 +103,20 @@ export default function ContractorsPage() {
     if (!forTrack(c)) return false;
     const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase()) ||
       Boolean(c.company?.toLowerCase().includes(search.toLowerCase()));
-    return matchesSearch && (!showNonCompliantOnly || getContractorListStatus(c, today).level === "missing-or-expired");
+    const level = getContractorListStatus(c, today).level;
+    return matchesSearch && (!showNonCompliantOnly || level === "missing-or-expired")
+      && (tradeFilter === "all" || !!c.trades?.includes(tradeFilter))
+      && (statusFilter === "all" || level === statusFilter);
   });
+  const STATUS_ORDER = ["missing-or-expired", "expiring", "complete"];
+  const STATUS_TEXT: Record<string, string> = { "missing-or-expired": "Missing or expired", expiring: "Expiring soon", complete: "All in date" };
+  const shown = sortRows(filtered, sort, {
+    name: c => c.name,
+    company: c => c.company,
+    status: c => rankIn(STATUS_ORDER, getContractorListStatus(c, today).level),
+    insurance: c => c.publicLiabilityExpiry,
+  });
+  const trades = sortByLabel([...new Set(contractors.filter(forTrack).flatMap(c => c.trades ?? []))], tradeLabel);
   const nonCompliantCount = contractors.filter(forTrack).filter(c => getContractorListStatus(c, today).level === "missing-or-expired").length;
 
   return (
@@ -122,6 +141,34 @@ export default function ContractorsPage() {
             <AlertTriangle className="w-4 h-4 mr-2" />
             Missing or expired ({nonCompliantCount})
           </Button>
+          {trades.length > 0 && (
+            <Select value={tradeFilter} onValueChange={setTradeFilter}>
+              <SelectTrigger aria-label="Filter contractors by trade" className="w-48 bg-card"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All trades</SelectItem>
+                {trades.map(trade => <SelectItem key={trade} value={trade}>{tradeLabel(trade)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger aria-label="Filter contractors by compliance" className="w-48 bg-card"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Any compliance</SelectItem>
+              {STATUS_ORDER.map(level => <SelectItem key={level} value={level}>{STATUS_TEXT[level]}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <ListSortSelect
+            className="w-56"
+            value={sort}
+            onChange={setSort}
+            options={[
+              { key: "name", dir: "asc", label: "Name, A to Z" },
+              { key: "name", dir: "desc", label: "Name, Z to A" },
+              { key: "company", dir: "asc", label: "Company, A to Z" },
+              { key: "status", dir: "asc", label: "Missing or expired first" },
+              { key: "insurance", dir: "asc", label: "Insurance expires soonest" },
+            ]}
+          />
           <ImportCsvButton type="contractors" className="h-10" />
           <Button asChild variant="outline">
             <Link href="/contractor-sign-in"><LogIn className="w-4 h-4 mr-2" /> Contractor sign-in</Link>
@@ -159,13 +206,13 @@ export default function ContractorsPage() {
           <Building className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
           <h3 className="text-lg font-bold">No contractors found</h3>
           <p className="text-muted-foreground mt-1 max-w-sm mx-auto">
-            {track && !search && !showNonCompliantOnly ? <>No contractors have a {trackLabel} trade yet. <button type="button" className="text-primary font-medium hover:underline" onClick={showAll}>Show all contractors</button> and tick a trade on the ones who do this work.</> : showNonCompliantOnly ? "No contractors with missing or expired compliance fields match your search." : search ? "Try another search." : "Add your external contractors here to track their compliance and certificates."}
+            {track && !search && !showNonCompliantOnly ? <>No contractors have a {trackLabel} trade yet. <button type="button" className="text-primary font-medium hover:underline" onClick={showAll}>Show all contractors</button> and tick a trade on the ones who do this work.</> : showNonCompliantOnly ? "No contractors with missing or expired compliance fields match your search." : search || tradeFilter !== "all" || statusFilter !== "all" ? "Try another search or filter." : "Add your external contractors here to track their compliance and certificates."}
           </p>
         </div>
       ) : (
         <TooltipProvider>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map(contractor => (
+            {shown.map(contractor => (
               <Link key={contractor.id} href={`/contractors/${contractor.id}`}>
                 <Card className="p-5 hover:shadow-xl hover:border-primary/30 transition-all duration-300 cursor-pointer group bg-card/60 backdrop-blur-sm border-border/50 h-full flex flex-col">
                   <div className="flex justify-between items-start mb-4">

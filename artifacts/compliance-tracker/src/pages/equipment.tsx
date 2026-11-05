@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { ListSortSelect } from "@/components/list-table";
+import { sortRows, type SortState } from "@/lib/table-sort";
 import { Link } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -422,6 +424,9 @@ function EquipmentList({ site, sites }: { site: string; sites: SiteOption[] }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [dialogKey, setDialogKey] = useState(0);
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [sort, setSort] = useState<SortState>({ key: "name", dir: "asc" });
 
   const params = new URLSearchParams();
   if (site !== ALL) params.set("siteId", site);
@@ -454,6 +459,18 @@ function EquipmentList({ site, sites }: { site: string; sites: SiteOption[] }) {
   const items = query.data ?? [];
   const today = localToday();
   const otherChecks = (item: EquipmentItem) => item.complianceItems.filter(check => !item.parts.some(part => part.checkId === check.id));
+  const itemTypes = sortByLabel([...new Set(items.map(item => item.type))], type => TYPE_LABELS[type as EquipmentType] ?? type);
+  const needle = search.trim().toLowerCase();
+  const shown = sortRows(items.filter(item => (typeFilter === "all" || item.type === typeFilter)
+    && (!needle || [item.name, item.typeLabel, item.siteName, item.location, item.make, item.model, item.serialNo, item.labelCode]
+      .some(value => value?.toLowerCase().includes(needle)))), sort, {
+    name: item => item.name,
+    type: item => item.typeLabel,
+    site: item => item.siteName,
+    location: item => item.location,
+    // The soonest printed expiry date on the item (pads, battery, examination…).
+    expiry: item => item.parts.map(part => part.expiryDate).filter(Boolean).sort()[0] ?? null,
+  });
 
   return (
     <div className="space-y-3">
@@ -461,6 +478,33 @@ function EquipmentList({ site, sites }: { site: string; sites: SiteOption[] }) {
         <Button onClick={() => openDialog(null)}><Plus className="mr-1.5 h-4 w-4" /> Add equipment</Button>
         {hasService("firetrack") && (
           <Button variant="outline" onClick={() => setImportOpen(true)}><Flame className="mr-1.5 h-4 w-4" /> Copy extinguishers from FireTrack</Button>
+        )}
+        {items.length > 0 && (
+          <>
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search equipment" className="pl-8" aria-label="Search equipment" />
+            </div>
+            <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <SelectTrigger aria-label="Filter equipment by type" className="w-56"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All types</SelectItem>
+                {itemTypes.map(type => <SelectItem key={type} value={type}>{TYPE_LABELS[type as EquipmentType] ?? type}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <ListSortSelect
+              className="w-60"
+              value={sort}
+              onChange={setSort}
+              options={[
+                { key: "name", dir: "asc", label: "Name, A to Z" },
+                { key: "type", dir: "asc", label: "Type, A to Z" },
+                { key: "site", dir: "asc", label: "Site, A to Z" },
+                { key: "location", dir: "asc", label: "Location, A to Z" },
+                { key: "expiry", dir: "asc", label: "Expiry date, soonest first" },
+              ]}
+            />
+          </>
         )}
         <label className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
           <Checkbox checked={showArchived} onCheckedChange={value => setShowArchived(value === true)} /> Show archived
@@ -476,7 +520,13 @@ function EquipmentList({ site, sites }: { site: string; sites: SiteOption[] }) {
       )}
 
       <div className="grid gap-2">
-        {items.map(item => (
+        {items.length > 0 && shown.length === 0 && (
+          <Card className="p-6 text-sm text-muted-foreground">
+            Nothing matches your search or type.{" "}
+            <button type="button" className="font-medium text-primary underline" onClick={() => { setSearch(""); setTypeFilter("all"); }}>Clear</button>
+          </Card>
+        )}
+        {shown.map(item => (
           <Card key={item.id} className={`flex flex-wrap items-start gap-3 p-4 ${item.active ? "" : "opacity-60"}`}>
             <div className="min-w-0 flex-1 space-y-1">
               <div className="flex flex-wrap items-center gap-2">

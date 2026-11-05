@@ -2213,6 +2213,7 @@ export const createComplianceItemBodyStatusDefault = `pending`;
 export const createComplianceItemBodyPriorityDefault = `medium`;
 export const createComplianceItemBodyFrequencyMonthsMax = 120;
 
+export const createComplianceItemBodyLastDoneRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
 
 
 export const CreateComplianceItemBody = zod.object({
@@ -2228,6 +2229,7 @@ export const CreateComplianceItemBody = zod.object({
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(createComplianceItemBodyFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
+  "lastDone": zod.string().regex(createComplianceItemBodyLastDoneRegExp).nullish().describe('Date a repeating check was last done (YYYY-MM-DD), not in the future. With a repeat interval it is recorded as the last completion and the due date becomes that date plus the interval, overriding dueDate. Ignored without an interval or when the check is being completed.'),
   "notes": zod.string().nullish()
 })
 
@@ -2319,6 +2321,7 @@ export const UpdateComplianceItemParams = zod.object({
 
 export const updateComplianceItemBodyFrequencyMonthsMax = 120;
 
+export const updateComplianceItemBodyLastDoneRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
 
 
 export const UpdateComplianceItemBody = zod.object({
@@ -2334,6 +2337,7 @@ export const UpdateComplianceItemBody = zod.object({
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(updateComplianceItemBodyFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
+  "lastDone": zod.string().regex(updateComplianceItemBodyLastDoneRegExp).nullish().describe('Date a repeating check was last done (YYYY-MM-DD), not in the future. With a repeat interval it is recorded as the last completion and the due date becomes that date plus the interval, overriding dueDate. Ignored without an interval or when the check is being completed.'),
   "notes": zod.string().nullish()
 })
 
@@ -3940,7 +3944,7 @@ export const AssignFixTrackContractorResponse = zod.object({
  * @summary List fire safety logbook entries
  */
 export const ListFireSafetyChecksQueryParams = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).optional(),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk', 'fire_drill_night']).optional(),
   "siteId": zod.coerce.number().optional()
 })
 
@@ -3953,7 +3957,7 @@ export const ListFireSafetyChecksResponseItem = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk', 'fire_drill_night']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"fire_drill_night\" is the night staff fire drill, a separate 6-monthly check at sites with sleeping accommodation. \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
@@ -3961,7 +3965,7 @@ export const ListFireSafetyChecksResponseItem = zod.object({
   "performedBy": zod.string().nullish(),
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
-  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check).'),
   "drillTime": zod.string().regex(listFireSafetyChecksResponseDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
   "evacuationSeconds": zod.number().min(1).max(listFireSafetyChecksResponseEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
   "staffPresent": zod.array(zod.object({
@@ -3989,7 +3993,7 @@ export const createFireSafetyCheckBodyStaffPresentIdsMax = 2000;
 
 
 export const CreateFireSafetyCheckBody = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk', 'fire_drill_night']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"fire_drill_night\" is the night staff fire drill, a separate 6-monthly check at sites with sleeping accommodation. \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "siteId": zod.number().nullish(),
@@ -3998,7 +4002,7 @@ export const CreateFireSafetyCheckBody = zod.object({
   "performedBy": zod.string().nullish(),
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
-  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check).'),
   "drillTime": zod.string().regex(createFireSafetyCheckBodyDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
   "evacuationSeconds": zod.number().min(1).max(createFireSafetyCheckBodyEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
   "staffPresentIds": zod.array(zod.number()).max(createFireSafetyCheckBodyStaffPresentIdsMax).optional().describe('Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.'),
@@ -4017,7 +4021,7 @@ export const CreateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk', 'fire_drill_night']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"fire_drill_night\" is the night staff fire drill, a separate 6-monthly check at sites with sleeping accommodation. \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
@@ -4025,7 +4029,7 @@ export const CreateFireSafetyCheckResponse = zod.object({
   "performedBy": zod.string().nullish(),
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
-  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check).'),
   "drillTime": zod.string().regex(createFireSafetyCheckResponseDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
   "evacuationSeconds": zod.number().min(1).max(createFireSafetyCheckResponseEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
   "staffPresent": zod.array(zod.object({
@@ -4049,7 +4053,7 @@ export const GetFireSafetyStatusQueryParams = zod.object({
 })
 
 export const GetFireSafetyStatusResponseItem = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk', 'fire_drill_night']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"fire_drill_night\" is the night staff fire drill, a separate 6-monthly check at sites with sleeping accommodation. \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "frequencyDays": zod.number(),
   "lastDate": zod.string().nullish(),
   "lastResult": zod.enum(['pass', 'fail', 'action_required']).nullable(),
@@ -4679,7 +4683,7 @@ export const UpdateFireSafetyCheckBody = zod.object({
   "performedBy": zod.string().nullish(),
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
-  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check).'),
   "drillTime": zod.string().regex(updateFireSafetyCheckBodyDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
   "evacuationSeconds": zod.number().min(1).max(updateFireSafetyCheckBodyEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
   "staffPresentIds": zod.array(zod.number()).max(updateFireSafetyCheckBodyStaffPresentIdsMax).optional().describe('Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.'),
@@ -4698,7 +4702,7 @@ export const UpdateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk', 'fire_drill_night']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"fire_drill_night\" is the night staff fire drill, a separate 6-monthly check at sites with sleeping accommodation. \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
@@ -4706,7 +4710,7 @@ export const UpdateFireSafetyCheckResponse = zod.object({
   "performedBy": zod.string().nullish(),
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
-  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check).'),
   "drillTime": zod.string().regex(updateFireSafetyCheckResponseDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
   "evacuationSeconds": zod.number().min(1).max(updateFireSafetyCheckResponseEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
   "staffPresent": zod.array(zod.object({
@@ -8671,7 +8675,8 @@ export const CreateInspectionReportResponse = zod.object({
   "dueDate": zod.date().nullish(),
   "assignedUserId": zod.number().nullish(),
   "reportReference": zod.string().nullish(),
-  "draftSource": zod.enum(['ai', 'manual']).optional()
+  "draftSource": zod.enum(['ai', 'manual']).optional(),
+  "sendToFixTrack": zod.boolean().optional().describe('Raise a FixTrack job for this action when the list is confirmed. Only ever the person\'s choice; absent means No.')
 })),
   "aiStatus": zod.string(),
   "aiSummary": zod.string().nullable(),
@@ -8708,7 +8713,8 @@ export const GetInspectionReportResponse = zod.object({
   "dueDate": zod.date().nullish(),
   "assignedUserId": zod.number().nullish(),
   "reportReference": zod.string().nullish(),
-  "draftSource": zod.enum(['ai', 'manual']).optional()
+  "draftSource": zod.enum(['ai', 'manual']).optional(),
+  "sendToFixTrack": zod.boolean().optional().describe('Raise a FixTrack job for this action when the list is confirmed. Only ever the person\'s choice; absent means No.')
 })),
   "aiStatus": zod.string(),
   "aiSummary": zod.string().nullable(),
@@ -8770,7 +8776,8 @@ export const ReadInspectionReportResponse = zod.object({
   "dueDate": zod.date().nullish(),
   "assignedUserId": zod.number().nullish(),
   "reportReference": zod.string().nullish(),
-  "draftSource": zod.enum(['ai', 'manual']).optional()
+  "draftSource": zod.enum(['ai', 'manual']).optional(),
+  "sendToFixTrack": zod.boolean().optional().describe('Raise a FixTrack job for this action when the list is confirmed. Only ever the person\'s choice; absent means No.')
 }))
 })
 
@@ -8792,7 +8799,8 @@ export const SaveInspectionReportDraftBody = zod.object({
   "dueDate": zod.date().nullish(),
   "assignedUserId": zod.number().nullish(),
   "reportReference": zod.string().nullish(),
-  "draftSource": zod.enum(['ai', 'manual']).optional()
+  "draftSource": zod.enum(['ai', 'manual']).optional(),
+  "sendToFixTrack": zod.boolean().optional().describe('Raise a FixTrack job for this action when the list is confirmed. Only ever the person\'s choice; absent means No.')
 }))
 })
 
@@ -8806,7 +8814,8 @@ export const SaveInspectionReportDraftResponse = zod.object({
   "dueDate": zod.date().nullish(),
   "assignedUserId": zod.number().nullish(),
   "reportReference": zod.string().nullish(),
-  "draftSource": zod.enum(['ai', 'manual']).optional()
+  "draftSource": zod.enum(['ai', 'manual']).optional(),
+  "sendToFixTrack": zod.boolean().optional().describe('Raise a FixTrack job for this action when the list is confirmed. Only ever the person\'s choice; absent means No.')
 }))
 })
 
@@ -8828,7 +8837,8 @@ export const ConfirmInspectionReportActionsBody = zod.object({
   "dueDate": zod.date().nullish(),
   "assignedUserId": zod.number().nullish(),
   "reportReference": zod.string().nullish(),
-  "draftSource": zod.enum(['ai', 'manual']).optional()
+  "draftSource": zod.enum(['ai', 'manual']).optional(),
+  "sendToFixTrack": zod.boolean().optional().describe('Raise a FixTrack job for this action when the list is confirmed. Only ever the person\'s choice; absent means No.')
 }))
 })
 

@@ -64,7 +64,14 @@ async function main() {
   const duplicateFix = await admin("POST", `/track-actions/${action.data?.id}/fix-track`, { create: true });
   status("repeated FixTrack choice reuses the existing issue", duplicateFix, [200]);
   check("FixTrack link remains one-to-one", duplicateFix.data?.fixTrackIssueId === linkedIssueId);
-  status("linked action cannot bypass FixTrack resolution", await admin("PATCH", `/track-actions/${action.data?.id}`, { status: "resolved", remedialAction: "bypass", evidenceReference: "bypass", resolutionNotes: "bypass", resolverSignature: SIGNATURE }), [409]);
+  // A linked action can be resolved in its own track; that finishes the FixTrack job too.
+  const inTrack = await admin("POST", "/track-actions", { module: "fire", title: "test break glass call points", severity: "action_required", siteId: alphaSite.data?.id });
+  status("create action to resolve in its track", inTrack, [201]);
+  const inTrackFix = await admin("POST", `/track-actions/${inTrack.data?.id}/fix-track`, { create: true });
+  status("send it to FixTrack", inTrackFix, [201]);
+  status("linked action resolves in its own track", await admin("PATCH", `/track-actions/${inTrack.data?.id}`, { status: "resolved", remedialAction: "Tested in house", evidenceReference: "Fire log", resolutionNotes: "All call points sounded", resolverSignature: SIGNATURE }), [200]);
+  const closedJob = await admin("GET", `/fix-track/issues/${inTrackFix.data?.fixTrackIssueId}`);
+  check("resolving in the track resolves the FixTrack job", closedJob.data?.status === "resolved" && closedJob.data?.resolvedByName === "Template Admin", JSON.stringify(closedJob.data?.status));
   status("linked FixTrack issue cannot leave originating site", await admin("PUT", `/fix-track/issues/${linkedIssueId}`, { siteId: betaSite.data?.id }), [409]);
   status("linked FixTrack issue starts work", await admin("PUT", `/fix-track/issues/${linkedIssueId}`, { status: "in_progress" }), [200]);
   status("linked FixTrack issue resolves with signature", await admin("PUT", `/fix-track/issues/${linkedIssueId}`, { status: "resolved", resolverSignature: SIGNATURE, solutionNotes: "Repair completed" }), [200]);

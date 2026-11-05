@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import { ListSortSelect, ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
+import { rankIn, sortRows, type SortState } from "@/lib/table-sort";
 import { AssigneeField, assigneeFields } from "@/components/assignee-field";
 import { takeLinkParams } from "@/lib/deep-link";
 import { useQuery } from "@tanstack/react-query";
@@ -82,6 +84,9 @@ const PRIORITIES: Record<string, { label: string; color: string }> = {
   high:   { label: "High",   color: "bg-amber-100 text-amber-700 border-amber-200" },
   urgent: { label: "Urgent", color: "bg-rose-100 text-rose-700 border-rose-200" },
 };
+
+/** Most urgent first when a list is sorted by priority. */
+const PRIORITY_ORDER = ["urgent", "high", "medium", "low"] as const;
 
 const STATUSES: Record<string, { label: string; icon: any; color: string }> = {
   reported:    { label: "Reported",    icon: AlertTriangle, color: "bg-rose-50 text-rose-700 border-rose-200" },
@@ -433,15 +438,16 @@ function IssueForm({ form, setForm, issueId, isNew, keepSiteId }: {
 
 // ── Dashboard helpers ─────────────────────────────────────────────────────────
 
-function StatCard({ label, value, color }: { label: string; value: number; color: "amber" | "rose" | "blue" | "emerald" | "slate" }) {
+function StatCard({ label, value, color, onClick }: { label: string; value: number; color: "amber" | "rose" | "blue" | "emerald" | "slate"; onClick?: () => void }) {
   const bg   = { amber: "bg-amber-50 border-amber-100",   rose: "bg-rose-50 border-rose-100",   blue: "bg-blue-50 border-blue-100",   emerald: "bg-emerald-50 border-emerald-100",   slate: "bg-slate-50 border-slate-200" };
   const val  = { amber: "text-amber-700",                  rose: "text-rose-700",                 blue: "text-blue-700",                 emerald: "text-emerald-700",                   slate: "text-slate-600" };
   const lbl  = { amber: "text-amber-600/70",               rose: "text-rose-600/70",              blue: "text-blue-600/70",              emerald: "text-emerald-600/70",                slate: "text-slate-500" };
   return (
-    <div className={cn("rounded-xl border p-5", bg[color])}>
+    <button type="button" onClick={onClick} disabled={!onClick} data-testid={`fix-stat-${label.toLowerCase().replace(/\s+/g, "-")}`}
+      className={cn("rounded-xl border p-5 text-left transition-shadow enabled:hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary", bg[color])}>
       <div className={cn("text-3xl font-bold tabular-nums", val[color])}>{value}</div>
       <div className={cn("text-xs font-medium mt-1", lbl[color])}>{label}</div>
-    </div>
+    </button>
   );
 }
 
@@ -453,7 +459,9 @@ function MiniBar({ pct, color }: { pct: number; color: string }) {
   );
 }
 
-function FixTrackDashboard({ issues }: { issues: Issue[] }) {
+/** Every count and row opens the issues behind it (two clicks at most to any issue). */
+type IssueFilter = { status?: string; priority?: string };
+function FixTrackDashboard({ issues, onOpenIssue, onShow }: { issues: Issue[]; onOpenIssue: (issue: Issue) => void; onShow: (filter: IssueFilter) => void }) {
   const today = new Date();
   const thisMonth = today.toISOString().slice(0, 7);
 
@@ -486,6 +494,20 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
     .slice(0, 6);
 
   const daysOpen = (d: string) => elapsedBoardDays(d, today);
+  const oldestTable = useListTable(oldest, [
+    { key: "issue", label: "Issue", className: "text-left px-4 py-2.5 text-xs font-medium text-muted-foreground",
+      value: i => i.title, sort: "text", filter: "search", filterValue: i => `${i.title} ${i.location ?? ""}` },
+    { key: "type", label: "Type", className: "text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden sm:table-cell",
+      value: i => issueTypeMeta(i.issueType).label, filterValue: i => i.issueType, sort: "text", filter: "choice",
+      choiceLabel: v => issueTypeMeta(v).label },
+    { key: "site", label: "Site", className: "text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden md:table-cell",
+      value: i => i.siteName, sort: "text", filter: "choice" },
+    { key: "priority", label: "Priority", className: "text-left px-4 py-2.5 text-xs font-medium text-muted-foreground",
+      value: i => rankIn(PRIORITY_ORDER, i.priority), filterValue: i => i.priority, sort: ["Most urgent first", "Least urgent first"],
+      filter: "choice", choiceLabel: v => PRIORITIES[v]?.label ?? v, choiceOrder: PRIORITY_ORDER },
+    { key: "days", label: "Days open", className: "text-right px-4 py-2.5 text-xs font-medium text-muted-foreground",
+      value: i => daysOpen(i.reportedDate), sort: ["Fewest days first", "Most days first"] },
+  ] satisfies ListColumn<Issue>[]);
   const maxType  = Math.max(...byType.map(t => t.count), 1);
   const maxSite  = Math.max(...bySite.map(([, c]) => c), 1);
 
@@ -496,10 +518,10 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
     <div className="space-y-6">
       {/* Stat cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Open issues"          value={open.length}          color={open.length > 0 ? "amber" : "emerald"} />
-        <StatCard label="Urgent open"          value={urgentOpen.length}    color={urgentOpen.length > 0 ? "rose" : "slate"} />
-        <StatCard label="In progress"          value={inProgress.length}    color="blue" />
-        <StatCard label="Resolved this month"  value={resolvedMonth.length} color="emerald" />
+        <StatCard label="Open issues"          value={open.length}          color={open.length > 0 ? "amber" : "emerald"} onClick={() => onShow({ status: "open" })} />
+        <StatCard label="Urgent open"          value={urgentOpen.length}    color={urgentOpen.length > 0 ? "rose" : "slate"} onClick={() => onShow({ status: "open", priority: "urgent" })} />
+        <StatCard label="In progress"          value={inProgress.length}    color="blue" onClick={() => onShow({ status: "in_progress" })} />
+        <StatCard label="Resolved this month"  value={resolvedMonth.length} color="emerald" onClick={() => onShow({ status: "resolved" })} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -509,13 +531,13 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
           {byStatus.map(({ key, meta, count }) => {
             const Icon = meta.icon;
             return (
-              <div key={key} className="flex items-center gap-3">
+              <button type="button" key={key} onClick={() => onShow({ status: key })} className="flex w-full items-center gap-3 rounded-md text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
                 <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-medium w-28 flex-shrink-0", meta.color)}>
                   <Icon className="w-3 h-3 flex-shrink-0" />{meta.label}
                 </span>
                 <MiniBar pct={issues.length ? (count / issues.length) * 100 : 0} color={statusBar[key] ?? "bg-muted-foreground"} />
                 <span className="text-sm font-semibold tabular-nums w-6 text-right">{count}</span>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -526,13 +548,13 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
           {byPriority.length === 0
             ? <p className="text-sm text-muted-foreground italic">No open issues</p>
             : byPriority.map(({ key, meta, count }) => (
-              <div key={key} className="flex items-center gap-3">
+              <button type="button" key={key} onClick={() => onShow({ status: "open", priority: key })} className="flex w-full items-center gap-3 rounded-md text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
                 <span className={cn("inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-medium w-20 flex-shrink-0", meta.color)}>
                   {meta.label}
                 </span>
                 <MiniBar pct={(count / open.length) * 100} color={priorityBar[key] ?? "bg-muted-foreground"} />
                 <span className="text-sm font-semibold tabular-nums w-6 text-right">{count}</span>
-              </div>
+              </button>
             ))
           }
         </div>
@@ -576,23 +598,18 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-muted/40 border-b">
-                <tr>
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Issue</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden sm:table-cell">Type</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden md:table-cell">Site</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Priority</th>
-                  <th className="text-right px-4 py-2.5 text-xs font-medium text-muted-foreground">Days open</th>
-                </tr>
+                <tr><ListTableHeadings table={oldestTable} /></tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {oldest.map(issue => {
+                <ListTableNoMatches table={oldestTable} colSpan={5} />
+                {oldestTable.rows.map(issue => {
                   const days        = daysOpen(issue.reportedDate);
                   const typeMeta    = ISSUE_TYPES[issue.issueType]  ?? ISSUE_TYPES.general;
                   const priorityMeta = PRIORITIES[issue.priority]   ?? PRIORITIES.low;
                   return (
-                    <tr key={issue.id} className="hover:bg-muted/20 transition-colors">
+                    <tr key={issue.id} className="cursor-pointer hover:bg-muted/20 transition-colors" onClick={() => onOpenIssue(issue)}>
                       <td className="px-4 py-3">
-                        <div className="font-medium text-sm">{issue.title}</div>
+                        <button type="button" className="text-left font-medium text-sm text-primary hover:underline" onClick={(event) => { event.stopPropagation(); onOpenIssue(issue); }}>{issue.title}</button>
                         {issue.location && <div className="text-xs text-muted-foreground">{issue.location}</div>}
                       </td>
                       <td className="px-4 py-3 hidden sm:table-cell">
@@ -647,6 +664,8 @@ export default function FixTrackPage() {
   const [search, setSearch]               = useState("");
   const [filterStatus, setFilterStatus]   = useState("");
   const [filterType, setFilterType]       = useState("");
+  const [filterSite, setFilterSite]       = useState("");
+  const [issueSort, setIssueSort]         = useState<SortState | null>(null);
   const [filterPriority, setFilterPriority] = useState("");
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -1004,13 +1023,25 @@ export default function FixTrackPage() {
 
   const q = search.trim().toLowerCase();
   const filtered = issues.filter(i => {
-    if (filterStatus   && i.status    !== filterStatus)   return false;
+    if (filterStatus === "open") { if (i.status !== "reported" && i.status !== "in_progress") return false; }
+    else if (filterStatus && i.status !== filterStatus) return false;
     if (filterType     && i.issueType !== filterType)     return false;
     if (filterPriority && i.priority  !== filterPriority) return false;
+    if (filterSite     && (i.siteName ?? "") !== filterSite) return false;
     if (q && ![i.title, i.location, i.reportedBy, i.description, i.assignedTo, i.contractorName]
       .some(v => v?.toLowerCase().includes(q))) return false;
     return true;
   });
+  const sortedIssues = sortRows(filtered, issueSort, {
+    reported: i => i.reportedDate,
+    priority: i => rankIn(PRIORITY_ORDER, i.priority),
+    target: i => i.targetDate,
+    title: i => i.title,
+    type: i => issueTypeMeta(i.issueType).label,
+    site: i => i.siteName,
+    status: i => rankIn(Object.keys(STATUSES), i.status),
+  });
+  const issueSites = sortByLabel([...new Set(issues.map(i => i.siteName).filter((n): n is string => !!n))], n => n);
 
   const openCount   = issues.filter(i => i.status === "reported" || i.status === "in_progress").length;
   const urgentCount = issues.filter(i => i.priority === "urgent" && (i.status === "reported" || i.status === "in_progress")).length;
@@ -1131,7 +1162,10 @@ export default function FixTrackPage() {
         {activeTab === "dashboard" && (
           loading
             ? <div className="py-20 text-center text-muted-foreground animate-pulse">Loading…</div>
-            : <FixTrackDashboard issues={issues} />
+            : <FixTrackDashboard issues={issues} onOpenIssue={openDetail} onShow={(filter) => {
+              setFilterStatus(filter.status ?? ""); setFilterPriority(filter.priority ?? ""); setFilterType(""); setSearch("");
+              setActiveTab("issues");
+            }} />
         )}
 
         {/* Board tab — priority board grouped by trade area */}
@@ -1149,7 +1183,7 @@ export default function FixTrackPage() {
 
         {/* Issues tab — Filters */}
         {activeTab === "issues" && <>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <div className="relative sm:col-span-2 lg:col-span-1">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input placeholder="Search issues…" value={search} onChange={e => setSearch(e.target.value)} className="pl-9 bg-card" />
@@ -1158,6 +1192,7 @@ export default function FixTrackPage() {
             <SelectTrigger className="bg-card"><SelectValue placeholder="All statuses" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="open">Open (reported or in progress)</SelectItem>
               {Object.entries(STATUSES).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
             </SelectContent>
           </Select>
@@ -1175,6 +1210,29 @@ export default function FixTrackPage() {
               {Object.entries(PRIORITIES).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
             </SelectContent>
           </Select>
+          {issueSites.length > 1 && (
+            <Select value={filterSite || "all"} onValueChange={v => setFilterSite(v === "all" ? "" : v)}>
+              <SelectTrigger className="bg-card" aria-label="Filter issues by site"><SelectValue placeholder="All sites" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All sites</SelectItem>
+                {issueSites.map(n => <SelectItem key={n} value={n}>{n}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+          <ListSortSelect
+            value={issueSort}
+            onChange={setIssueSort}
+            options={[
+              { key: "reported", dir: "desc", label: "Newest reported first" },
+              { key: "reported", dir: "asc", label: "Oldest reported first" },
+              { key: "priority", dir: "asc", label: "Most urgent first" },
+              { key: "target", dir: "asc", label: "Target date, soonest first" },
+              { key: "status", dir: "asc", label: "Status (reported first)" },
+              { key: "type", dir: "asc", label: "Type, A to Z" },
+              { key: "site", dir: "asc", label: "Site, A to Z" },
+              { key: "title", dir: "asc", label: "Title, A to Z" },
+            ]}
+          />
         </div>
 
         {/* Issue list */}
@@ -1190,7 +1248,7 @@ export default function FixTrackPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {filtered.map(issue => {
+            {sortedIssues.map(issue => {
               const statusMeta   = STATUSES[issue.status]    ?? STATUSES.reported;
               const StatusIcon   = statusMeta.icon;
               const typeMeta     = ISSUE_TYPES[issue.issueType] ?? ISSUE_TYPES.general;

@@ -9791,6 +9791,11 @@ components:
           minimum: 1
           maximum: 120
           description: Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
+        lastDone:
+          type: string
+          nullable: true
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: Date a repeating check was last done (YYYY-MM-DD), not in the future. With a repeat interval it is recorded as the last completion and the due date becomes that date plus the interval, overriding dueDate. Ignored without an interval or when the check is being completed.
         notes:
           type: string
           nullable: true
@@ -9840,6 +9845,11 @@ components:
           minimum: 1
           maximum: 120
           description: Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
+        lastDone:
+          type: string
+          nullable: true
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: Date a repeating check was last done (YYYY-MM-DD), not in the future. With a repeat interval it is recorded as the last completion and the due date becomes that date plus the interval, overriding dueDate. Ignored without an interval or when the check is being completed.
         notes:
           type: string
           nullable: true
@@ -10941,9 +10951,10 @@ components:
 
     FireCheckType:
       type: string
-      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel, emergency_lights_annual, alarm_service, extinguisher_service, night_walk]
+      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel, emergency_lights_annual, alarm_service, extinguisher_service, night_walk, fire_drill_night]
       description: >-
-        "fire_walk" is the escape route sign-off (sites with sleeping accommodation). "night_walk" is a night
+        "fire_walk" is the escape route sign-off (sites with sleeping accommodation). "fire_drill_night" is the
+        night staff fire drill, a separate 6-monthly check at sites with sleeping accommodation. "night_walk" is a night
         porter's fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see /fire-safety/night-walks).
 
     FireSafetyCheck:
@@ -10984,7 +10995,7 @@ components:
           type: string
           nullable: true
           enum: [included, not_included, no_night_staff]
-          description: Fire drills. Whether night staff took part.
+          description: Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check).
         drillTime:
           type: string
           nullable: true
@@ -11068,7 +11079,7 @@ components:
           type: string
           nullable: true
           enum: [included, not_included, no_night_staff]
-          description: Fire drills. Whether night staff took part.
+          description: Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check).
         drillTime:
           type: string
           nullable: true
@@ -11141,7 +11152,7 @@ components:
           type: string
           nullable: true
           enum: [included, not_included, no_night_staff]
-          description: Fire drills. Whether night staff took part.
+          description: Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check).
         drillTime:
           type: string
           nullable: true
@@ -13961,6 +13972,9 @@ components:
         assignedUserId: { type: integer, nullable: true }
         reportReference: { type: string, nullable: true }
         draftSource: { type: string, enum: [ai, manual] }
+        sendToFixTrack:
+          type: boolean
+          description: Raise a FixTrack job for this action when the list is confirmed. Only ever the person's choice; absent means No.
       required: [title, module, severity]
 
     InspectionReportDraftRequest:

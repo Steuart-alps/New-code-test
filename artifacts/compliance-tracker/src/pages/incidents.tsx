@@ -45,6 +45,8 @@ import { StringListEditor } from "@/components/string-list-editor";
 import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 import { useSayItFill } from "@/lib/say-it-fill";
 import { sortByLabel } from "@/lib/sort-options";
+import { ColumnFilterChoices, ColumnHeader, ColumnSearch, dateSortOptions, textSortOptions } from "@/components/column-header";
+import { matchesSearch, rankIn, sortRows, type SortAccessors, type SortState } from "@/lib/table-sort";
 import { localDate } from "@/lib/voice-log";
 import { useManagedBy } from "@/components/managed-by-badge";
 import { VIDEO_PATH } from "@/lib/media-upload";
@@ -245,6 +247,19 @@ function startOfThisMonth() {
 /** Severity filter value for the "Serious/Fatal" summary box. */
 const SERIOUS_OR_FATAL = "serious_or_fatal";
 const severityLabel = (v: string) => (v === SERIOUS_OR_FATAL ? "Serious or fatal" : SEVERITY_LABELS[v] ?? humanize(v));
+
+/** How each Incidents column sorts when its heading is used. */
+const INCIDENT_SORT: SortAccessors<Incident> = {
+  // Date then time, so two incidents on one day keep their time order.
+  date: r => `${r.incidentDate.slice(0, 10)} ${r.incidentTime ?? ""}`,
+  type: r => typeLabel(r.incidentType),
+  severity: r => rankIn(SEVERITIES, r.severity),
+  person: r => r.involvedName,
+  location: r => r.location,
+  status: r => rankIn(STATUSES, r.status),
+  // Overdue, then outstanding, then reported, then not reportable.
+  riddor: r => !r.riddorReportable ? 3 : r.reportedToHse ? 2 : r.riddorDeadline?.state === "overdue" ? 0 : 1,
+};
 
 const STATUS_LABELS: Record<Status, string> = {
   open:                "Open",
@@ -501,6 +516,11 @@ export default function IncidentsPage() {
   const [filterTo, setFilterTo] = useState("");
   const [filterRiddor, setFilterRiddor] = useState(false);
   const [search, setSearch] = useState("");
+  // Searches typed into the Person, Location and Description column headings.
+  const [filterPerson, setFilterPerson] = useState("");
+  const [filterLocation, setFilterLocation] = useState("");
+  const [filterDescription, setFilterDescription] = useState("");
+  const [sort, setSort] = useState<SortState>({ key: "date", dir: "desc" });
   const [showDialog, setShowDialog] = useState(false);
   const [editItem, setEditItem] = useState<Incident | null>(null);
   const [saving, setSaving] = useState(false);
@@ -619,8 +639,16 @@ export default function IncidentsPage() {
         r.reportedBy.toLowerCase().includes(q)
       );
     }
-    return rows;
-  }, [incidents, filterStatus, filterSeverity, filterType, filterSite, filterFrom, filterTo, filterRiddor, search]);
+    if (filterPerson.trim()) rows = rows.filter(r => matchesSearch(`${r.involvedName} ${r.involvedJobTitle ?? ""}`, filterPerson));
+    if (filterLocation.trim()) {
+      rows = rows.filter(r => matchesSearch(r.location, filterLocation)
+        || matchesSearch(r.what3words, filterLocation.trim().replace(/^\/+/, "")));
+    }
+    if (filterDescription.trim()) rows = rows.filter(r => matchesSearch(r.description, filterDescription));
+    return sortRows(rows, sort, INCIDENT_SORT);
+  }, [incidents, filterStatus, filterSeverity, filterType, filterSite, filterFrom, filterTo, filterRiddor, search,
+    filterPerson, filterLocation, filterDescription, sort]);
+  const columnSearchActive = !!(filterPerson.trim() || filterLocation.trim() || filterDescription.trim());
 
   type SummaryFilter = { status?: Status; severity?: string; from?: string; riddor?: boolean };
   /** Shows the incidents a summary box counts: its filter only, at the chosen site. */
@@ -632,14 +660,17 @@ export default function IncidentsPage() {
     setFilterTo("");
     setFilterRiddor(show.riddor ?? false);
     setSearch("");
+    setFilterPerson("");
+    setFilterLocation("");
+    setFilterDescription("");
   }
   function summaryFilterActive(show: SummaryFilter) {
     const noFilters = filterStatus === "all" && filterSeverity === "all" && filterType === "all"
-      && !filterFrom && !filterTo && !filterRiddor && !search.trim();
+      && !filterFrom && !filterTo && !filterRiddor && !search.trim() && !columnSearchActive;
     if (!show.status && !show.severity && !show.from && !show.riddor) return noFilters;
     return filterStatus === (show.status ?? "all") && filterSeverity === (show.severity ?? "all")
       && filterType === "all" && filterFrom === (show.from ?? "") && !filterTo
-      && filterRiddor === (show.riddor ?? false) && !search.trim();
+      && filterRiddor === (show.riddor ?? false) && !search.trim() && !columnSearchActive;
   }
 
   const riddorOutstanding = summary?.riddorOutstanding ?? 0;
@@ -672,6 +703,9 @@ export default function IncidentsPage() {
       filterType !== "all" ? `Type: ${typeLabel(filterType)}` : "",
       filterRiddor ? "RIDDOR only" : "",
       search.trim() ? `Search: "${search.trim()}"` : "",
+      filterPerson.trim() ? `Person: "${filterPerson.trim()}"` : "",
+      filterLocation.trim() ? `Location: "${filterLocation.trim()}"` : "",
+      filterDescription.trim() ? `Description: "${filterDescription.trim()}"` : "",
     ].filter(Boolean).join(" · ");
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Incident Register</title>
 <style>
@@ -1154,13 +1188,83 @@ ${rows.map(r => `<tr>
           <table className="w-full text-sm">
             <thead className="bg-muted/40 border-b border-border">
               <tr>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider">Date</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider">Type / Severity</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider">Person Involved</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider hidden md:table-cell">Location</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider hidden lg:table-cell">Description</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider">Status</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider hidden sm:table-cell">RIDDOR</th>
+                <ColumnHeader
+                  label="Date" sortOptions={dateSortOptions("date")} sort={sort} onSortChange={setSort}
+                  filterActive={!!(filterFrom || filterTo)}
+                  onClearFilter={() => { setFilterFrom(""); setFilterTo(""); }}
+                >
+                  <p className="text-xs font-semibold text-muted-foreground">Between</p>
+                  <Input type="date" aria-label="Date column from" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} className="h-8 rounded-sm" />
+                  <Input type="date" aria-label="Date column to" value={filterTo} onChange={e => setFilterTo(e.target.value)} className="h-8 rounded-sm" />
+                </ColumnHeader>
+                <ColumnHeader
+                  label="Type / Severity"
+                  sortOptions={[
+                    { key: "type", dir: "asc", label: "Type, A to Z" },
+                    { key: "type", dir: "desc", label: "Type, Z to A" },
+                    { key: "severity", dir: "desc", label: "Severity, most serious first" },
+                    { key: "severity", dir: "asc", label: "Severity, least serious first" },
+                  ]}
+                  sort={sort} onSortChange={setSort}
+                  filterActive={filterType !== "all" || filterSeverity !== "all"}
+                  onClearFilter={() => { setFilterType("all"); setFilterSeverity("all"); }}
+                >
+                  <ColumnFilterChoices
+                    label="Type" value={filterType} allLabel="All types" onChange={setFilterType}
+                    options={sortByLabel(incidentTypeOptions, typeLabel).map(t => ({ value: t, label: typeLabel(t) }))}
+                  />
+                  <ColumnFilterChoices
+                    label="Severity" value={filterSeverity} allLabel="All severities" onChange={setFilterSeverity}
+                    options={[...severityOptions, SERIOUS_OR_FATAL].map(v => ({ value: v, label: severityLabel(v) }))}
+                  />
+                </ColumnHeader>
+                <ColumnHeader
+                  label="Person Involved" sortOptions={textSortOptions("person")} sort={sort} onSortChange={setSort}
+                  filterActive={!!filterPerson.trim()} onClearFilter={() => setFilterPerson("")}
+                >
+                  <ColumnSearch label="Search person involved" placeholder="Name or job title" value={filterPerson} onChange={setFilterPerson} />
+                </ColumnHeader>
+                <ColumnHeader
+                  label="Location" className="hidden md:table-cell" sortOptions={textSortOptions("location")} sort={sort} onSortChange={setSort}
+                  filterActive={!!filterLocation.trim()} onClearFilter={() => setFilterLocation("")}
+                >
+                  <ColumnSearch label="Search location" placeholder="Location or what3words" value={filterLocation} onChange={setFilterLocation} />
+                </ColumnHeader>
+                <ColumnHeader
+                  label="Description" className="hidden lg:table-cell"
+                  filterActive={!!filterDescription.trim()} onClearFilter={() => setFilterDescription("")}
+                >
+                  <ColumnSearch label="Search description" placeholder="Words in the description" value={filterDescription} onChange={setFilterDescription} />
+                </ColumnHeader>
+                <ColumnHeader
+                  label="Status"
+                  sortOptions={[
+                    { key: "status", dir: "asc", label: "Open first" },
+                    { key: "status", dir: "desc", label: "Closed first" },
+                  ]}
+                  sort={sort} onSortChange={setSort}
+                  filterActive={filterStatus !== "all"} onClearFilter={() => setFilterStatus("all")}
+                >
+                  <ColumnFilterChoices
+                    label="Status" value={filterStatus} allLabel="All statuses" onChange={v => setFilterStatus(v as Status | "all")}
+                    options={STATUSES.map(v => ({ value: v, label: STATUS_LABELS[v] }))}
+                  />
+                </ColumnHeader>
+                <ColumnHeader
+                  label="RIDDOR" className="hidden sm:table-cell"
+                  sortOptions={[
+                    { key: "riddor", dir: "asc", label: "Overdue and outstanding first" },
+                    { key: "riddor", dir: "desc", label: "Not reportable first" },
+                  ]}
+                  sort={sort} onSortChange={setSort}
+                  filterActive={filterRiddor} onClearFilter={() => setFilterRiddor(false)}
+                >
+                  <ColumnFilterChoices
+                    label="Show" value={filterRiddor ? "riddor" : "all"} allLabel="All incidents"
+                    onChange={v => setFilterRiddor(v === "riddor")}
+                    options={[{ value: "riddor", label: "RIDDOR reportable only" }]}
+                  />
+                </ColumnHeader>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider"></th>
               </tr>
             </thead>

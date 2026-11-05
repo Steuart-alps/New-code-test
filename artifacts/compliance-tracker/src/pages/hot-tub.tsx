@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
@@ -311,6 +312,23 @@ export default function HotTubPage() {
     }
     return rows;
   }, [checks, filterType, filterSite, filterTub, filterFrom, filterTo, search, tubMap]);
+  const TH = "text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider";
+  const num = (v: string | null) => (v == null || v === "" || Number.isNaN(parseFloat(v)) ? null : parseFloat(v));
+  const checksTable = useListTable(filtered, [
+    { key: "type", label: "Check Type", className: TH, value: r => CHECK_TYPE_LABELS[r.checkType as CheckType] ?? r.checkType,
+      sort: "text", filter: "choice", filterValue: r => r.checkType, choiceLabel: v => CHECK_TYPE_LABELS[v as CheckType] ?? v },
+    { key: "tub", label: "Tub", className: `${TH} hidden sm:table-cell`, value: r => (r.hotTubId ? tubMap.get(r.hotTubId)?.name : null),
+      sort: "text", filter: "choice" },
+    { key: "date", label: "Date", className: TH, value: r => r.checkDate, sort: "date", filter: "date" },
+    { key: "result", label: "Result", className: TH, value: r => (r.result === "pass" ? "Pass" : "Fail"), sort: ["Fail first", "Pass first"],
+      filter: "choice" },
+    { key: "ph", label: "pH", className: `${TH} hidden lg:table-cell`, value: r => num(r.phValue), sort: "number" },
+    { key: "sanitiser", label: "Sanitiser (ppm)", className: `${TH} hidden lg:table-cell`, value: r => num(r.sanitiserLevel), sort: "number" },
+    { key: "temp", label: "Temp (°C)", className: `${TH} hidden lg:table-cell`, value: r => num(r.temperature), sort: "number" },
+    { key: "by", label: "Performed By", className: `${TH} hidden md:table-cell`, value: r => r.performedBy, sort: "text", filter: "choice" },
+    { key: "photos", label: "Photos", className: `${TH} hidden sm:table-cell` },
+    { key: "edit", label: "", className: TH },
+  ] satisfies ListColumn<HotTubCheck>[]);
 
   // ── Download PDF log (for health inspections) ────────────────────────────────
 
@@ -804,21 +822,11 @@ export default function HotTubPage() {
         <div className="border border-border rounded-sm overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-muted/40 border-b border-border">
-              <tr>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider">Check Type</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider hidden sm:table-cell">Tub</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider">Date</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider">Result</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider hidden lg:table-cell">pH</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider hidden lg:table-cell">Sanitiser (ppm)</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider hidden lg:table-cell">Temp (°C)</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider hidden md:table-cell">Performed By</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider hidden sm:table-cell">Photos</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider"></th>
-              </tr>
+              <tr><ListTableHeadings table={checksTable} /></tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filtered.map(r => {
+              <ListTableNoMatches table={checksTable} colSpan={10} />
+              {checksTable.rows.map(r => {
                 const tub = r.hotTubId ? tubMap.get(r.hotTubId) : null;
                 return (
                   <tr key={r.id} className="bg-white hover:bg-muted/20 transition-colors group">

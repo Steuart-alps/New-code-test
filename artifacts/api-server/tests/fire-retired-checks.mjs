@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { createTenant, createUser, isoDay, pool } from './approval-workflow-fixtures.mjs';
 
-// FireTrack no longer records its own alarm panel check (the panel is on the
-// premises opening and closing checks) or its contractor services (the fire
-// alarm and extinguisher services and the annual 3-hour emergency lighting
-// test), which are their compliance checks, shown on FireTrack. Older records
-// stay and can still be edited. A compliance check can be done in house by a
+// FireTrack's alarm panel check (on the premises opening and closing checks
+// only; no new FireTrack records) and its contractor services (the fire alarm and extinguisher
+// services and the annual 3-hour emergency lighting test, due by their
+// compliance checks, shown on FireTrack) have no FireTrack due date of their
+// own; the services can be recorded in FireTrack (Nov 2026). A passed contractor
+// service marks its compliance check done, and completing the compliance
+// check records it in FireTrack. A compliance check can be done in house by a
 // competent person, and no contractor certificate is then due. Run:
 //   FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/fire-retired-checks.mjs
 
@@ -29,13 +31,27 @@ try {
   assert.deepEqual(alerts.filter(alert => alert.module === 'fire' && RETIRED.includes(alert.checkType)), []);
   console.log('ok - the alarm panel check and the contractor services are not in the FireTrack status or reminders');
 
-  // ── No new records ──────────────────────────────────────────────────────────
-  for (const checkType of RETIRED) {
-    const refused = await staff.request('POST', '/fire-safety', { checkType, checkDate: today, result: 'pass', siteId: site.id });
-    assert.equal(refused.status, 400, `${checkType}: ${JSON.stringify(refused.data)}`);
-    assert.equal(refused.data.code, 'FIRE_CHECK_TYPE_RETIRED');
+  // ── Every check can be recorded in FireTrack ───────────────────────────────
+  const alarmService = (await owner.request('POST', '/compliance-items', {
+    title: 'Fire Alarm Maintenance', priority: 'high', siteId: site.id, frequencyMonths: 6, dueDate: `${today}T00:00:00.000Z`,
+  })).data;
+  for (const checkType of RETIRED.filter(type => type !== 'alarm_panel')) {
+    const recorded = await staff.request('POST', '/fire-safety', { checkType, checkDate: today, result: 'pass', siteId: site.id });
+    assert.equal(recorded.status, 201, `${checkType}: ${JSON.stringify(recorded.data)}`);
   }
-  console.log('ok - FireTrack refuses new records of the retired checks, saying where they are kept now');
+  const panel = await staff.request('POST', '/fire-safety', { checkType: 'alarm_panel', checkDate: today, result: 'pass', siteId: site.id });
+  assert.equal(panel.status, 400, 'the alarm panel stays on the opening and closing checks');
+  assert.equal(panel.data.code, 'FIRE_CHECK_TYPE_RETIRED');
+  const recordedStatus = (await owner.request('GET', `/fire-safety/status?siteId=${site.id}`)).data;
+  assert.deepEqual(recordedStatus.filter(row => RETIRED.includes(row.checkType)), [], 'still not due in FireTrack');
+  const serviced = (await owner.request('GET', `/compliance-items/${alarmService.id}`)).data;
+  assert.equal(serviced.completedAt.slice(0, 10), today, 'the alarm service pass marks its compliance check done');
+  const { rows: [linkAudit] } = await pool.query(
+    `SELECT metadata FROM audit_events WHERE client_id = $1 AND entity_type = 'compliance_item' AND entity_id = $2
+     ORDER BY id DESC LIMIT 1`, [owner.clientId, alarmService.id]);
+  assert.ok(linkAudit.metadata.fromFireSafetyCheck, 'the audit trail names the FireTrack record');
+  await pool.query(`DELETE FROM fire_safety_checks WHERE client_id = $1`, [owner.clientId]);
+  console.log('ok - contractor services can be recorded in FireTrack (not the alarm panel); a service pass marks its compliance check done');
 
   // ── Older records stay, editable, and make nothing due ─────────────────────
   // (Dated today so the edit is inside the daily-record lock window.)
@@ -51,7 +67,7 @@ try {
   assert.equal(after.some(row => row.checkType === 'alarm_panel'), false);
   console.log('ok - an older alarm panel record stays in the history and can be edited');
 
-  // ── Completing a contractor service records nothing in FireTrack ───────────
+  // ── Completing a contractor service records it in FireTrack ────────────────
   const check = async (title, extra = {}) => {
     const created = await owner.request('POST', '/compliance-items', {
       title, priority: 'high', siteId: site.id, frequencyMonths: 12, dueDate: `${today}T00:00:00.000Z`, ...extra,
@@ -62,14 +78,15 @@ try {
   const lights = await check('Emergency Light Maintenance');
   const done = await staff.request('PATCH', `/compliance-items/${lights.id}/status`, { status: 'completed', completedAt: lastMonth });
   assert.equal(done.status, 200, JSON.stringify(done.data));
-  const { rows: [{ count }] } = await pool.query(
-    `SELECT count(*)::int AS count FROM fire_safety_checks WHERE client_id = $1 AND check_type <> 'alarm_panel'`, [owner.clientId]);
-  assert.equal(count, 0);
+  const { rows: fromCheck } = await pool.query(
+    `SELECT check_type, check_date::text AS day, result FROM fire_safety_checks
+     WHERE client_id = $1 AND check_type <> 'alarm_panel'`, [owner.clientId]);
+  assert.deepEqual(fromCheck.map(r => [r.check_type, r.day, r.result]), [['emergency_lights_annual', lastMonth, 'pass']]);
   const visits = (await owner.request('GET', '/contractor-visits')).data;
   for (const key of ['fire:alarm_service', 'fire:extinguisher_service', 'fire:emergency_lights_annual']) {
     assert.equal(visits.types.find(type => type.key === key)?.dueFrom, 'check', `${key} keeps its own due date`);
   }
-  console.log('ok - the compliance check is the one record of each contractor service, with its own due date');
+  console.log('ok - completing the compliance check records it in FireTrack; the check keeps its own due date');
 
   // ── Done in house by a competent person ────────────────────────────────────
   const contractor = (await owner.request('POST', '/contractors', { name: 'Bright Sparks', email: 'lights@contractor.test' })).data;

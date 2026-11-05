@@ -83,15 +83,20 @@ const ALL_CHECK_TYPES = [
   "alarm", "emergency_lights", "extinguishers",
   "fire_doors", "fire_drill", "fire_walk", "alarm_panel",
   "emergency_lights_annual", "alarm_service", "extinguisher_service", "night_walk",
+  "fire_drill_night",
 ] as const;
 type AnyCheckType = typeof ALL_CHECK_TYPES[number];
+
+/** The everyday fire drill and the night staff drill record the same things. */
+const DRILL_TYPES = new Set<string>(["fire_drill", "fire_drill_night"]);
 
 const CHECK_TYPE_LABELS: Record<AnyCheckType, string> = {
   alarm:            "Weekly fire alarm test",
   emergency_lights: "Monthly emergency lighting flick test",
   extinguishers:    "Weekly extinguisher visual check",
   fire_doors:       "Fire door check",
-  fire_drill:       "Fire drill (6-monthly, with night staff)",
+  fire_drill:       "Fire drill",
+  fire_drill_night: "Fire drill - night staff",
   fire_walk:        "Fire walk — escape route sign-off",
   alarm_panel:      "Alarm panel check",
   emergency_lights_annual: "Annual 3-hour emergency lighting discharge test",
@@ -109,6 +114,7 @@ const LOCATION_PLACEHOLDER: Partial<Record<AnyCheckType, string>> = {
   extinguisher_service:    "e.g. Whole building, 14 extinguishers",
   fire_doors:              "e.g. Kitchen to restaurant door, ground floor",
   fire_drill:              "e.g. Assembly point, front car park",
+  fire_drill_night:        "e.g. Assembly point, front car park",
   alarm_service:           "e.g. Main panel, reception",
 };
 
@@ -122,21 +128,25 @@ const CHECK_TYPE_GROUPS: { label: string; types: AnyCheckType[] }[] = [
   },
   {
     label: "Walkthroughs & drills",
-    types: ["fire_walk", "night_walk", "fire_drill"],
+    types: ["fire_walk", "night_walk", "fire_drill", "fire_drill_night"],
   },
 ];
 
 /**
- * Checks no longer recorded here (the server's RETIRED_FIRE_CHECK_TYPES): the
- * alarm panel is on the premises opening and closing checks, and the
- * contractor services are their compliance checks, shown on this page by
- * TrackContractorChecks. Older records still show in the history and can be
- * filtered.
+ * Every check can be recorded here, in house or by a contractor (Steuart, Nov
+ * 2026). The contractor services also have a compliance check, which gives
+ * their due date and red/amber/green (TrackContractorChecks on this page): a
+ * pass recorded here marks that check done, and marking the check done records
+ * it here. The alarm panel is not recorded here: it is on the premises opening
+ * and closing checks (older panel records still show in the history).
  */
-const RETIRED_CHECK_GROUP: { label: string; types: AnyCheckType[] } = {
-  label: "No longer recorded here",
-  types: ["alarm_panel", "alarm_service", "extinguisher_service", "emergency_lights_annual"],
+const CONTRACTOR_CHECK_GROUP: { label: string; types: AnyCheckType[] } = {
+  label: "Contractor services & annual tests",
+  types: ["alarm_service", "extinguisher_service", "emergency_lights_annual"],
 };
+
+/** Every group, for the record form and the history filter. */
+const RECORD_CHECK_GROUPS = [...CHECK_TYPE_GROUPS, CONTRACTOR_CHECK_GROUP];
 
 /** How often, in words, for the status cards. */
 function frequencyLabel(days: number): string {
@@ -175,7 +185,6 @@ function NightStaffPicker({ value, onChange, optional }: { value: NightStaff | n
         <Moon className="w-4 h-4 text-primary flex-shrink-0" />
         <p className="text-sm font-medium">Night staff included? {optional && <span className="text-muted-foreground text-xs font-normal">optional</span>}</p>
       </div>
-      <p className="text-xs text-muted-foreground">Drills are due at least every 6 months and should include night staff.</p>
       <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Night staff included">
         {(Object.keys(NIGHT_STAFF_OPTIONS) as NightStaff[]).map(option => (
           <button key={option} type="button" role="radio" aria-checked={value === option} onClick={() => onChange(option)}
@@ -202,9 +211,55 @@ function NightStaffPicker({ value, onChange, optional }: { value: NightStaff | n
   );
 }
 
+/** What the night staff drill is for, shown when it is chosen. */
+function NightDrillGuide() {
+  return (
+    <div className="flex gap-2 border border-border rounded-sm p-3 bg-muted/20 text-xs text-muted-foreground" data-testid="night-drill-guide">
+      <Moon className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
+      <p>
+        A drill for the staff on duty at night, when the building has sleeping accommodation. Tick the night staff who took
+        part below. Due at least every 6 months, like the everyday fire drill.
+      </p>
+    </div>
+  );
+}
+
 // Drill notes are required: what needs to improve, or that nothing does.
 const DRILL_NOTES_LABEL = "Improvements required / notes";
 const DRILL_NOTES_PLACEHOLDER = "e.g. Fire door on the first floor was slow to close; everyone used the nearest exit";
+
+// ── Contractor services ───────────────────────────────────────────────────────
+
+/** Contractor jobs that are also compliance checks, and the check each one marks done. */
+const LINKED_CHECK_GUIDES: Partial<Record<AnyCheckType, { testId: string; heading: string; who: string; check: string }>> = {
+  emergency_lights_annual: {
+    testId: "discharge-test-guide", heading: "Annual 3-hour discharge test.",
+    who: "emergency lighting contractor, or in house by a competent person", check: "Emergency Light Maintenance",
+  },
+  alarm_service: {
+    testId: "alarm-service-guide", heading: "6-monthly fire alarm service.",
+    who: "fire alarm contractor (BS 5839)", check: "Fire Alarm Maintenance",
+  },
+  extinguisher_service: {
+    testId: "extinguisher-service-guide", heading: "Annual fire extinguisher service.",
+    who: "extinguisher contractor (BS 5306-3)", check: "Fire Extinguishers Maintenance",
+  },
+};
+
+function LinkedCheckGuide({ checkType }: { checkType: AnyCheckType }) {
+  const guide = LINKED_CHECK_GUIDES[checkType];
+  if (!guide) return null;
+  return (
+    <div className="flex gap-2 border border-border rounded-sm p-3 bg-muted/20 text-xs text-muted-foreground" data-testid={guide.testId}>
+      <Lightbulb className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
+      <p>
+        <span className="font-medium text-foreground">{guide.heading}</span> Usually done by your {guide.who}.
+        A pass here also marks the "{guide.check}" compliance check done, at this site. Its certificate still goes on
+        that compliance check, and it shows red until the certificate is in.
+      </p>
+    </div>
+  );
+}
 
 // ── Emergency lighting ────────────────────────────────────────────────────────
 
@@ -754,7 +809,7 @@ function parseJsonRecord(raw: string | undefined | null, fallback: Record<string
 
 const DEFAULT_FIRE_FREQUENCIES: Record<string, number> = {
   alarm: 7, emergency_lights: 30, extinguishers: 7, fire_doors: 90,
-  fire_drill: 180, fire_walk: 7,
+  fire_drill: 180, fire_drill_night: 180, fire_walk: 7,
 };
 
 type FireProfileState = {
@@ -1039,7 +1094,6 @@ function RecordCheckDialog({
 
   // Weekly alarm test: the call point used. Drills: whether night staff took part.
   const [callPointChoice, setCallPointChoice] = useState<{ callPointId: number | null; callPoint: string }>({ callPointId: null, callPoint: "" });
-  const [nightStaff, setNightStaff] = useState<NightStaff | null>(null);
   // Drills: the time of the drill, how long the evacuation took and who was there.
   const [drillTime, setDrillTime] = useState("");
   const [evacuation, setEvacuation] = useState<EvacuationValue>(EMPTY_EVACUATION);
@@ -1156,7 +1210,7 @@ function RecordCheckDialog({
   function reset() {
     setCheckDate(todayIso()); setResult("pass"); setLocation(""); setPerformedBy(user?.name ?? ""); setNotes("");
     setRoutes([]); setPanelStatus("normal"); setFaultsFound(""); setZonesTested(""); setActionsTaken("");
-    setCallPointChoice({ callPointId: null, callPoint: "" }); setNightStaff(null); setSoundLevel(EMPTY_SOUND_LEVEL);
+    setCallPointChoice({ callPointId: null, callPoint: "" }); setSoundLevel(EMPTY_SOUND_LEVEL);
     setDrillTime(""); setEvacuation(EMPTY_EVACUATION); setStaffPresentIds([]);
     media.clear();
     setWalkTime(null);
@@ -1164,19 +1218,22 @@ function RecordCheckDialog({
 
   const selectedSiteRow = sites?.find(s => s.id === selectedSite);
   // The escape route sign-off is for sites with sleeping accommodation, night
-  // walks for sites with a night porter. The chosen type always stays listed.
+  // walks for sites with a night porter, and the night staff drill for sites
+  // answered as having sleeping accommodation. The chosen type always stays listed.
   const offered = (k: AnyCheckType) => k === checkType
     || (k === "fire_walk" ? selectedSiteRow?.sleepingAccommodation !== false
+      : k === "fire_drill_night" ? (selectedSiteRow ? selectedSiteRow.sleepingAccommodation === true : !!sites?.some(s => s.sleepingAccommodation))
       : k === "night_walk" ? (selectedSiteRow ? selectedSiteRow.nightPorter === true : !!sites?.some(s => s.nightPorter))
       : true);
 
   const missing = checkType === "alarm" && !callPointChoice.callPointId && !callPointChoice.callPoint.trim()
     ? "Choose the call point tested"
     : checkType === "alarm" && soundLevel.db.trim() && parseSoundLevel(soundLevel.db) === null ? "Enter a sound level between 20 and 140 dB"
-    : checkType === "fire_drill" && !drillTime ? "Give the time of the drill"
-    : checkType === "fire_drill" && parseEvacuation(evacuation) === null ? "Give the time taken to evacuate"
-    : checkType === "fire_drill" && !nightStaff ? "Say whether night staff were included (Yes, No or N/A)"
-    : checkType === "fire_drill" && !notes.trim() ? "Write the improvements required, or notes"
+    : checkType === "fire_drill_night" && !selectedSite ? "Choose the site"
+    : checkType === "fire_drill_night" && selectedSiteRow?.sleepingAccommodation !== true ? "The night staff fire drill is for sites with sleeping accommodation"
+    : DRILL_TYPES.has(checkType) && !drillTime ? "Give the time of the drill"
+    : DRILL_TYPES.has(checkType) && parseEvacuation(evacuation) === null ? "Give the time taken to evacuate"
+    : DRILL_TYPES.has(checkType) && !notes.trim() ? "Write the improvements required, or notes"
     : checkType === "night_walk" && !selectedSite ? "Choose the site"
     : checkType === "night_walk" && !walkTime ? "Choose which walk: 22:00, 02:00 or 06:00"
     : checkType === "night_walk" && !performedBy.trim() ? "Say who did the walk"
@@ -1197,8 +1254,8 @@ function RecordCheckDialog({
         callPoint: callPointChoice.callPointId ? null : callPointChoice.callPoint.trim(),
         ...soundLevelRequest(soundLevel),
       } : {}),
-      ...(checkType === "fire_drill" ? {
-        nightStaff, drillTime, evacuationSeconds: parseEvacuation(evacuation), staffPresentIds,
+      ...(DRILL_TYPES.has(checkType) ? {
+        drillTime, evacuationSeconds: parseEvacuation(evacuation), staffPresentIds,
       } : {}),
       ...(checkType === "night_walk" ? { walkTime } : {}),
     };
@@ -1240,7 +1297,7 @@ function RecordCheckDialog({
             <Select value={checkType} onValueChange={v => setCheckType(v as AnyCheckType)}>
               <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {CHECK_TYPE_GROUPS.map(g => (
+                {RECORD_CHECK_GROUPS.map(g => (
                   <div key={g.label}>
                     <p className="px-2 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{g.label}</p>
                     {sortByLabel(g.types.filter(offered), k => CHECK_TYPE_LABELS[k]).map(k => (
@@ -1275,11 +1332,12 @@ function RecordCheckDialog({
           )}
 
           {checkType === "emergency_lights" && <FlickTestGuide />}
+          <LinkedCheckGuide checkType={checkType} />
 
-          {checkType === "fire_drill" && (
+          {DRILL_TYPES.has(checkType) && (
             <>
+              {checkType === "fire_drill_night" && <NightDrillGuide />}
               <DrillTimingFields drillTime={drillTime} onDrillTimeChange={setDrillTime} evacuation={evacuation} onEvacuationChange={setEvacuation} />
-              <NightStaffPicker value={nightStaff} onChange={setNightStaff} />
               <DrillStaffPicker siteId={selectedSite} value={staffPresentIds} onChange={setStaffPresentIds} />
             </>
           )}
@@ -1389,7 +1447,7 @@ function RecordCheckDialog({
             </div>
           )}
 
-          {checkType === "fire_drill" ? (
+          {DRILL_TYPES.has(checkType) ? (
             <div className="space-y-1.5">
               <Label htmlFor="drill-notes">{DRILL_NOTES_LABEL}</Label>
               <Textarea id="drill-notes" value={notes} onChange={e => setNotes(e.target.value)} rows={3} className="rounded-sm"
@@ -1452,7 +1510,7 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
   const routesFixed = structured?._type === "fire_walk" && (structured as FireWalkNotes).routes.length > 0;
   const isPanel = checkType === "alarm_panel";
   const isAlarm = checkType === "alarm";
-  const isDrill = checkType === "fire_drill";
+  const isDrill = DRILL_TYPES.has(checkType);
 
   // Records saved before these fields existed may stay blank; a recorded
   // answer can be changed but not removed.
@@ -1573,7 +1631,8 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
             <>
               <DrillTimingFields drillTime={drillTime} onDrillTimeChange={setDrillTime} evacuation={evacuation} onEvacuationChange={setEvacuation}
                 optional={!check.drillTime && check.evacuationSeconds == null} />
-              <NightStaffPicker value={nightStaff} onChange={setNightStaff} optional={!check.nightStaff} />
+              {/* Asked on drills before the night staff drill was its own check. */}
+              {checkType === "fire_drill" && check.nightStaff && <NightStaffPicker value={nightStaff} onChange={setNightStaff} />}
               <DrillStaffPicker siteId={selectedSite} value={staffPresentIds} onChange={setStaffPresentIds} recorded={recordedStaff} />
             </>
           )}
@@ -1812,6 +1871,47 @@ export default function FireSafetyPage() {
           </div>
         </div>
 
+        {/* Filters */}
+        <Card>
+          <CardHeader className="border-b border-border/50 pb-4">
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-muted-foreground" />
+              <CardTitle className="text-base font-display font-bold">Filter History</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="p-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Check Type</Label>
+                <Select value={filterType || "all"} onValueChange={v => setFilterType(v === "all" ? "" : v as AnyCheckType)}>
+                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="All types" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All types</SelectItem>
+                    {RECORD_CHECK_GROUPS.map(g => (
+                      <div key={g.label}>
+                        <p className="px-2 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{g.label}</p>
+                        {sortByLabel(g.types, k => CHECK_TYPE_LABELS[k]).map(k => <SelectItem key={k} value={k}>{CHECK_TYPE_LABELS[k]}</SelectItem>)}
+                      </div>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {sites && sites.length > 0 && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Site</Label>
+                  <Select value={filterSite ? String(filterSite) : "all"} onValueChange={v => setFilterSite(v === "all" ? undefined : Number(v))}>
+                    <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All sites</SelectItem>
+                      {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Status overview — two rows */}
         {statusLoading ? (
           <Card>
@@ -1903,47 +2003,6 @@ export default function FireSafetyPage() {
         <CallPointRotationCard siteId={filterSite} sites={sites} enabled={hasFiretrack} />
         {hasFiretrack && canEdit && <DrillAttendanceCard siteId={filterSite} />}
 
-        {/* Filters */}
-        <Card>
-          <CardHeader className="border-b border-border/50 pb-4">
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-muted-foreground" />
-              <CardTitle className="text-base font-display font-bold">Filter History</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="p-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Check Type</Label>
-                <Select value={filterType || "all"} onValueChange={v => setFilterType(v === "all" ? "" : v as AnyCheckType)}>
-                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="All types" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All types</SelectItem>
-                    {[...CHECK_TYPE_GROUPS, RETIRED_CHECK_GROUP].map(g => (
-                      <div key={g.label}>
-                        <p className="px-2 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{g.label}</p>
-                        {sortByLabel(g.types, k => CHECK_TYPE_LABELS[k]).map(k => <SelectItem key={k} value={k}>{CHECK_TYPE_LABELS[k]}</SelectItem>)}
-                      </div>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {sites && sites.length > 0 && (
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Site</Label>
-                  <Select value={filterSite ? String(filterSite) : "all"} onValueChange={v => setFilterSite(v === "all" ? undefined : Number(v))}>
-                    <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All sites</SelectItem>
-                      {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
         {/* Check history */}
         <Card>
           <CardHeader className="border-b border-border/50 pb-4">
@@ -2010,7 +2069,7 @@ export default function FireSafetyPage() {
                             {check.evacuationSeconds != null && (
                               <div><span className="font-medium">Time taken to evacuate:</span> {formatEvacuation(check.evacuationSeconds)}</div>
                             )}
-                            {check.checkType === "fire_drill" && (check.staffPresent?.length ?? 0) > 0 && (
+                            {DRILL_TYPES.has(check.checkType) && (check.staffPresent?.length ?? 0) > 0 && (
                               <div data-testid={`drill-staff-present-${check.id}`}>
                                 <span className="font-medium">Staff present ({check.staffPresent!.length}):</span> {check.staffPresent!.map(person => person.name).join(", ")}
                               </div>
@@ -2021,7 +2080,7 @@ export default function FireSafetyPage() {
                           {structured?._type === "alarm_panel" && <AlarmPanelDisplay data={structured as AlarmPanelNotes} />}
                           {/* Plain notes fallback */}
                           {!structured && check.notes && (
-                            <div className="text-xs text-muted-foreground"><span className="font-medium">{check.checkType === "fire_drill" ? `${DRILL_NOTES_LABEL}:` : "Notes:"}</span> {check.notes}</div>
+                            <div className="text-xs text-muted-foreground"><span className="font-medium">{DRILL_TYPES.has(check.checkType) ? `${DRILL_NOTES_LABEL}:` : "Notes:"}</span> {check.notes}</div>
                           )}
                           <CheckPhotoUploader entityType="fire_safety_check" entityId={check.id} compact />
                         </div>
