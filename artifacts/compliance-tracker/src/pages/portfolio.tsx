@@ -22,18 +22,19 @@ interface PortfolioBusiness {
   name: string;
   active: boolean;
   sites: number;
-  siteList: Array<{ id: number; name: string }>;
+  siteList: Array<{ id: number; name: string; createdAt?: string | null }>;
   overdueChecks: number;
   openActions: number;
   overdueActions: number;
   lastActivityAt: string | null;
   subscription: SubscriptionState;
   trialEndsAt: string | null;
+  createdAt?: string | null;
 }
 
 interface Branding { practiceName: string | null; hasLogo: boolean; updatedAt: string | null }
 
-const ukDate = (value: string | null) => value ? format(new Date(value), "d MMM yyyy") : "—";
+const ukDate = (value: string | null | undefined) => value ? format(new Date(value), "d MMM yyyy") : "—";
 
 function subscriptionLabel(business: PortfolioBusiness): { text: string; tone: "good" | "warn" | "bad" | "muted" } {
   switch (business.subscription) {
@@ -66,7 +67,15 @@ function SiteNames({ business }: { business: PortfolioBusiness }) {
   return (
     <p className="flex items-start gap-1 text-xs text-muted-foreground">
       <MapPin className="mt-0.5 h-3 w-3 shrink-0" />
-      <span className="break-words">{names.map(site => site.name).join(", ")}</span>
+      <span className="break-words">
+        {names.map((site, index) => (
+          <span key={site.id}>
+            {index > 0 && ", "}
+            {site.name}
+            {site.createdAt && <span className="whitespace-nowrap"> (created {ukDate(site.createdAt)})</span>}
+          </span>
+        ))}
+      </span>
     </p>
   );
 }
@@ -205,6 +214,7 @@ export default function PortfolioPage() {
     { key: "sites", label: "Sites", className: "p-3 text-right font-medium", value: b => b.sites, sort: "number" },
     { key: "overdue", label: "Overdue checks", className: "p-3 text-right font-medium", value: b => b.overdueChecks, sort: ["Fewest first", "Most first"] },
     { key: "actions", label: "Open actions", className: "p-3 text-right font-medium", value: b => b.openActions, sort: ["Fewest first", "Most first"] },
+    { key: "created", label: "Created", className: "p-3 font-medium", value: b => b.createdAt ?? null, sort: "date", filter: "date" },
     { key: "activity", label: "Last activity", className: "p-3 font-medium", value: b => b.lastActivityAt, sort: "date", filter: "date" },
     { key: "subscription", label: "Subscription", className: "p-3 font-medium", value: b => subscriptionLabel(b).text, sort: "text", filter: "choice",
       filterValue: b => (b.subscription === "trial" && b.trialEndsAt ? "On trial" : subscriptionLabel(b).text) },
@@ -268,7 +278,7 @@ export default function PortfolioPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="break-words font-semibold">{business.name}</p>
-                      <p className="text-xs text-muted-foreground">Last activity {ukDate(business.lastActivityAt)}</p>
+                      <p className="text-xs text-muted-foreground">Created {ukDate(business.createdAt)} · Last activity {ukDate(business.lastActivityAt)}</p>
                       <SiteNames business={business} />
                     </div>
                     <SubscriptionBadge business={business} />
@@ -290,7 +300,7 @@ export default function PortfolioPage() {
                   <tr><ListTableHeadings table={table} /></tr>
                 </thead>
                 <tbody>
-                  <ListTableNoMatches table={table} colSpan={7} />
+                  <ListTableNoMatches table={table} colSpan={8} />
                   {table.rows.map(business => (
                     <tr key={business.id} className="border-t" data-testid={`portfolio-row-${business.id}`}>
                       <td className="p-3">
@@ -300,6 +310,7 @@ export default function PortfolioPage() {
                       <td className="p-3 text-right"><Count value={business.sites} /></td>
                       <td className="p-3 text-right"><Count value={business.overdueChecks} alert /></td>
                       <td className="p-3 text-right"><Count value={business.openActions} alert={business.overdueActions > 0} />{business.overdueActions > 0 && <span className="block text-xs text-rose-700">{business.overdueActions} overdue</span>}</td>
+                      <td className="p-3 whitespace-nowrap">{ukDate(business.createdAt)}</td>
                       <td className="p-3 whitespace-nowrap">{ukDate(business.lastActivityAt)}</td>
                       <td className="p-3"><SubscriptionBadge business={business} /></td>
                       <td className="p-3 text-right"><Button size="sm" variant="outline" onClick={() => open(business)}>Open</Button></td>

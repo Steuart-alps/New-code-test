@@ -319,6 +319,9 @@ async function portfolio(owner, ownerClientId, secondClientId, admin, viewer) {
   const first = baseline.find((b) => b.id === ownerClientId);
   check("portfolio: site count", first?.sites === 2, JSON.stringify(first));
   check("portfolio: trial state reported", first?.subscription === "trial", JSON.stringify(first));
+  check("portfolio: business created date reported", !Number.isNaN(Date.parse(first?.createdAt ?? "")), JSON.stringify(first));
+  check("portfolio: each site has a created date",
+    (first?.siteList ?? []).length === 2 && first.siteList.every((site) => !Number.isNaN(Date.parse(site.createdAt ?? ""))), JSON.stringify(first?.siteList));
 
   const past = new Date(Date.now() - 5 * 86400000).toISOString();
   const item = await owner("POST", "/compliance-items", { title: `Overdue survey ${run}`, dueDate: past });

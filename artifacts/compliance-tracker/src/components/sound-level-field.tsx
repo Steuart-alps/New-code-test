@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import {
-  measureWithPhone, phoneAdjustment, phoneMeterSupported, savePhoneAdjustment,
+  measureWithPhone, PHONE_MEASURE_SECONDS, phoneAdjustment, phoneMeterSupported, savePhoneAdjustment,
   SOUND_LEVEL_MIN_DB, soundLevelMinimum, soundLevelVerdict, type SoundLevelMethod,
 } from "@/lib/fire-sound-level";
 
@@ -64,12 +64,19 @@ export function SoundLevelVerdictText({ db, bedhead, method, className }: {
 export function SoundLevelField({ value, onChange }: { value: SoundLevelValue; onChange: (value: SoundLevelValue) => void }) {
   const [measuring, setMeasuring] = useState(false);
   const [live, setLive] = useState<number | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState(PHONE_MEASURE_SECONDS);
+  const [measuredFor, setMeasuredFor] = useState<number | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [maxedOut, setMaxedOut] = useState(false);
   const [settingUp, setSettingUp] = useState(false);
   const [meterReading, setMeterReading] = useState("");
   const stopRef = useRef<AbortController | null>(null);
-  useEffect(() => () => stopRef.current?.abort(), []);
+  // The reading lands in the box after the form may have changed (a call
+  // point chosen while listening), so it builds on the latest value.
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const unmounted = useRef(false);
+  useEffect(() => () => { unmounted.current = true; stopRef.current?.abort(); }, []);
 
   const db = parseSoundLevel(value.db);
   const invalid = value.db.trim() !== "" && db === null;
@@ -78,13 +85,25 @@ export function SoundLevelField({ value, onChange }: { value: SoundLevelValue; o
   async function measure() {
     setProblem(null);
     setMaxedOut(false);
+    setMeasuredFor(null);
+    setSecondsLeft(PHONE_MEASURE_SECONDS);
     setMeasuring(true);
     const controller = new AbortController();
     stopRef.current = controller;
     try {
-      const result = await measureWithPhone({ seconds: 5, onLevel: level => setLive(Math.round(level)), signal: controller.signal });
+      const result = await measureWithPhone({
+        seconds: PHONE_MEASURE_SECONDS,
+        onLevel: (level, left) => { setLive(Math.round(level)); setSecondsLeft(left); },
+        signal: controller.signal,
+      });
+      if (unmounted.current) return;
+      if (parseSoundLevel(String(result.db)) === null) {
+        setProblem("The phone didn't pick up the alarm. Check the microphone is allowed and not covered, then try again, or type the reading in.");
+        return;
+      }
       setMaxedOut(result.maxedOut);
-      onChange({ ...value, db: String(result.db), method: "phone" });
+      setMeasuredFor(result.seconds);
+      onChange({ ...valueRef.current, db: String(result.db), method: "phone" });
     } catch (err: any) {
       if (err?.name !== "AbortError") {
         setProblem(err?.name === "NotAllowedError"
@@ -134,8 +153,8 @@ export function SoundLevelField({ value, onChange }: { value: SoundLevelValue; o
         </Select>
         {phoneMeterSupported && (
           measuring ? (
-            <Button type="button" variant="destructive" size="sm" className="h-9" onClick={() => stopRef.current?.abort()}>
-              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> {live !== null ? `${live} dB` : "Listening"}… Stop
+            <Button type="button" variant="destructive" size="sm" className="h-9" onClick={() => stopRef.current?.abort()} data-testid="button-stop-sound">
+              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> {live !== null ? `${live} dB, ${secondsLeft} s left` : "Listening…"} · Stop now
             </Button>
           ) : (
             <Button type="button" variant="outline" size="sm" className="h-9" onClick={measure} data-testid="button-measure-sound">
@@ -144,7 +163,10 @@ export function SoundLevelField({ value, onChange }: { value: SoundLevelValue; o
           )
         )}
       </div>
-      {measuring && <p className="text-xs text-muted-foreground" aria-live="polite">Hold the phone up, away from your body, for 5 seconds while the alarm sounds.</p>}
+      {measuring && <p className="text-xs text-muted-foreground" aria-live="polite">Hold the phone up, away from your body, for {PHONE_MEASURE_SECONDS} seconds while the alarm sounds. It stops on its own and puts the average in the box.</p>}
+      {!measuring && measuredFor !== null && db !== null && value.method === "phone" && (
+        <p className="text-xs text-muted-foreground" aria-live="polite" data-testid="sound-level-measured">Average over {measuredFor} seconds put in the box.</p>
+      )}
       {invalid && <p className="text-xs text-rose-700">Enter a level between 20 and 140 dB.</p>}
       {problem && <p role="alert" className="text-xs text-rose-700">{problem}</p>}
       <label className="flex items-center gap-2 text-xs cursor-pointer">
