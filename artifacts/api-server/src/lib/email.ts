@@ -210,14 +210,40 @@ const EMAIL_LAYOUT_MARKER = 'data-complytrack-email="1"';
 
 /** Brand colours shared by every email. */
 export const EMAIL_BRAND = {
-  header: "#0f172a",
-  button: "#2563eb",
+  /** The navy of the website's login page, sidebar and buttons. */
+  header: "#162D42",
+  button: "#162D42",
+  /** The website's light blue accent. */
+  accent: "#7DA7C9",
+  /** The website's heading typeface, with email-safe fallbacks. */
+  displayFont: "'Cormorant Garamond',Georgia,'Times New Roman',serif",
 } as const;
+
+/** Older bodies' bright blue buttons and links take the website's navy instead. */
+const OFF_BRAND_BLUE = /#(?:2563eb|1d4ed8)\b/gi;
 
 /** Call-to-action link styled as the shared blue button. `href` must be safe for an attribute. */
 export function emailButton(href: string, label: string): string {
-  return `<a href="${href}" style="display:inline-block;background:${EMAIL_BRAND.button};color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:10px;font-size:16px;font-weight:700;">${label}</a>`;
+  return `<a href="${href}" style="display:inline-block;background:${EMAIL_BRAND.button};color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:2px;font-size:16px;font-weight:700;">${label}</a>`;
 }
+
+/** The bold line that opens a message, under the greeting. `html` is escaped by the caller. */
+export function emailHeadline(html: string): string {
+  return `<p style="margin:0 0 12px;font-size:19px;font-weight:700;color:${EMAIL_BRAND.header};">${html}</p>`;
+}
+
+/** A soft grey box for the part of a message the reader must not miss. */
+export function emailPanel(html: string): string {
+  return `<div style="background:#f8fafc;border-radius:12px;padding:20px 24px;margin:24px 0;">${html}</div>`;
+}
+
+/** The shared button, centred on its own line. */
+export function emailButtonRow(href: string, label: string): string {
+  return `<div style="text-align:center;margin:28px 0;">${emailButton(href, label)}</div>`;
+}
+
+/** Closing line used by every message. */
+export const EMAIL_SIGN_OFF = `<p style="margin:24px 0 0;">Best regards,<br><strong>ComplyTrack</strong></p>`;
 
 /** Smallest text size in an email body; the main text is 16px. */
 const MIN_BODY_FONT_PX = 13;
@@ -234,27 +260,27 @@ function readableFontSizes(html: string): string {
 }
 
 /**
- * The one design every ComplyTrack email uses: dark header with the
- * ComplyTrack name, a white card for the message, and a footer with the ALPS
- * logo and legal name. `subtitle` and `footerNote` are HTML; callers escape
+ * The one design every ComplyTrack email uses: navy header with the ALPS
+ * logo and the ComplyTrack name, a white card for the message, and a footer
+ * with the legal name. `subtitle` and `footerNote` are HTML; callers escape
  * any business text in them.
  */
 export function renderEmailLayout(opts: { bodyHtml: string; subtitle?: string; footerNote?: string }): string {
   const appUrl = getPublicAppUrl();
   return `<!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
+<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@700&display=swap" rel="stylesheet"/></head>
 <body ${EMAIL_LAYOUT_MARKER} style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
-  <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
-    <div style="background:${EMAIL_BRAND.header};padding:32px 40px;">
-      <div style="font-size:26px;font-weight:800;color:#ffffff;letter-spacing:-0.3px;">🛡️ ComplyTrack</div>
-      ${opts.subtitle ? `<div style="font-size:16px;font-weight:600;color:#cbd5e1;margin-top:6px;">${opts.subtitle}</div>` : ""}
+  <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:2px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
+    <div style="background:${EMAIL_BRAND.header};padding:32px 40px;text-align:center;">
+      <a href="${escapeHtml(appUrl)}" style="color:#ffffff;text-decoration:none;"><img src="${escapeHtml(appUrl)}/email-assets/alps-logo-white.png" width="128" height="80" alt="ALPS Consultancy" style="display:block;margin:0 auto 14px;border:0;color:#ffffff;font-size:16px;"/></a>
+      <div style="font-family:${EMAIL_BRAND.displayFont};font-size:30px;font-weight:700;color:#ffffff;line-height:1.1;">ComplyTrack</div>
+      ${opts.subtitle ? `<div style="font-size:15px;font-weight:600;color:${EMAIL_BRAND.accent};margin-top:14px;letter-spacing:0.3px;">${opts.subtitle}</div>` : ""}
     </div>
     <div style="padding:32px 40px;color:#1e293b;font-size:16px;line-height:1.6;">
-${readableFontSizes(opts.bodyHtml)}
+${readableFontSizes(opts.bodyHtml).replace(OFF_BRAND_BLUE, EMAIL_BRAND.button)}
     </div>
     <div style="padding:24px 40px;border-top:1px solid #f1f5f9;font-size:13px;color:#64748b;text-align:center;line-height:1.6;">
-      <a href="${escapeHtml(appUrl)}" style="color:#64748b;text-decoration:none;"><img src="${escapeHtml(appUrl)}/email-assets/alps-logo.png" width="96" height="60" alt="ALPS Consultancy" style="display:block;margin:0 auto 12px;border:0;color:#64748b;font-size:13px;"/></a>
       ComplyTrack by ALPS Consultancy${opts.footerNote ? ` · ${opts.footerNote}` : ""}<br/>
       ALPS Consulting Ltd t/as ALPS Consultancy
     </div>

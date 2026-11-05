@@ -2,7 +2,9 @@ import { db } from "@workspace/db";
 import { clientsTable, usersTable } from "@workspace/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { logger } from "./logger";
-import { sendSystemEmail, getPublicAppUrl, escapeHtml } from "./email";
+import {
+  sendSystemEmail, getPublicAppUrl, escapeHtml, renderEmailLayout, emailHeadline, emailPanel, emailButtonRow, EMAIL_SIGN_OFF,
+} from "./email";
 import { countClientSites, findLiveSubscription, getPerSitePrice, quantityForSiteCount } from "./billing";
 import { sendPushToUsers } from "./pushNotifications";
 import { BUNDLE_KEY, BUNDLE_LABEL, COMING_SOON_SERVICE_KEYS, SERVICES, SERVICE_CAP_PENCE, type ServiceKey } from "./services";
@@ -79,19 +81,17 @@ function buildTrialReminderEmail(opts: {
   const safeRecipientName = escapeHtml(opts.recipientName);
   const safeCompanyName   = escapeHtml(opts.companyName);
 
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #1e293b;">Your free trial is ending soon</h2>
-      <p>Hi ${safeRecipientName},</p>
+  const html = renderEmailLayout({
+    subtitle: "Free trial",
+    bodyHtml: `
+      <p style="margin:0 0 16px;">Hi ${safeRecipientName},</p>
+      ${emailHeadline("Your free trial is ending soon")}
       <p>The free trial for <strong>${safeCompanyName}</strong> ends in <strong>${daysPhrase}</strong>, on <strong>${endDateStr}</strong>.</p>
       <p>${escapeHtml(priceLine)}</p>
-      <div style="background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
-        <p style="margin: 0 0 16px; color: #475569; font-size: 14px;">Subscribe now to keep your compliance tracking, reminders and certificates running without interruption.</p>
-        <a href="${opts.billingUrl}" style="display: inline-block; background: #2563eb; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Set Up Billing</a>
-      </div>
-      <p>Best regards,<br><strong>ComplyTrack</strong></p>
-    </div>
-  `;
+      ${emailPanel(`<p style="margin:0;color:#475569;">Subscribe now to keep your compliance tracking, reminders and certificates running without interruption.</p>`)}
+      ${emailButtonRow(opts.billingUrl, "Set Up Billing")}
+      ${EMAIL_SIGN_OFF}`,
+  });
 
   const text = `
 Your free trial is ending soon
@@ -334,20 +334,18 @@ function buildTrialEndedEmail(opts: {
   const priceLine = opts.monthlyTotal
     ? `Based on your current ${opts.siteCount} site${opts.siteCount === 1 ? "" : "s"}${modulesPhrase}, your subscription would be £${opts.monthlyTotal} per month.`
     : "Pricing is per site, per month.";
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #1e293b;">Your free trial has ended</h2>
-      <p>Hi ${escapeHtml(opts.recipientName)},</p>
+  const html = renderEmailLayout({
+    subtitle: "Free trial",
+    bodyHtml: `
+      <p style="margin:0 0 16px;">Hi ${escapeHtml(opts.recipientName)},</p>
+      ${emailHeadline("Your free trial has ended")}
       <p>The free trial for <strong>${escapeHtml(opts.companyName)}</strong> ended on <strong>${escapeHtml(endDateStr)}</strong>.
          Your records are safe, but the account is locked until a subscription is set up.</p>
       <p>${escapeHtml(priceLine)}</p>
-      <div style="background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
-        <p style="margin: 0 0 16px; color: #475569; font-size: 14px;">Subscribe to restore access to your compliance tracking, reminders and certificates.</p>
-        <a href="${opts.billingUrl}" style="display: inline-block; background: #2563eb; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Subscribe now</a>
-      </div>
-      <p>Best regards,<br><strong>ComplyTrack</strong></p>
-    </div>
-  `;
+      ${emailPanel(`<p style="margin:0;color:#475569;">Subscribe to restore access to your compliance tracking, reminders and certificates.</p>`)}
+      ${emailButtonRow(opts.billingUrl, "Subscribe now")}
+      ${EMAIL_SIGN_OFF}`,
+  });
   const text = `
 Your free trial has ended
 
