@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
@@ -75,6 +76,14 @@ function ExpiryBadge({ expiresAt }: { expiresAt: string | null }) {
       Valid · {days}d left
     </Badge>
   );
+}
+
+const EXPIRY_STATES = ["Expired", "Expiring within 30 days", "Valid", "No expiry"] as const;
+/** The Status column's filter group for an expiry date (matches ExpiryBadge). */
+function expiryState(expiresAt: string | null) {
+  const days = daysUntil(expiresAt);
+  if (days === null) return "No expiry";
+  return days < 0 ? "Expired" : days <= 30 ? "Expiring within 30 days" : "Valid";
 }
 
 function fmt(iso: string | null | undefined) {
@@ -201,6 +210,15 @@ export default function StaffTrainingPage() {
   const [editRecord, setEditRecord] = useState<TrainingRecord | null | undefined>(undefined); // undefined = closed, null = new
   const [deleteRecord, setDeleteRecord] = useState<TrainingRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const TH = "text-left px-5 py-3 text-sm font-medium text-muted-foreground";
+  const recordsTable = useListTable(records, [
+    { key: "staff", label: "Staff member", className: TH, value: r => r.staffName, sort: "text", filter: "search" },
+    { key: "course", label: "Course / Certificate", className: TH, value: r => r.courseName, sort: "text", filter: "choice" },
+    { key: "issued", label: "Issued", className: `${TH} hidden sm:table-cell`, value: r => r.issuedAt, sort: "date", filter: "date" },
+    { key: "status", label: "Status", className: TH, value: r => r.expiresAt, sort: ["Expires soonest first", "Expires latest first"],
+      filter: "choice", filterValue: r => expiryState(r.expiresAt), choiceOrder: EXPIRY_STATES },
+    ...(canAdmin ? [{ key: "actions", label: "", className: "w-20 px-3 py-3" }] : []),
+  ] satisfies ListColumn<TrainingRecord>[]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -317,16 +335,11 @@ export default function StaffTrainingPage() {
           <div className="bg-card border border-border rounded-xl overflow-hidden">
             <table className="w-full">
               <thead className="bg-muted/40 border-b border-border">
-                <tr>
-                  <th className="text-left px-5 py-3 text-sm font-medium text-muted-foreground">Staff member</th>
-                  <th className="text-left px-5 py-3 text-sm font-medium text-muted-foreground">Course / Certificate</th>
-                  <th className="text-left px-5 py-3 text-sm font-medium text-muted-foreground hidden sm:table-cell">Issued</th>
-                  <th className="text-left px-5 py-3 text-sm font-medium text-muted-foreground">Status</th>
-                  {canAdmin && <th className="w-20 px-3 py-3" />}
-                </tr>
+                <tr><ListTableHeadings table={recordsTable} /></tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {records.map(r => (
+                <ListTableNoMatches table={recordsTable} colSpan={canAdmin ? 5 : 4} />
+                {recordsTable.rows.map(r => (
                   <tr key={r.id} className="hover:bg-muted/20 transition-colors">
                     <td className="px-5 py-3 text-sm font-medium">{r.staffName}</td>
                     <td className="px-5 py-3 text-sm text-muted-foreground">{r.courseName}</td>

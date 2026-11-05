@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
+import type { SortValue } from "@/lib/table-sort";
 import { AppLayout } from "@/components/layout";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { downloadFile, getDownloadErrorMessage, printHtmlDocument } from "@/lib/download";
@@ -371,9 +373,18 @@ function FileUploadField({ form, setForm }: { form: any; setForm: (f: any) => vo
 
 // ── Generic list table ────────────────────────────────────────────────────────
 
-function ListTable({ headers, rows, photoEntityType, onEdit, onDelete, onDownload, onPrint, onAcknowledgements, canAdmin }: {
+type ListRow = { id: number; cells: React.ReactNode[]; values: SortValue[]; hasFile?: boolean; requiresAcknowledgement?: boolean; className?: string };
+/** How each column's heading sorts and filters, in header order. */
+type ColumnKind = Pick<ListColumn<ListRow>, "sort" | "filter">;
+const TEXT_SEARCH: ColumnKind = { sort: "text", filter: "search" };
+const TEXT_CHOICE: ColumnKind = { sort: "text", filter: "choice" };
+const DATE_RANGE: ColumnKind = { sort: "date", filter: "date" };
+const NUMBER: ColumnKind = { sort: "number" };
+
+function ListTable({ headers, columnKinds, rows, photoEntityType, onEdit, onDelete, onDownload, onPrint, onAcknowledgements, canAdmin }: {
   headers: string[];
-  rows: { id: number; cells: React.ReactNode[]; hasFile?: boolean; requiresAcknowledgement?: boolean; className?: string }[];
+  columnKinds: readonly ColumnKind[];
+  rows: ListRow[];
   photoEntityType?: string;
   onEdit?: (id: number) => void;
   onDelete: (id: number) => void;
@@ -382,18 +393,21 @@ function ListTable({ headers, rows, photoEntityType, onEdit, onDelete, onDownloa
   onAcknowledgements?: (id: number) => void;
   canAdmin: boolean;
 }) {
+  const TH = "text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide";
+  const table = useListTable(rows, [
+    ...headers.map((label, i): ListColumn<ListRow> => ({ key: String(i), label, className: TH, value: r => r.values[i], ...columnKinds[i] })),
+    ...(photoEntityType ? [{ key: "photos", label: "Photos", className: TH }] : []),
+    { key: "actions", label: "", className: "px-4 py-3" },
+  ]);
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
       <table className="w-full">
         <thead className="bg-muted/50">
-          <tr>
-            {headers.map(h => <th key={h} className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">{h}</th>)}
-            {photoEntityType && <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Photos</th>}
-            <th className="px-4 py-3" />
-          </tr>
+          <tr><ListTableHeadings table={table} /></tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {rows.map(r => (
+          <ListTableNoMatches table={table} colSpan={headers.length + (photoEntityType ? 2 : 1)} />
+          {table.rows.map(r => (
             <tr key={r.id} className={cn("hover:bg-muted/30 transition-colors", r.className)}>
               {r.cells.map((c, i) => <td key={i} className="px-4 py-3 text-sm">{c}</td>)}
               {photoEntityType && (
@@ -555,6 +569,7 @@ export default function SafeTrackPage() {
       id: r.id,
       hasFile: !!r.objectPath,
       requiresAcknowledgement: r.requiresAcknowledgement,
+      values: [r.title, r.status.replace("_", " "), r.assessedBy, r.reviewDate, siteName(r.siteId) ?? "All sites"],
       cells: [
         <div className="flex items-center gap-2">
           <span className="font-medium">{r.title}</span>
@@ -578,6 +593,7 @@ export default function SafeTrackPage() {
       id: s.id,
       hasFile: !!s.objectPath,
       requiresAcknowledgement: s.requiresAcknowledgement,
+      values: [s.title, s.publishedAt ? "Published" : "Draft", s.version, s.scope, siteName(s.siteId) ?? "All sites"],
       cells: [
         <div className="flex items-center gap-2">
           <span className="font-medium">{s.title}</span>
@@ -601,6 +617,7 @@ export default function SafeTrackPage() {
       id: h.id,
       hasFile: !!h.objectPath,
       requiresAcknowledgement: h.requiresAcknowledgement,
+      values: [h.title, h.publishedAt ? "Published" : "Draft", h.version, h.section, siteName(h.siteId) ?? "All sites"],
       cells: [
         <div className="flex items-center gap-2">
           <span className="font-medium">{h.title}</span>
@@ -634,6 +651,7 @@ export default function SafeTrackPage() {
       return {
         id: record.id,
         className: overdue ? "bg-rose-50/70" : expiringSoon ? "bg-amber-50/70" : undefined,
+        values: [record.staffName, record.trainingType, record.completedAt, record.expiryDate, siteName(record.siteId) ?? "All sites"],
         cells: [
           <div>
             <span className="font-medium">{record.staffName}</span>
@@ -667,6 +685,8 @@ export default function SafeTrackPage() {
       const answered = checklist.items.filter(item => item.status !== "").length;
       return {
         id: record.id,
+        values: [record.staffName, [checklist.jobTitle, checklist.department].filter(Boolean).join(" · "), record.startDate,
+          record.completedAt ? "Complete" : "In progress", answered, siteName(record.siteId) ?? "All sites"],
         cells: [
           <span className="font-medium">{record.staffName}</span>,
           <span className="text-muted-foreground text-xs">{checklist.jobTitle || "—"}{checklist.department ? ` · ${checklist.department}` : ""}</span>,
@@ -681,11 +701,11 @@ export default function SafeTrackPage() {
     });
 
   const tabConfig = {
-    risk:     { label: "Risk Assessments", singularLabel: "Risk Assessment",  icon: FileText,      sub: "risk-assessments", headers: ["Title", "Status", "Assessed By", "Review Date", "Site"], rows: raRows },
-    sops:     { label: "SOPs",             singularLabel: "SOP",              icon: ClipboardList, sub: "sops",             headers: ["Title", "Status", "Version", "Scope", "Site"],            rows: sopRows },
-    handbook: { label: "Staff Handbook",   singularLabel: "Handbook Entry",   icon: BookMarked,    sub: "handbook",         headers: ["Title", "Status", "Version", "Section", "Site"],          rows: handbookRows },
-    training: { label: "Training Records", singularLabel: "Training Record", icon: GraduationCap, sub: "training-records", headers: ["Staff Member", "Training", "Completed", "Expiry", "Site"], rows: trainingRows },
-    inductions: { label: "Inductions", singularLabel: "Induction", icon: Users, sub: "inductions", headers: ["Staff", "Role / Dept", "Start Date", "Status", "Progress", "Site"], rows: inductionRows },
+    risk:     { label: "Risk Assessments", singularLabel: "Risk Assessment",  icon: FileText,      sub: "risk-assessments", headers: ["Title", "Status", "Assessed By", "Review Date", "Site"], columnKinds: [TEXT_SEARCH, TEXT_CHOICE, TEXT_CHOICE, DATE_RANGE, TEXT_CHOICE], rows: raRows },
+    sops:     { label: "SOPs",             singularLabel: "SOP",              icon: ClipboardList, sub: "sops",             headers: ["Title", "Status", "Version", "Scope", "Site"],            columnKinds: [TEXT_SEARCH, TEXT_CHOICE, NUMBER, TEXT_SEARCH, TEXT_CHOICE], rows: sopRows },
+    handbook: { label: "Staff Handbook",   singularLabel: "Handbook Entry",   icon: BookMarked,    sub: "handbook",         headers: ["Title", "Status", "Version", "Section", "Site"],          columnKinds: [TEXT_SEARCH, TEXT_CHOICE, NUMBER, TEXT_CHOICE, TEXT_CHOICE], rows: handbookRows },
+    training: { label: "Training Records", singularLabel: "Training Record", icon: GraduationCap, sub: "training-records", headers: ["Staff Member", "Training", "Completed", "Expiry", "Site"], columnKinds: [TEXT_SEARCH, TEXT_CHOICE, DATE_RANGE, { sort: ["Expires soonest first", "Expires latest first"], filter: "date" }, TEXT_CHOICE], rows: trainingRows },
+    inductions: { label: "Inductions", singularLabel: "Induction", icon: Users, sub: "inductions", headers: ["Staff", "Role / Dept", "Start Date", "Status", "Progress", "Site"], columnKinds: [TEXT_SEARCH, TEXT_CHOICE, DATE_RANGE, TEXT_CHOICE, NUMBER, TEXT_CHOICE], rows: inductionRows },
   } as const;
 
   type TabKey = keyof typeof tabConfig;
@@ -764,6 +784,7 @@ export default function SafeTrackPage() {
               ) : (
                 <ListTable
                   headers={cfg.headers as unknown as string[]}
+                  columnKinds={cfg.columnKinds}
                   rows={cfg.rows}
                   photoEntityType={PHOTO_ENTITY_TYPE[key as TabKey]}
                   onEdit={canAdmin ? id => openEdit((tab === "risk" ? ras : tab === "sops" ? sops : tab === "handbook" ? handbook : tab === "training" ? training : inductions).find((r: any) => r.id === id)) : undefined}
