@@ -48,6 +48,7 @@ Wednesday 28 October.
 | 29 | Management walk-round inspections for each track, plus one overall review | After launch | None | How often, who does them, and your existing checklists |
 | 30 | KitchenTrack HACCP plan builder from your ALPS template | After launch | None for stage 1; a few pence per AI draft in stage 2 | Your wording of the CCP questions |
 | 31 | Complete risk assessments inside ComplyTrack | After launch | None; a few pence per AI draft if added later | The RiskAssessor Pro layout you want to follow, and which assessments to start with |
+| 32 | Lone worker check in, check out and monitoring | After launch (phone app needed for the full version) | Text messages cost a few pence each; none if alerts are by email and app only | Who gets alerted, and whether texts are wanted |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -1228,6 +1229,64 @@ few pence each from the business's AI allowance.
 
 ---
 
+## 32. Lone worker check in, check out and monitoring
+
+**When:** after launch. Your idea on 5 November: "lone worker check in /
+check out / monitoring".
+
+For anyone who works alone: a greenkeeper out on the course at dawn, a
+maintenance person in a plant room, a cleaner locking up at night, or a
+manager doing a night fire walk. If they don't check out or check in on time,
+someone is told so they can find out whether the person is all right.
+
+**How it would work:**
+
+1. **Check in:** the worker taps "Start lone working", says where they are
+   (a site, an area, or what3words or GPS on the course, as TreeTrack already
+   does) and when they expect to finish. It can also be started by scanning
+   an area's QR label.
+2. **Regular "I'm OK" taps:** at a set gap (for example every 30 or 60
+   minutes), the phone asks them to confirm they are OK.
+3. **Missed check:** if they miss a check or their finish time passes without
+   a check out, ComplyTrack tries them first, then alerts the named contacts
+   for that site (for example the duty manager, then the Owner) with where
+   they last were. Each alert is logged with who saw it and what they did.
+4. **Help button:** a large button for "I need help now", which alerts the
+   contacts straight away with the location.
+5. **Check out:** the worker taps "Finished" and the session closes.
+
+Managers see who is lone working right now, and a history for audits. It
+links to the lone working risk assessment (item 31), the staff roster, the
+"Open kiosk" (item 28) and contractor sign-in (item 23), so contractors
+working alone can use it too.
+
+**Important limits:**
+
+- **It needs the phone app for the full version.** A web page can't reliably
+  wake a phone to ask "are you OK?" or keep track when the screen is off. A
+  simple first version could work on the web (check in, finish time, alert
+  if the finish time passes without a check out), with the regular OK taps
+  and help button coming with the iPhone and Android apps (item 4).
+- **It is not a replacement for 999.** It tells colleagues something may be
+  wrong. The app should say that clearly, and the risk assessment should
+  still cover what happens if nobody answers. Places with no mobile signal
+  need a plan of their own (for example a radio or a fixed call-in time).
+- **Alerts must reach someone.** Email alone can be missed, so alerts would
+  go by app notification and, if wanted, by text message.
+
+**Cost:** no extra hosting. ComplyTrack can't send text messages yet, so
+texts would need a text message provider. They cost a few pence each, and
+only when an alert goes out. Prices to be checked before building.
+
+**Questions for you:**
+
+1. Who should be alerted first when a check is missed, and who after that?
+2. Are text message alerts wanted, or are app notifications and email enough?
+3. Which clients have lone workers today, and what do they use now (if
+   anything)?
+
+---
+
 ## Future apps (separate from ComplyTrack)
 
 Ideas for separate apps, outside ComplyTrack itself. Logged only; nothing
@@ -1276,6 +1335,7 @@ work:
 | Recipe ideas for leftover kitchen stock | A few pence per set of ideas, from the AI allowance |
 | HACCP plan builder, stage 2 AI draft | A few pence per draft, from the AI allowance |
 | Risk assessment AI draft (if added later) | A few pence per draft, from the AI allowance |
+| Lone worker alerts by text message (if wanted) | A few pence per text, only when an alert is sent; prices to be checked |
 | Kitchen voice input | None |
 | Maintenance inventory | None |
 | Reorder the side menu | None |
