@@ -7,7 +7,7 @@
  */
 
 /**
- * Fire drills. Whether night staff took part.
+ * Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check).
  */
 export type FireSafetyCheckNightStaff = typeof FireSafetyCheckNightStaff[keyof typeof FireSafetyCheckNightStaff] | null;
 
