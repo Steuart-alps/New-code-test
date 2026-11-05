@@ -37,7 +37,7 @@ function assertBranded(html, label) {
   assert.match(html, /by ALPS Consultancy/, `${label}: "by ALPS Consultancy" under the name`);
   assert.doesNotMatch(html, /🛡/, `${label}: no shield emoji`);
   assert.doesNotMatch(html, /#2563eb/i, `${label}: no bright blue, the website navy instead`);
-  assert.match(html, /src="https:\/\/app\.example\.test\/email-assets\/alps-logo\.png"/, `${label}: ALPS logo from the site`);
+  assert.match(html, /src="https:\/\/app\.example\.test\/email-assets\/alps-logo-white\.png"/, `${label}: white ALPS logo from the site in the header`);
   assert.match(html, /alt="ALPS Consultancy"/, `${label}: logo has a text alternative`);
   assert.match(html, /ALPS Consulting Ltd t\/as ALPS Consultancy/, `${label}: legal name in the footer`);
 }

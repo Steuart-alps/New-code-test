@@ -260,9 +260,9 @@ function readableFontSizes(html: string): string {
 }
 
 /**
- * The one design every ComplyTrack email uses: dark header with the
- * ComplyTrack name, a white card for the message, and a footer with the ALPS
- * logo and legal name. `subtitle` and `footerNote` are HTML; callers escape
+ * The one design every ComplyTrack email uses: navy header with the ALPS
+ * logo and the ComplyTrack name, a white card for the message, and a footer
+ * with the legal name. `subtitle` and `footerNote` are HTML; callers escape
  * any business text in them.
  */
 export function renderEmailLayout(opts: { bodyHtml: string; subtitle?: string; footerNote?: string }): string {
@@ -273,15 +273,14 @@ export function renderEmailLayout(opts: { bodyHtml: string; subtitle?: string; f
 <body ${EMAIL_LAYOUT_MARKER} style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
   <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:2px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
     <div style="background:${EMAIL_BRAND.header};padding:32px 40px;text-align:center;">
-      <div style="font-family:${EMAIL_BRAND.displayFont};font-size:32px;font-weight:700;color:#ffffff;line-height:1.1;">ComplyTrack</div>
-      <div style="font-family:${EMAIL_BRAND.displayFont};font-size:14px;font-style:italic;color:rgba(255,255,255,0.65);margin-top:6px;">by ALPS Consultancy</div>
+      <a href="${escapeHtml(appUrl)}" style="color:#ffffff;text-decoration:none;"><img src="${escapeHtml(appUrl)}/email-assets/alps-logo-white.png" width="128" height="80" alt="ALPS Consultancy" style="display:block;margin:0 auto 14px;border:0;color:#ffffff;font-size:16px;"/></a>
+      <div style="font-family:${EMAIL_BRAND.displayFont};font-size:30px;font-weight:700;color:#ffffff;line-height:1.1;">ComplyTrack</div>
       ${opts.subtitle ? `<div style="font-size:15px;font-weight:600;color:${EMAIL_BRAND.accent};margin-top:14px;letter-spacing:0.3px;">${opts.subtitle}</div>` : ""}
     </div>
     <div style="padding:32px 40px;color:#1e293b;font-size:16px;line-height:1.6;">
 ${readableFontSizes(opts.bodyHtml).replace(OFF_BRAND_BLUE, EMAIL_BRAND.button)}
     </div>
     <div style="padding:24px 40px;border-top:1px solid #f1f5f9;font-size:13px;color:#64748b;text-align:center;line-height:1.6;">
-      <a href="${escapeHtml(appUrl)}" style="color:#64748b;text-decoration:none;"><img src="${escapeHtml(appUrl)}/email-assets/alps-logo.png" width="96" height="60" alt="ALPS Consultancy" style="display:block;margin:0 auto 12px;border:0;color:#64748b;font-size:13px;"/></a>
       ComplyTrack by ALPS Consultancy${opts.footerNote ? ` · ${opts.footerNote}` : ""}<br/>
       ALPS Consulting Ltd t/as ALPS Consultancy
     </div>

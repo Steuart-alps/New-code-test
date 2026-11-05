@@ -162,7 +162,7 @@ async function main() {
     check(
       "the welcome and resent emails use the shared ComplyTrack design",
       [invitation?.html, resent?.html].every((html) => (html ?? "").split('data-complytrack-email="1"').length === 2
-        && html.includes("/email-assets/alps-logo.png")
+        && html.includes("/email-assets/alps-logo-white.png")
         && html.includes("ALPS Consulting Ltd t/as ALPS Consultancy")),
     );
     check("no email is sent for an unknown address", !capturedEmails().some((entry) => entry.to.startsWith("nobody-")));
