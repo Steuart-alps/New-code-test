@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
 import { AppLayout } from "@/components/layout";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
@@ -267,6 +268,17 @@ export default function StaffRosterPage() {
   });
 
   const activeCount = staff.filter(s => s.active).length;
+  const ROSTER_TH = "text-left px-4 py-3 font-medium text-muted-foreground";
+  const rosterTable = useListTable(filtered, [
+    { key: "name", label: "Name", className: ROSTER_TH, value: s => s.name, sort: "text", filter: "search" },
+    { key: "job", label: "Job Title", className: `${ROSTER_TH} hidden sm:table-cell`, value: s => s.job_title, sort: "text", filter: "choice" },
+    { key: "department", label: "Department", className: `${ROSTER_TH} hidden md:table-cell`, value: s => s.department, sort: "text", filter: "choice" },
+    { key: "site", label: "Site", className: `${ROSTER_TH} hidden lg:table-cell`, value: s => s.site_name ?? "All sites", sort: "text", filter: "choice" },
+    { key: "status", label: "Status", className: `${ROSTER_TH} hidden sm:table-cell`, value: s => (s.active ? "Active" : "Inactive"), sort: "text", filter: "choice" },
+    { key: "pin", label: "Kiosk PIN", className: `${ROSTER_TH} hidden md:table-cell`,
+      value: s => ((pinStatus[s.id] ?? s.has_pin ?? s.pin_set) ? "Set" : "Not set"), filter: "choice" },
+    { key: "actions", label: "", className: "px-4 py-3 w-20" },
+  ] satisfies ListColumn<StaffMember>[]);
 
   // Printable roster — uses the standard printable-HTML window.print pattern.
   const esc = (v: string | null | undefined) =>
@@ -400,18 +412,11 @@ ${rows.map(s => `<tr>
         <div className="border rounded-lg overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-muted/40 border-b">
-              <tr>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Name</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">Job Title</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">Department</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">Site</th>
-                 <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">Status</th>
-                 <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">Kiosk PIN</th>
-                <th className="px-4 py-3 w-20" />
-              </tr>
+              <tr><ListTableHeadings table={rosterTable} /></tr>
             </thead>
             <tbody className="divide-y">
-              {filtered.map(s => (
+              <ListTableNoMatches table={rosterTable} colSpan={7} />
+              {rosterTable.rows.map(s => (
                 <tr key={s.id} className={cn("hover:bg-muted/20 transition-colors", !s.active && "opacity-50")}>
                   <td className="px-4 py-3 font-medium">{s.name}</td>
                   <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{s.job_title ?? "—"}</td>

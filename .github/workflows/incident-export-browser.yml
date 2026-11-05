@@ -6,6 +6,10 @@ on:
       - "artifacts/compliance-tracker/src/pages/incidents.tsx"
       - "artifacts/compliance-tracker/src/lib/download.ts"
       - "artifacts/compliance-tracker/tests/incident-export-*"
+      - "artifacts/compliance-tracker/tests/column-headings-*"
+      - "artifacts/compliance-tracker/src/components/column-header.tsx"
+      - "artifacts/compliance-tracker/src/components/list-table.tsx"
+      - "artifacts/compliance-tracker/src/lib/table-sort.ts"
       - "artifacts/compliance-tracker/package.json"
       - "package.json"
       - "pnpm-lock.yaml"
@@ -16,6 +20,10 @@ on:
       - "artifacts/compliance-tracker/src/pages/incidents.tsx"
       - "artifacts/compliance-tracker/src/lib/download.ts"
       - "artifacts/compliance-tracker/tests/incident-export-*"
+      - "artifacts/compliance-tracker/tests/column-headings-*"
+      - "artifacts/compliance-tracker/src/components/column-header.tsx"
+      - "artifacts/compliance-tracker/src/components/list-table.tsx"
+      - "artifacts/compliance-tracker/src/lib/table-sort.ts"
       - "artifacts/compliance-tracker/package.json"
       - "package.json"
       - "pnpm-lock.yaml"
@@ -49,3 +57,6 @@ jobs:
 
       - name: Run incident export checks
         run: pnpm --filter @workspace/compliance-tracker run test:incident-export-browser
+
+      - name: Run column heading sort and filter checks
+        run: pnpm --filter @workspace/compliance-tracker run test:column-headings-browser

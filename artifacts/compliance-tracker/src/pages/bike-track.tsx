@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
 import { takeLinkParams } from "@/lib/deep-link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
@@ -1235,6 +1236,47 @@ export default function BikeTrackPage() {
   }, [bikes, search]);
 
   const activeHires = useMemo(() => hires.filter(h => h.status === "active"), [hires]);
+
+  // Column headings: click to sort, filter or search.
+  const BIKE_TH = "text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider";
+  const BIKE_STATUS_TEXT: Record<string, string> = { available: "Available", hired: "On Hire", maintenance: "Maintenance", retired: "Retired" };
+  const bikesTable = useListTable(filteredBikes, [
+    { key: "ref", label: "Ref / Name", className: BIKE_TH, value: b => b.ref, sort: "text", filter: "search", filterValue: b => `${b.ref} ${b.name ?? ""}` },
+    { key: "type", label: "Type", className: `${BIKE_TH} hidden sm:table-cell`, value: b => BIKE_TYPES[b.type] ?? b.type, sort: "text", filter: "choice" },
+    { key: "status", label: "Status", className: BIKE_TH, value: b => BIKE_STATUS_TEXT[b.status] ?? b.status, sort: "text", filter: "choice" },
+    { key: "service", label: "Last Service", className: `${BIKE_TH} hidden lg:table-cell`, value: b => latestServiceMap[b.id]?.serviceDate ?? null, sort: "date" },
+    { key: "notes", label: "Notes", className: `${BIKE_TH} hidden md:table-cell`, value: b => b.notes, filter: "search" },
+    ...(canAdmin ? [{ key: "actions", label: "", className: "px-4 py-3" }] : []),
+  ] satisfies ListColumn<BikeRow>[]);
+  const hireStatusText = (status: string) => status.charAt(0).toUpperCase() + status.slice(1);
+  const hiresTable = useListTable(filteredHires, [
+    { key: "bike", label: "Bike", className: BIKE_TH, value: h => h.bikeRef, sort: "text", filter: "choice" },
+    { key: "guest", label: "Guest", className: BIKE_TH, value: h => h.guestName, sort: "text", filter: "search", filterValue: h => `${h.guestName} ${h.guestContact ?? ""}` },
+    { key: "hire", label: "Hire Date", className: `${BIKE_TH} hidden sm:table-cell`, value: h => h.hireDate, sort: "date", filter: "date" },
+    { key: "return", label: "Return", className: `${BIKE_TH} hidden sm:table-cell`, value: h => h.returnDateActual ?? h.returnDateExpected, sort: ["Soonest first", "Latest first"], filter: "date" },
+    { key: "checks", label: "Checks", className: `${BIKE_TH} hidden md:table-cell` },
+    { key: "status", label: "Status", className: BIKE_TH, value: h => hireStatusText(h.status), sort: "text", filter: "choice" },
+    { key: "photos", label: "Photos", className: `${BIKE_TH} hidden sm:table-cell` },
+    { key: "actions", label: "", className: "px-4 py-3" },
+  ] satisfies ListColumn<HireRow>[]);
+  const SERVICE_TYPE_TEXT: Record<string, string> = { annual: "Annual", interim: "Interim" };
+  const shownServices = useMemo(() => services.filter(s => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return s.bikeRef.toLowerCase().includes(q) ||
+      (s.bikeName ?? "").toLowerCase().includes(q) ||
+      (s.servicedBy ?? "").toLowerCase().includes(q);
+  }), [services, search]);
+  const servicesTable = useListTable(shownServices, [
+    { key: "bike", label: "Bike", className: BIKE_TH, value: s => s.bikeRef, sort: "text", filter: "choice" },
+    { key: "type", label: "Type", className: BIKE_TH, value: s => SERVICE_TYPE_TEXT[s.serviceType] ?? "Ad-hoc", sort: "text", filter: "choice" },
+    { key: "date", label: "Date", className: BIKE_TH, value: s => s.serviceDate, sort: "date", filter: "date" },
+    { key: "by", label: "Serviced By", className: `${BIKE_TH} hidden sm:table-cell`, value: s => s.servicedBy, sort: "text", filter: "choice" },
+    { key: "next", label: "Next Due", className: `${BIKE_TH} hidden md:table-cell`, value: s => s.nextServiceDate, sort: ["Soonest first", "Latest first"], filter: "date" },
+    { key: "cost", label: "Cost", className: `${BIKE_TH} hidden lg:table-cell`, value: s => s.costPence, sort: "number" },
+    { key: "photos", label: "Photos", className: `${BIKE_TH} hidden sm:table-cell` },
+    { key: "actions", label: "", className: "px-4 py-3" },
+  ] satisfies ListColumn<ServiceRow>[]);
   const overdueHires = useMemo(() => activeHires.filter(h => h.returnDateExpected && (daysUntil(h.returnDateExpected) ?? 1) < 0), [activeHires]);
 
   // ── Export hire register (for insurance / liability) ──────────────────────────
@@ -1474,18 +1516,10 @@ export default function BikeTrackPage() {
           ) : (
             <div className="border border-border rounded-sm overflow-hidden">
               <table className="w-full text-sm">
-                <thead className="bg-muted/40 border-b border-border">
-                  <tr>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">Ref / Name</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider hidden sm:table-cell">Type</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">Status</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider hidden lg:table-cell">Last Service</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider hidden md:table-cell">Notes</th>
-                    {canAdmin && <th className="px-4 py-3" />}
-                  </tr>
-                </thead>
+                <thead className="bg-muted/40 border-b border-border"><tr><ListTableHeadings table={bikesTable} /></tr></thead>
                 <tbody className="divide-y divide-border">
-                  {filteredBikes.map(b => (
+                  <ListTableNoMatches table={bikesTable} colSpan={bikesTable.columns.length} />
+                  {bikesTable.rows.map(b => (
                     <tr key={b.id} className="bg-white hover:bg-muted/20 transition-colors group">
                       <td className="px-4 py-3">
                         <p className="font-semibold">{b.ref}</p>
@@ -1593,20 +1627,10 @@ export default function BikeTrackPage() {
           ) : (
             <div className="border border-border rounded-sm overflow-hidden">
               <table className="w-full text-sm">
-                <thead className="bg-muted/40 border-b border-border">
-                  <tr>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">Bike</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">Guest</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider hidden sm:table-cell">Hire Date</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider hidden sm:table-cell">Return</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider hidden md:table-cell">Checks</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">Status</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider hidden sm:table-cell">Photos</th>
-                    <th className="px-4 py-3" />
-                  </tr>
-                </thead>
+                <thead className="bg-muted/40 border-b border-border"><tr><ListTableHeadings table={hiresTable} /></tr></thead>
                 <tbody className="divide-y divide-border">
-                  {filteredHires.map(h => {
+                  <ListTableNoMatches table={hiresTable} colSpan={hiresTable.columns.length} />
+                  {hiresTable.rows.map(h => {
                     const due = daysUntil(h.returnDateExpected);
                     const isOverdue = h.status === "active" && due !== null && due < 0;
                     return (
@@ -1773,26 +1797,11 @@ export default function BikeTrackPage() {
             <div className="border border-border rounded-sm overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-muted/40 border-b border-border">
-                  <tr>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">Bike</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">Type</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">Date</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider hidden sm:table-cell">Serviced By</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider hidden md:table-cell">Next Due</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider hidden lg:table-cell">Cost</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider hidden sm:table-cell">Photos</th>
-                    <th className="px-4 py-3" />
-                  </tr>
+                  <tr><ListTableHeadings table={servicesTable} /></tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {services
-                    .filter(s => {
-                      if (!search.trim()) return true;
-                      const q = search.toLowerCase();
-                      return s.bikeRef.toLowerCase().includes(q) ||
-                        (s.bikeName ?? "").toLowerCase().includes(q) ||
-                        (s.servicedBy ?? "").toLowerCase().includes(q);
-                    })
+                  <ListTableNoMatches table={servicesTable} colSpan={servicesTable.columns.length} />
+                  {servicesTable.rows
                     .map(s => {
                       const overdue = s.nextServiceDate && (daysUntil(s.nextServiceDate) ?? 1) < 0;
                       const dueSoon = s.nextServiceDate && !overdue && (daysUntil(s.nextServiceDate) ?? 999) <= 30;

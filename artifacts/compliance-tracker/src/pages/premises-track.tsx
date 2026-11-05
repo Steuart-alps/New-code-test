@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
+import { rankIn } from "@/lib/table-sort";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
@@ -429,6 +431,18 @@ export default function PremisesTrackPage() {
   );
 
   const today = new Date().toISOString().slice(0, 10);
+  const PREM_TH = "px-4 py-2.5 text-left text-xs font-medium text-muted-foreground";
+  const inspectionsTable = useListTable(filtered, [
+    { key: "date", label: "Date", className: PREM_TH, value: r => r.inspectionDate, sort: "date", filter: "date" },
+    { key: "type", label: "Type", className: PREM_TH, value: r => TYPE_LABELS[r.inspectionType] ?? r.inspectionType, sort: "text",
+      filter: "choice", filterValue: r => r.inspectionType, choiceLabel: v => TYPE_LABELS[v] ?? v },
+    { key: "area", label: "Area", className: `${PREM_TH} hidden sm:table-cell`, value: r => r.area, sort: "text", filter: "choice" },
+    { key: "findings", label: "Findings", className: `${PREM_TH} hidden md:table-cell`, value: r => r.findings ?? r.hazardDetails, filter: "search" },
+    { key: "status", label: "Status", className: PREM_TH, value: r => rankIn(Object.keys(STATUS_LABELS), r.status),
+      sort: ["Open first", "Closed first"], filter: "choice", filterValue: r => r.status, choiceLabel: v => STATUS_LABELS[v] ?? v,
+      choiceOrder: Object.keys(STATUS_LABELS) },
+    { key: "actions", label: "", className: "px-4 py-2.5 w-40" },
+  ] satisfies ListColumn<PremisesInspection>[]);
 
   // ── Export printable register ─────────────────────────────────────────────────
 
@@ -626,17 +640,11 @@ ${sorted.map(r => `<tr>
           <div className="border border-border rounded-sm overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-muted/40 border-b border-border">
-                <tr>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Date</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Type</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground hidden sm:table-cell">Area</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground hidden md:table-cell">Findings</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Status</th>
-                  <th className="px-4 py-2.5 w-40"></th>
-                </tr>
+                <tr><ListTableHeadings table={inspectionsTable} /></tr>
               </thead>
               <tbody>
-                {filtered.map((r, i) => {
+                <ListTableNoMatches table={inspectionsTable} colSpan={6} />
+                {inspectionsTable.rows.map((r, i) => {
                    // The latest inspection of its type and area sets when the
                    // next is due, whatever its action status.
                    const isOverdue = !r.superseded

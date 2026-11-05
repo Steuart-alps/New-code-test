@@ -129,3 +129,20 @@
     @apply tracking-tight font-bold text-[#162D42];
   }
 }
+
+/* Empty boxes show their hint in the same grey as typed-box placeholders,
+   so nothing looks filled in until it is. Date and time boxes have no
+   placeholder: the browser draws "dd/mm/yyyy" or "--:--" in the text
+   colour, so the Input component (and any plain input) marks them
+   data-empty while blank. Typing in a focused box shows in full colour.
+   Kept outside @layer so a colour class on a box can't hide the grey. */
+input[data-empty="true"]:not(:focus) {
+  color: hsl(var(--muted-foreground));
+}
+/* Plain dropdowns still on their blank "Choose…" option. */
+select:has(option[value=""]:checked) {
+  color: hsl(var(--muted-foreground));
+}
+select option {
+  color: hsl(var(--foreground));
+}

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
 import { useQueryClient } from "@tanstack/react-query";
 import { ClipboardCheck, Download, FileText, Mic, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { CoshhSpeakListDialog } from "@/components/coshh-speak-list-dialog";
@@ -290,6 +291,28 @@ export function CoshhRegisterPanel({ track }: { track: CoshhTrackLinks }) {
     );
   };
 
+  const assessmentState = (item: CoshhSubstance) => {
+    if (item.status !== "in_use") return "Withdrawn";
+    const linked = currentAssessments(item.id);
+    if (linked.length === 0) return "No COSHH assessment";
+    return linked.some(a => a.reviewOverdue) ? "Review overdue" : "Assessed";
+  };
+  const ASSESSMENT_ORDER = ["No COSHH assessment", "Review overdue", "Assessed", "Withdrawn"];
+  const registerTable = useListTable(visible, [
+    { key: "product", label: "Product", className: "p-2 font-medium", value: i => i.productName, sort: "text", filter: "search",
+      filterValue: i => `${i.productName} ${i.supplier ?? ""}`,
+      moreFilters: [
+        { key: "supplier", label: "Supplier", value: i => i.supplier },
+        { key: "site", label: "Site", value: i => siteName(i.siteId) },
+      ] },
+    { key: "hazards", label: "Hazards", className: "p-2 font-medium", value: i => i.hazardPictograms.map(k => PICTOGRAM_LABEL[k] ?? k).join(", "),
+      filter: "search", searchPlaceholder: "e.g. Corrosive" },
+    { key: "where", label: "Where used", className: "p-2 font-medium", value: i => i.whereUsed, sort: "text", filter: "search" },
+    { key: "assessment", label: "COSHH assessment", className: "p-2 font-medium", value: i => ASSESSMENT_ORDER.indexOf(assessmentState(i)),
+      sort: ["Most urgent first", "Least urgent first"], filter: "choice", filterValue: assessmentState, choiceOrder: ASSESSMENT_ORDER },
+    { key: "actions", label: "", className: "p-2" },
+  ] satisfies ListColumn<CoshhSubstance>[]);
+
   const pictogramBadges = (item: CoshhSubstance) => item.hazardPictograms.length === 0
     ? <span className="text-xs text-muted-foreground">None recorded</span>
     : item.hazardPictograms.map((k) => <Badge key={k} variant="outline" className="text-[10px] border-orange-200 bg-orange-50 text-orange-800">{PICTOGRAM_LABEL[k] ?? k}</Badge>);
@@ -357,17 +380,10 @@ export function CoshhRegisterPanel({ track }: { track: CoshhTrackLinks }) {
           <>
             <div className="hidden lg:block border border-border rounded-xl overflow-hidden">
               <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-left">
-                  <tr>
-                    <th className="p-2 font-medium">Product</th>
-                    <th className="p-2 font-medium">Hazards</th>
-                    <th className="p-2 font-medium">Where used</th>
-                    <th className="p-2 font-medium">COSHH assessment</th>
-                    <th className="p-2"><span className="sr-only">Actions</span></th>
-                  </tr>
-                </thead>
+                <thead className="bg-muted/50 text-left"><tr><ListTableHeadings table={registerTable} /></tr></thead>
                 <tbody>
-                  {visible.map((item) => (
+                  <ListTableNoMatches table={registerTable} colSpan={5} />
+                  {registerTable.rows.map((item) => (
                     <tr key={item.id} className={"border-t border-border align-top"}>
                       <td className="p-2">
                         <p className="font-medium">{item.productName}</p>
@@ -388,7 +404,7 @@ export function CoshhRegisterPanel({ track }: { track: CoshhTrackLinks }) {
               </table>
             </div>
             <div className="lg:hidden space-y-3">
-              {visible.map((item) => (
+              {registerTable.rows.map((item) => (
                 <div key={item.id} className={"rounded-xl border border-border p-3 space-y-2"}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">

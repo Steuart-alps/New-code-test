@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
+import { rankIn } from "@/lib/table-sort";
 import { useSayItFill, withSpokenNote, type SayItFill } from "@/lib/say-it-fill";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -643,6 +645,30 @@ export default function PestTrackPage() {
   const openActivity = activity.filter(a => !a.resolved);
   const today = new Date().toISOString().slice(0, 10);
 
+  const PEST_TH = "px-4 py-2.5 text-left text-xs font-medium text-muted-foreground";
+  const visitsTable = useListTable(filteredVisits, [
+    { key: "date", label: "Date", className: PEST_TH, value: v => v.visitDate, sort: "date", filter: "date" },
+    { key: "contractor", label: "Contractor", className: `${PEST_TH} hidden sm:table-cell`, value: v => v.contractorName ?? v.contractorCompany,
+      sort: "text", filter: "choice" },
+    { key: "findings", label: "Findings summary", className: `${PEST_TH} hidden md:table-cell`, value: v => v.findings, filter: "search" },
+    { key: "next", label: "Next visit", className: `${PEST_TH} hidden lg:table-cell`, value: v => v.nextVisitDate,
+      sort: ["Soonest first", "Latest first"], filter: "date" },
+    { key: "photos", label: "", className: "px-2 py-2.5 w-14" },
+    { key: "edit", label: "", className: "px-4 py-2.5 w-16" },
+  ] satisfies ListColumn<PestVisit>[], { defaultSort: null });
+  const activityTable = useListTable(filteredActivity, [
+    { key: "date", label: "Date", className: PEST_TH, value: a => a.recordedDate, sort: "date", filter: "date" },
+    { key: "type", label: "Type", className: PEST_TH, value: a => PEST_TYPE_LABELS[a.pestType] ?? a.pestType, sort: "text",
+      filter: "choice", filterValue: a => a.pestType, choiceLabel: v => PEST_TYPE_LABELS[v] ?? v },
+    { key: "location", label: "Location", className: `${PEST_TH} hidden sm:table-cell`, value: a => a.location, sort: "text", filter: "search" },
+    { key: "severity", label: "Severity", className: PEST_TH, value: a => rankIn(["high", "medium", "low"], a.severity),
+      sort: ["Most severe first", "Least severe first"], filter: "choice", filterValue: a => a.severity,
+      choiceLabel: v => SEVERITY_LABELS[v] ?? v, choiceOrder: ["high", "medium", "low"] },
+    { key: "status", label: "Status", className: `${PEST_TH} hidden md:table-cell`, value: a => (a.resolved ? "Resolved" : "Open"),
+      sort: ["Open first", "Resolved first"], filter: "choice" },
+    { key: "edit", label: "", className: "px-4 py-2.5 w-16" },
+  ] satisfies ListColumn<PestActivity>[]);
+
   const handleDownloadRegister = async () => {
     setDownloading(true);
     try {
@@ -849,17 +875,11 @@ export default function PestTrackPage() {
               <div className="border border-border rounded-sm overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/40 border-b border-border">
-                    <tr>
-                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Date</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground hidden sm:table-cell">Contractor</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground hidden md:table-cell">Findings summary</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground hidden lg:table-cell">Next visit</th>
-                      <th className="px-2 py-2.5 w-14"></th>
-                      <th className="px-4 py-2.5 w-16"></th>
-                    </tr>
+                    <tr><ListTableHeadings table={visitsTable} /></tr>
                   </thead>
                   <tbody>
-                    {filteredVisits.map((v, i) => {
+                    <ListTableNoMatches table={visitsTable} colSpan={6} />
+                    {visitsTable.rows.map((v, i) => {
                       const isNextOverdue = v.nextVisitDate && v.nextVisitDate < today;
                       return (
                         <tr key={v.id} className={cn("group border-t border-border hover:bg-muted/20", i === 0 && "border-t-0")}>
@@ -936,17 +956,11 @@ export default function PestTrackPage() {
               <div className="border border-border rounded-sm overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/40 border-b border-border">
-                    <tr>
-                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Date</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Type</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground hidden sm:table-cell">Location</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Severity</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground hidden md:table-cell">Status</th>
-                      <th className="px-4 py-2.5 w-16"></th>
-                    </tr>
+                    <tr><ListTableHeadings table={activityTable} /></tr>
                   </thead>
                   <tbody>
-                    {filteredActivity.map((a, i) => (
+                    <ListTableNoMatches table={activityTable} colSpan={6} />
+                    {activityTable.rows.map((a, i) => (
                       <tr key={a.id} className={cn("group border-t border-border hover:bg-muted/20", i === 0 && "border-t-0")}>
                         <td className="px-4 py-3 text-sm">{fmt(a.recordedDate)}</td>
                         <td className="px-4 py-3">
