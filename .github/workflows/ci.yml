@@ -466,6 +466,7 @@ jobs:
           pnpm --filter @workspace/api-zod run test:kitchen-temperature-guidance
           pnpm --filter @workspace/api-server run test:kitchen-hold-controls
           pnpm --filter @workspace/api-server run test:kitchen-temperature-actions
+          pnpm --filter @workspace/api-server run test:kitchen-cold-rechecks
           pnpm --filter @workspace/api-server run test:kitchen-mobile-replay
           pnpm --filter @workspace/api-server run test:kitchen-month-summary
           pnpm --filter @workspace/api-server run test:voice-log
