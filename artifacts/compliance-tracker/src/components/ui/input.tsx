@@ -11,13 +11,23 @@ type InputProps = React.ComponentProps<"input"> & {
 }
 
 const NOT_WORDS = new Set(["numeric", "decimal", "tel", "email", "url"])
+/** Boxes the browser fills with "dd/mm/yyyy" or "--:--" when blank, as no placeholder is allowed. */
+const DATE_TIME_TYPES = new Set(["date", "time", "datetime-local", "month", "week"])
+
+/** Mark a blank date or time box data-empty so index.css greys its "dd/mm/yyyy" / "--:--" hint. */
+function markEmpty(node: HTMLInputElement | null) {
+  if (node && DATE_TIME_TYPES.has(node.type)) node.dataset.empty = node.value === "" ? "true" : "false"
+}
 
 const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, type, dictation = false, selectOnFocus = false, onFocus, onMouseDown, onMouseUp, ...props }, ref) => {
+  ({ className, type, dictation = false, selectOnFocus = false, onFocus, onMouseDown, onMouseUp, onInput, ...props }, ref) => {
     const clickToFocus = React.useRef(false)
     const [innerRef, setRef] = useMergedRef(ref)
     const isTextBox = type === undefined || type === "text" || type === "search"
     const withMic = dictation && dictationSupported && isTextBox
+    // Re-check after every render too, so a value set by code (a form reset,
+    // a pre-filled default) updates the grey hint as well as typing does.
+    React.useLayoutEffect(() => { markEmpty(innerRef.current) })
     const field = (
       <input
         type={type}
@@ -31,6 +41,10 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
           withMic && "pr-10"
         )}
         ref={setRef}
+        onInput={(event) => {
+          markEmpty(event.currentTarget)
+          onInput?.(event)
+        }}
         onFocus={(event) => {
           onFocus?.(event)
           if (selectOnFocus) event.currentTarget.select()
