@@ -83,12 +83,26 @@ jobs:
           echo "Expo project ID (commit it to app.json as expo.extra.eas.projectId):"
           node -e "const c=require('./app.json');console.log(c.expo.extra?.eas?.projectId ?? 'not set')"
 
+      - name: Create the iPhone signing certificate and profile
+        # EAS won't create these unattended, so scripts/ios-signing.mjs makes
+        # them with the App Store Connect key. It revokes older distribution
+        # certificates (keeping the newest), which Steuart approved on
+        # 5 Nov 2026; apps already uploaded are not affected.
+        run: |
+          node scripts/ios-signing.mjs "$RUNNER_TEMP/ios-signing"
+          cp "$RUNNER_TEMP/ios-signing/credentials.json" credentials.json
+          # Non-interactive submit needs the app's Apple ID in eas.json.
+          ASC_APP_ID="$(cat "$RUNNER_TEMP/ios-signing/asc-app-id.txt")" node -e "
+            const fs=require('fs');const e=JSON.parse(fs.readFileSync('eas.json','utf8'));
+            e.submit.production.ios={...(e.submit.production.ios||{}),ascAppId:process.env.ASC_APP_ID.trim()};
+            fs.writeFileSync('eas.json',JSON.stringify(e,null,2)+'\n');"
+
       - name: Build on Expo
-        run: npx --yes eas-cli@latest build --platform ios --profile production --non-interactive --wait
+        run: npx --yes eas-cli@latest build --platform ios --profile testflight --non-interactive --wait
 
       - name: Upload to App Store Connect (TestFlight)
         run: npx --yes eas-cli@latest submit --platform ios --profile production --latest --non-interactive --wait
 
-      - name: Remove the key file
+      - name: Remove the key and signing files
         if: always()
-        run: rm -f "$RUNNER_TEMP/asc-api-key.p8"
+        run: rm -rf "$RUNNER_TEMP/asc-api-key.p8" "$RUNNER_TEMP/ios-signing" credentials.json
