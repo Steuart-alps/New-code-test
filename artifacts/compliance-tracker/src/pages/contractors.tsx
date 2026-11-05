@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import { AppLayout } from "@/components/layout";
 import { ContractorFormDialog } from "@/components/contractor-form-dialog";
 import { ImportCsvButton } from "@/components/import-csv-dialog";
@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
+import { tradeLabel } from "@/lib/contractor-trades";
 import { getContractorListStatus, type ContractorListRecord, type ContractorListStatus } from "@/lib/contractor-list-status";
 
 const statusStyle = {
@@ -40,6 +41,9 @@ function ComplianceIndicator({ status }: { status: ContractorListStatus }) {
   );
 }
 
+interface VisitTypeSummary { key: string; module: string; trackLabel: string; trades?: string[] }
+interface VisitSummary { visitKey: string; contractorId: number | null }
+
 export default function ContractorsPage() {
   const [search, setSearch] = useState("");
   const [showNonCompliantOnly, setShowNonCompliantOnly] = useState(false);
@@ -58,13 +62,43 @@ export default function ContractorsPage() {
     enabled: !!activeClientId,
   });
 
+  // A track's Contractor checks box links here with ?track=<module> (and
+  // ?visit=<key> for one line): show only that track's lines and the
+  // contractors who do its work, with a button to show everything.
+  const searchString = useSearch();
+  const [, setLocation] = useLocation();
+  const { data: visitData } = useQuery<{ types: VisitTypeSummary[]; visits: VisitSummary[] }>({
+    queryKey: ["contractor-visits", activeClientId],
+    queryFn: async () => {
+      const response = await clientApiFetch("/contractor-visits");
+      if (!response.ok) throw new Error("Failed to load contractor visits");
+      return response.json();
+    },
+    enabled: !!activeClientId,
+  });
+  const params = new URLSearchParams(searchString);
+  const visitTypes = visitData?.types ?? [];
+  const trackModule = params.get("track") ?? visitTypes.find(type => type.key === params.get("visit"))?.module ?? null;
+  const trackTypes = trackModule ? visitTypes.filter(type => type.module === trackModule) : [];
+  const track = trackTypes.length ? trackModule! : undefined;
+  const trackLabel = trackTypes[0]?.trackLabel;
+  const trackTrades = [...new Set(trackTypes.flatMap(type => type.trades ?? []))];
+  const trackKeys = new Set(trackTypes.map(type => type.key));
+  const chosenForTrack = new Set((visitData?.visits ?? [])
+    .filter(visit => trackKeys.has(visit.visitKey) && visit.contractorId != null)
+    .map(visit => visit.contractorId));
+  const forTrack = (c: ContractorListRecord) =>
+    !track || chosenForTrack.has(c.id) || !!c.trades?.some(trade => trackTrades.includes(trade));
+  const showAll = () => setLocation("/contractors", { replace: true });
+
   const today = new Date();
   const filtered = contractors.filter(c => {
+    if (!forTrack(c)) return false;
     const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase()) ||
       Boolean(c.company?.toLowerCase().includes(search.toLowerCase()));
     return matchesSearch && (!showNonCompliantOnly || getContractorListStatus(c, today).level === "missing-or-expired");
   });
-  const nonCompliantCount = contractors.filter(c => getContractorListStatus(c, today).level === "missing-or-expired").length;
+  const nonCompliantCount = contractors.filter(forTrack).filter(c => getContractorListStatus(c, today).level === "missing-or-expired").length;
 
   return (
     <AppLayout title="Contractors">
@@ -100,8 +134,21 @@ export default function ContractorsPage() {
         )}
       </div>
 
-      <CertificatesOutstandingCard />
-      <ContractorVisitsCard contractors={contractors} />
+      {track && (
+        <Card className="p-4 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-primary/30 bg-primary/5" data-testid="contractors-track-filter">
+          <div>
+            <p className="font-semibold">Showing {trackLabel} only</p>
+            <p className="text-sm text-muted-foreground">
+              {trackLabel}&apos;s contractor checks, and the contractors already chosen for them or with a {trackLabel} trade
+              {trackTrades.length > 0 && <> ({trackTrades.map(tradeLabel).join(", ")})</>}. Tick a trade on a contractor to list them here.
+            </p>
+          </div>
+          <Button type="button" variant="outline" onClick={showAll} className="shrink-0">Show all contractors</Button>
+        </Card>
+      )}
+
+      {!track && <CertificatesOutstandingCard />}
+      <ContractorVisitsCard contractors={contractors} track={track} />
 
       {isLoading ? (
         <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full" /></div>
@@ -112,7 +159,7 @@ export default function ContractorsPage() {
           <Building className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
           <h3 className="text-lg font-bold">No contractors found</h3>
           <p className="text-muted-foreground mt-1 max-w-sm mx-auto">
-            {showNonCompliantOnly ? "No contractors with missing or expired compliance fields match your search." : search ? "Try another search." : "Add your external contractors here to track their compliance and certificates."}
+            {track && !search && !showNonCompliantOnly ? <>No contractors have a {trackLabel} trade yet. <button type="button" className="text-primary font-medium hover:underline" onClick={showAll}>Show all contractors</button> and tick a trade on the ones who do this work.</> : showNonCompliantOnly ? "No contractors with missing or expired compliance fields match your search." : search ? "Try another search." : "Add your external contractors here to track their compliance and certificates."}
           </p>
         </div>
       ) : (
@@ -153,6 +200,7 @@ export default function ContractorsPage() {
       <ContractorFormDialog 
         isOpen={isFormOpen} 
         onClose={() => setIsFormOpen(false)} 
+        defaultTrades={track ? trackTrades : undefined}
       />
     </AppLayout>
   );

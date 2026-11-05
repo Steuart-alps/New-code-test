@@ -60,10 +60,16 @@ export function ContractorFormDialog({
   isOpen,
   onClose,
   contractor = null,
+  defaultTrades,
+  onCreated,
 }: {
   isOpen: boolean;
   onClose: () => void;
   contractor?: (Contractor & { trades?: string[] }) | null;
+  /** Trades ticked to start with on a new contractor (those the business offers). */
+  defaultTrades?: string[];
+  /** Called with the new contractor once it is saved. */
+  onCreated?: (created: { id: number; name: string }) => void;
 }) {
   const { toast } = useToast();
   const clientApiFetch = useActiveClientApi();
@@ -166,9 +172,18 @@ export function ContractorFormDialog({
         publicLiabilityExpiry: "",
         dbsIssueDate: "", dbsType: "", dbsExpiryDate: "",
       });
-      setTrades([]);
+      setTrades(defaultTrades ?? []);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contractor, isOpen, form]);
+
+  // A new contractor only takes trades the business offers.
+  const offeredKey = formOptions ? effectiveTradeValues.join("|") : null;
+  useEffect(() => {
+    if (contractor || offeredKey == null) return;
+    setTrades(prev => prev.filter(trade => effectiveTradeValues.includes(trade)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contractor, offeredKey, isOpen]);
 
   function toggleTrade(value: string) {
     setTrades(prev =>
@@ -201,6 +216,8 @@ export function ContractorFormDialog({
           body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error((await res.json()).error ?? "Create failed");
+        const created = await res.json().catch(() => null);
+        if (created?.id != null) onCreated?.(created);
       }
       // Invalidate all contractor queries so lists refresh
       await qc.invalidateQueries({ queryKey: ["contractors"] });

@@ -10,7 +10,7 @@ import { complianceCheckDueState } from "@/lib/compliance-check-state";
 import { formatDay } from "@/lib/onboarding";
 import { cn } from "@/lib/utils";
 
-interface VisitType { key: string; module: string; title: string; label: string }
+interface VisitType { key: string; module: string; trackLabel: string; title: string; label: string }
 interface Visit { visitKey: string; siteId: number; notNeeded?: boolean }
 
 type Rag = "red" | "amber" | "green" | "grey";
@@ -86,7 +86,7 @@ export function TrackContractorChecks({ module, siteId }: { module: string; site
   const rows = allRows.filter((row) => !row.notNeeded);
   const hidden = allRows.length - rows.length;
   const setUpLink = (key: string) =>
-    `/contractors?${new URLSearchParams({ visit: key, ...(siteId !== undefined ? { site: String(siteId) } : {}) })}`;
+    `/contractors?${new URLSearchParams({ track: module, visit: key, ...(siteId !== undefined ? { site: String(siteId) } : {}) })}`;
 
   return (
     <Card className="p-4" data-testid={`track-contractor-checks-${module}`}>
@@ -147,9 +147,15 @@ export function TrackContractorChecks({ module, siteId }: { module: string; site
       {hidden > 0 && (
         <p className="text-xs text-muted-foreground mt-2" data-testid="contractor-checks-hidden">
           {hidden} marked N/A (no contractor needed) and hidden.{" "}
-          <Link href="/contractors" className="text-primary font-medium hover:underline">Add back on the Contractors page</Link>
+          <Link href={`/contractors?track=${encodeURIComponent(module)}`} className="text-primary font-medium hover:underline">Add back on the Contractors page</Link>
         </p>
       )}
+      <p className="text-xs mt-3">
+        <Link href={`/contractors?track=${encodeURIComponent(module)}`} className="text-primary font-medium hover:underline"
+          data-testid="track-contractors-link">
+          {types[0].trackLabel} contractors →
+        </Link>
+      </p>
     </Card>
   );
 }

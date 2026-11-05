@@ -5,6 +5,7 @@ import type { Contractor } from "@workspace/api-client-react";
 export type ContractorListRecord = Contractor & {
   gasSafeRegistration?: string | null;
   dbsExpiryDate?: string | null;
+  trades?: string[] | null;
 };
 
 export type ContractorListStatus = {

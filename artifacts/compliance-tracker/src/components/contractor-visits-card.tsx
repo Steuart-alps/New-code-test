@@ -11,9 +11,11 @@ import { useToast } from "@/hooks/use-toast";
 import { formatDay, localToday } from "@/lib/onboarding";
 import { useSiteFilter } from "@/hooks/use-working-site";
 import { tradeLabel } from "@/lib/contractor-trades";
+import { ContractorFormDialog } from "@/components/contractor-form-dialog";
 
 interface VisitType {
   key: string;
+  module: string;
   trackLabel: string;
   label: string;
   description: string;
@@ -53,6 +55,7 @@ interface Contractor { id: number; name: string; company?: string | null; trades
 
 /** Select values besides a contractor id. */
 const UNDECIDED = "none";
+const NEW_CONTRACTOR = "__new__";
 const ALL_SITES = "all";
 const REGISTER_GROUP = "Compliance checks";
 
@@ -85,7 +88,11 @@ interface Row {
  * before it is due, or is marked "No contractor needed"; those fold away so
  * each track shows what needs a contractor.
  */
-export function ContractorVisitsCard({ contractors }: { contractors: Contractor[] }) {
+export function ContractorVisitsCard({ contractors, track }: {
+  contractors: Contractor[];
+  /** Only this track's lines (a track's module, e.g. "green"), when set. */
+  track?: string;
+}) {
   const { activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
   const clientApiFetch = useActiveClientApi();
@@ -99,6 +106,8 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
     return { visit: params.get("visit"), site: params.get("site") };
   });
   const [highlight, setHighlight] = useState<string | null>(null);
+  // The line a new contractor is being added for, from its contractor list.
+  const [addingFor, setAddingFor] = useState<Row | null>(null);
 
   const { data, isLoading, isError } = useQuery<{ types: VisitType[]; visits: Visit[]; checks?: RegisterCheck[] }>({
     queryKey: ["contractor-visits", activeClientId],
@@ -157,10 +166,11 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
 
   const groups = new Map<string, Row[]>();
   const add = (group: string, row: Row) => groups.set(group, [...(groups.get(group) ?? []), row]);
-  for (const type of data.types) groups.set(type.trackLabel, groups.get(type.trackLabel) ?? []);
+  const ofTrack = (type: VisitType) => !track || type.module === track;
+  for (const type of data.types) if (ofTrack(type)) groups.set(type.trackLabel, groups.get(type.trackLabel) ?? []);
   for (const visit of data.visits) {
     const type = typeByKey.get(visit.visitKey);
-    if (!type || !atSite(visit.siteId)) continue;
+    if (!type || !ofTrack(type) || !atSite(visit.siteId)) continue;
     const takesDate = type.dueFrom === "check" || !visit.trackDueDate;
     add(type.trackLabel, {
       id: `${visit.visitKey}@${visit.siteId}`,
@@ -183,7 +193,8 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
       choose: choice => putVisit(visit, choice),
     });
   }
-  for (const check of checks) {
+  // The compliance check register belongs to no one track.
+  for (const check of track ? [] : checks) {
     if (!atSite(check.siteId)) continue;
     add(REGISTER_GROUP, {
       id: `check:${check.checkId}`,
@@ -290,7 +301,10 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
             <div className="flex gap-2 w-full md:w-auto">
               <Select
                 value={value}
-                onValueChange={next => row.choose({ contractorId: next === UNDECIDED ? null : Number(next), notNeeded: false })}
+                onValueChange={next => {
+                  if (next === NEW_CONTRACTOR) setAddingFor(row);
+                  else row.choose({ contractorId: next === UNDECIDED ? null : Number(next), notNeeded: false });
+                }}
                 disabled={save.isPending}
               >
                 <SelectTrigger
@@ -301,6 +315,7 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={UNDECIDED}>Not chosen yet</SelectItem>
+                  <SelectItem value={NEW_CONTRACTOR} className="text-primary font-medium">+ Add a new contractor</SelectItem>
                   {contractorChoices(row.trades)}
                 </SelectContent>
               </Select>
@@ -379,6 +394,13 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
           );
         })}
       </div>
+
+      <ContractorFormDialog
+        isOpen={addingFor != null}
+        onClose={() => setAddingFor(null)}
+        defaultTrades={addingFor?.trades}
+        onCreated={created => addingFor?.choose({ contractorId: created.id, notNeeded: false })}
+      />
     </Card>
   );
 }
