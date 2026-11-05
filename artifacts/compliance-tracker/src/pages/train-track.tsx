@@ -1,4 +1,6 @@
 import { useState, useMemo } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn, type ListTable } from "@/components/list-table";
+import { rankIn } from "@/lib/table-sort";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { useRecordMedia } from "@/components/record-media";
@@ -408,6 +410,46 @@ export default function TrainTrackPage() {
   const filteredSignoffs  = useMemo(() => applyCommonFilters(signoffs),  [signoffs,  siteFilter, search]);
   const filteredInternals = useMemo(() => applyCommonFilters(internals), [internals, siteFilter, search]);
 
+  // Column headings: click to sort, filter or search.
+  const TT_TH = "text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider";
+  const staffColumn: ListColumn<TrainingRecord> = { key: "staff", label: "Staff Member", className: TT_TH, value: r => r.staff_name, sort: "text", filter: "search" };
+  const siteColumn: ListColumn<TrainingRecord> = { key: "site", label: "Site", className: `${TT_TH} hidden md:table-cell`, value: r => r.site_name, sort: "text", filter: "choice" };
+  const actionsColumn: ListColumn<TrainingRecord> = { key: "actions", label: "", className: `${TT_TH} w-20` };
+  const CERT_ORDER = ["expired", "expiring_soon", "valid", "no_expiry"];
+  const certsTable = useListTable(filteredCerts, [
+    staffColumn,
+    { key: "training", label: "Training", className: TT_TH, value: r => r.training_type, sort: "text", filter: "choice" },
+    { key: "provider", label: "Provider", className: `${TT_TH} hidden sm:table-cell`, value: r => r.provider, sort: "text", filter: "choice" },
+    siteColumn,
+    { key: "completed", label: "Completed", className: `${TT_TH} hidden lg:table-cell`, value: r => r.completed_date, sort: "date", filter: "date" },
+    { key: "expires", label: "Expires", className: TT_TH, value: r => r.expiry_date, sort: ["Soonest first", "Latest first"], filter: "date" },
+    { key: "status", label: "Status", className: TT_TH, value: r => rankIn(CERT_ORDER, getCertStatus(r.expiry_date, today)),
+      sort: ["Most urgent first", "Least urgent first"], filter: "choice", filterValue: r => getCertStatus(r.expiry_date, today),
+      choiceLabel: v => STATUS_CFG[v as CertStatus]?.label ?? v, choiceOrder: CERT_ORDER },
+    actionsColumn,
+  ]);
+  const signoffsTable = useListTable(filteredSignoffs, [
+    staffColumn,
+    { key: "document", label: "Document", className: TT_TH, value: r => r.document_title, sort: "text", filter: "search" },
+    { key: "type", label: "Type", className: `${TT_TH} hidden sm:table-cell`, value: r => (r.document_type ? DOCUMENT_TYPE_LABELS[r.document_type] ?? r.document_type : null),
+      sort: "text", filter: "choice" },
+    siteColumn,
+    { key: "signed", label: "Date Signed", className: TT_TH, value: r => r.completed_date, sort: "date", filter: "date" },
+    { key: "status", label: "Status", className: TT_TH, value: r => (getSignoffStatus(r.expiry_date, today) === "expired" ? "Expired" : "Acknowledged"),
+      sort: ["Acknowledged first", "Expired first"], filter: "choice" },
+    { key: "notes", label: "Notes", className: `${TT_TH} hidden lg:table-cell`, value: r => r.notes, filter: "search" },
+    actionsColumn,
+  ]);
+  const internalsTable = useListTable(filteredInternals, [
+    staffColumn,
+    { key: "training", label: "Training / Equipment", className: TT_TH, value: r => r.training_type, sort: "text", filter: "choice" },
+    { key: "trainer", label: "Delivered By", className: `${TT_TH} hidden sm:table-cell`, value: r => r.trainer, sort: "text", filter: "choice" },
+    siteColumn,
+    { key: "date", label: "Date", className: TT_TH, value: r => r.completed_date, sort: "date", filter: "date" },
+    { key: "notes", label: "Notes", className: `${TT_TH} hidden lg:table-cell`, value: r => r.notes, filter: "search" },
+    actionsColumn,
+  ]);
+
   // ── Mutations ──────────────────────────────────────────────────────────────
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["train-track-records"] });
@@ -741,21 +783,19 @@ ${rows.map(r => `<tr>
 
   // ── Table header ───────────────────────────────────────────────────────────
 
-  function TableWrap({ headers, children, footer }: { headers: string[]; children: React.ReactNode; footer: string }) {
+  // Called as a function, not rendered as <TableWrap>: a component defined in
+  // here would be new on every render and close the heading pop-ups mid-typing.
+  function tableWrap({ table, children, footer }: { table: ListTable<TrainingRecord>; children: React.ReactNode; footer: string }) {
     return (
       <div className="border border-border rounded-sm overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-muted/40 border-b border-border">
-            <tr>
-              {headers.map(h => (
-                <th key={h} className={cn(
-                  "text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider",
-                  h === "" && "w-20"
-                )}>{h}</th>
-              ))}
-            </tr>
+            <tr><ListTableHeadings table={table} /></tr>
           </thead>
-          <tbody className="divide-y divide-border">{children}</tbody>
+          <tbody className="divide-y divide-border">
+            <ListTableNoMatches table={table} colSpan={table.columns.length} />
+            {children}
+          </tbody>
         </table>
         <div className="border-t border-border px-4 py-2 bg-muted/20 text-xs text-muted-foreground">{footer}</div>
       </div>
@@ -922,11 +962,11 @@ ${rows.map(r => `<tr>
           ) : filteredCerts.length === 0 ? (
             <EmptyState message={certs.length === 0 ? "No certificates yet. Add your first one." : "No certificates match the current filter."} />
           ) : (
-            <TableWrap
-              headers={["Staff Member", "Training", "Provider", "Site", "Completed", "Expires", "Status", ""]}
-              footer={`Showing ${filteredCerts.length} of ${certs.length} certificate${certs.length !== 1 ? "s" : ""}`}
-            >
-              {filteredCerts.map(r => {
+            tableWrap({
+              table: certsTable,
+              footer: `Showing ${filteredCerts.length} of ${certs.length} certificate${certs.length !== 1 ? "s" : ""}`,
+              children: <>
+              {certsTable.rows.map(r => {
                 const status = getCertStatus(r.expiry_date, today);
                 const cfg = STATUS_CFG[status];
                 const Icon = cfg.icon;
@@ -980,7 +1020,8 @@ ${rows.map(r => `<tr>
                   </tr>
                 );
               })}
-            </TableWrap>
+            </>,
+            })
           )}
         </>
       )}
@@ -998,11 +1039,11 @@ ${rows.map(r => `<tr>
           ) : filteredSignoffs.length === 0 ? (
             <EmptyState message={signoffs.length === 0 ? "No sign-offs yet. Add the first one." : "No sign-offs match the current filter."} />
           ) : (
-            <TableWrap
-              headers={["Staff Member", "Document", "Type", "Site", "Date Signed", "Status", "Notes", ""]}
-              footer={`Showing ${filteredSignoffs.length} of ${signoffs.length} sign-off${signoffs.length !== 1 ? "s" : ""}`}
-            >
-              {filteredSignoffs.map(r => (
+            tableWrap({
+              table: signoffsTable,
+              footer: `Showing ${filteredSignoffs.length} of ${signoffs.length} sign-off${signoffs.length !== 1 ? "s" : ""}`,
+              children: <>
+              {signoffsTable.rows.map(r => (
                 <tr key={r.id} className="bg-white hover:bg-muted/20 transition-colors group">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -1064,7 +1105,8 @@ ${rows.map(r => `<tr>
                   </td>
                 </tr>
               ))}
-            </TableWrap>
+            </>,
+            })
           )}
         </>
       )}
@@ -1082,11 +1124,11 @@ ${rows.map(r => `<tr>
           ) : filteredInternals.length === 0 ? (
             <EmptyState message={internals.length === 0 ? "No internal training records yet." : "No records match the current filter."} />
           ) : (
-            <TableWrap
-              headers={["Staff Member", "Training / Equipment", "Delivered By", "Site", "Date", "Notes", ""]}
-              footer={`Showing ${filteredInternals.length} of ${internals.length} record${internals.length !== 1 ? "s" : ""}`}
-            >
-              {filteredInternals.map(r => (
+            tableWrap({
+              table: internalsTable,
+              footer: `Showing ${filteredInternals.length} of ${internals.length} record${internals.length !== 1 ? "s" : ""}`,
+              children: <>
+              {internalsTable.rows.map(r => (
                 <tr key={r.id} className="bg-white hover:bg-muted/20 transition-colors group">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -1113,7 +1155,8 @@ ${rows.map(r => `<tr>
                   </td>
                 </tr>
               ))}
-            </TableWrap>
+            </>,
+            })
           )}
         </>
       )}

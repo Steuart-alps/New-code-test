@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable } from "@/components/list-table";
 import { Link, useSearch } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ContractorSignInSite, ContractorSignInSites, ContractorSignInVisit, ContractorSignInVisitDetail } from "@workspace/api-client-react";
@@ -164,6 +165,14 @@ export default function ContractorSignInPage() {
 
   const fireChanged = (fireDraft.trim() || null) !== (site?.fireProcedure?.trim() || null);
   const lastVisits = useMemo(() => visits.filter((v) => v.status !== "on_site"), [visits]);
+  const VISIT_TH = "py-2 pr-3 font-medium";
+  const visitsTable = useListTable(lastVisits, [
+    { key: "contractor", label: "Contractor", className: VISIT_TH, value: v => v.name, sort: "text", filter: "search",
+      filterValue: v => `${v.name} ${v.company ?? ""}`, moreFilters: [{ key: "company", label: "Company", value: v => v.company }] },
+    { key: "in", label: "Signed in", className: VISIT_TH, value: v => v.signedInAt, sort: "date", filter: "date" },
+    { key: "out", label: "Signed out", className: VISIT_TH, value: v => v.signedOutAt, sort: "date" },
+    { key: "status", label: "Status", className: "py-2 font-medium", value: v => STATUS_BADGE[v.status].label, filter: "choice" },
+  ]);
 
   return (
     <AppLayout title="Contractor sign-in">
@@ -320,10 +329,11 @@ export default function ContractorSignInPage() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="text-left text-muted-foreground">
-                      <tr><th className="py-2 pr-3 font-medium">Contractor</th><th className="py-2 pr-3 font-medium">Signed in</th><th className="py-2 pr-3 font-medium">Signed out</th><th className="py-2 font-medium" /></tr>
+                      <tr><ListTableHeadings table={visitsTable} /></tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {lastVisits.map((v) => (
+                      <ListTableNoMatches table={visitsTable} colSpan={4} />
+                      {visitsTable.rows.map((v) => (
                         <tr key={v.id} className="cursor-pointer hover:bg-muted/40" onClick={() => setOpenVisit(v.id)}>
                           <td className="py-2 pr-3"><span className="font-medium">{v.name}</span><br /><span className="text-muted-foreground">{v.company}</span></td>
                           <td className="py-2 pr-3 whitespace-nowrap">{dateTime(v.signedInAt)}</td>

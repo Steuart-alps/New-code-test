@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
 import { useParams, Link, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
@@ -258,6 +259,14 @@ export default function ContractorDetailPage() {
     onError: (err: any) => toast({ title: err.message ?? "Delete failed", variant: "destructive" }),
   });
 
+  const CERT_TH = "text-left px-4 py-2 font-medium text-muted-foreground";
+  const certsTable = useListTable(certs, [
+    { key: "name", label: "Certificate", className: CERT_TH, value: c => c.certificate_name, sort: "text", filter: "search" },
+    { key: "issuer", label: "Issuer", className: `${CERT_TH} hidden sm:table-cell`, value: c => c.issuer, sort: "text", filter: "choice" },
+    { key: "expiry", label: "Expires / recheck", className: CERT_TH, value: c => c.expiry_date, sort: ["Soonest first", "Latest first"], filter: "date" },
+    { key: "actions", label: "", className: "px-4 py-2" },
+  ] satisfies ListColumn<ContractorCert>[]);
+
   if (loadingContractor) return (
     <AppLayout title="Contractor Detail">
       <div className="animate-spin w-8 h-8 mx-auto mt-20 border-2 border-primary border-t-transparent rounded-full" />
@@ -400,15 +409,11 @@ export default function ContractorDetailPage() {
               ) : (
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-border/40 bg-muted/10">
-                      <th className="text-left px-4 py-2 font-medium text-muted-foreground">Certificate</th>
-                      <th className="text-left px-4 py-2 font-medium text-muted-foreground hidden sm:table-cell">Issuer</th>
-                      <th className="text-left px-4 py-2 font-medium text-muted-foreground">Expires / recheck</th>
-                      <th className="px-4 py-2" />
-                    </tr>
+                    <tr className="border-b border-border/40 bg-muted/10"><ListTableHeadings table={certsTable} /></tr>
                   </thead>
                   <tbody className="divide-y divide-border/40">
-                    {certs.map(cert => (
+                    <ListTableNoMatches table={certsTable} colSpan={4} />
+                    {certsTable.rows.map(cert => (
                       <tr key={cert.id} className="hover:bg-muted/20 transition-colors">
                         <td className="px-4 py-3 font-medium">{cert.certificate_name}</td>
                         <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{cert.issuer || "—"}</td>

@@ -36,6 +36,19 @@ export interface ListColumn<T> {
   choiceOrder?: readonly string[];
   /** Placeholder for a search box. */
   searchPlaceholder?: string;
+  /** Further dropdown filters in the same heading, e.g. Priority under a Status heading. */
+  moreFilters?: ListChoiceFilter<T>[];
+  /** Further ways to sort from the same heading, e.g. by priority as well as status. */
+  moreSorts?: { key: string; labels: readonly [asc: string, desc: string]; value: (row: T) => SortValue }[];
+}
+
+/** A dropdown-style filter listing the values found in the rows. */
+export interface ListChoiceFilter<T> {
+  key: string;
+  label: string;
+  value: (row: T) => string | null | undefined;
+  choiceLabel?: (value: string) => string;
+  choiceOrder?: readonly string[];
 }
 
 type ColumnFilter = string | { from: string; to: string };
@@ -46,11 +59,34 @@ const dayOf = (v: SortValue) => asText(v).slice(0, 10);
 
 function sortOptionsFor<T>(column: ListColumn<T>): ColumnSortOption[] {
   const { key, sort } = column;
-  if (!sort) return [];
-  if (sort === "text") return textSortOptions(key);
-  if (sort === "date") return dateSortOptions(key);
-  if (sort === "number") return [{ key, dir: "asc", label: "Lowest first" }, { key, dir: "desc", label: "Highest first" }];
-  return [{ key, dir: "asc", label: sort[0] }, { key, dir: "desc", label: sort[1] }];
+  const more = (column.moreSorts ?? []).flatMap((s): ColumnSortOption[] => [
+    { key: s.key, dir: "asc", label: s.labels[0] },
+    { key: s.key, dir: "desc", label: s.labels[1] },
+  ]);
+  const own: ColumnSortOption[] = !sort ? []
+    : sort === "text" ? textSortOptions(key)
+    : sort === "date" ? dateSortOptions(key)
+    : sort === "number" ? [{ key, dir: "asc", label: "Lowest first" }, { key, dir: "desc", label: "Highest first" }]
+    : [{ key, dir: "asc", label: sort[0] }, { key, dir: "desc", label: sort[1] }];
+  if (more.length && own.length) {
+    // Name the column in its own options when the heading sorts more than one way.
+    own.forEach(o => { o.label = `${column.label}, ${o.label.charAt(0).toLowerCase()}${o.label.slice(1)}`; });
+  }
+  return [...own, ...more];
+}
+
+/** Every dropdown filter a list has, keyed by where its choice is stored. */
+function choiceFiltersOf<T>(columns: ListColumn<T>[]) {
+  const out: (ListChoiceFilter<T> & { stateKey: string; column: ListColumn<T> })[] = [];
+  for (const column of columns) {
+    if (column.filter === "choice") {
+      const read = column.filterValue ?? column.value;
+      if (read) out.push({ key: column.key, stateKey: column.key, column, label: column.label,
+        value: row => asText(read(row)), choiceLabel: column.choiceLabel, choiceOrder: column.choiceOrder });
+    }
+    for (const extra of column.moreFilters ?? []) out.push({ ...extra, stateKey: `${column.key}.${extra.key}`, column });
+  }
+  return out;
 }
 
 function isActive(filter: ColumnFilter | undefined) {
@@ -76,9 +112,13 @@ export function useListTable<T>(
   // Worked out on every render: lists are short, and columns often read page data (site names…).
   const result = (() => {
     let out = [...source];
+    for (const choice of choiceFiltersOf(columns)) {
+      const filter = filters[choice.stateKey];
+      if (typeof filter === "string" && isActive(filter)) out = out.filter(row => asText(choice.value(row)) === filter);
+    }
     for (const column of columns) {
       const filter = filters[column.key];
-      if (!column.filter || !isActive(filter)) continue;
+      if (!column.filter || column.filter === "choice" || !isActive(filter)) continue;
       const read = column.filterValue ?? column.value;
       if (!read) continue;
       if (column.filter === "date" && typeof filter === "object") {
@@ -86,17 +126,18 @@ export function useListTable<T>(
           const day = dayOf(read(row));
           return (!filter.from || (!!day && day >= filter.from)) && (!filter.to || (!!day && day <= filter.to));
         });
-      } else if (column.filter === "choice") {
-        out = out.filter(row => asText(read(row)) === filter);
       } else if (typeof filter === "string") {
         out = out.filter(row => matchesSearch(asText(read(row)), filter));
       }
     }
-    const accessors = Object.fromEntries(columns.filter(c => c.sort && c.value).map(c => [c.key, c.value!]));
+    const accessors = Object.fromEntries([
+      ...columns.filter(c => c.sort && c.value).map(c => [c.key, c.value!] as const),
+      ...columns.flatMap(c => (c.moreSorts ?? []).map(s => [s.key, s.value] as const)),
+    ]);
     return sortRows(out, sort, accessors);
   })();
 
-  const activeFilters = columns.filter(c => c.filter && isActive(filters[c.key])).length;
+  const activeFilters = Object.values(filters).filter(isActive).length;
 
   return {
     columns,
@@ -114,23 +155,28 @@ export function useListTable<T>(
       }),
     activeFilters,
     clearFilters: () => setFilters({}),
-    /** Values found in a choice column, for building its list. */
-    choicesFor: (column: ListColumn<T>) => {
-      const read = column.filterValue ?? column.value;
+    /** The dropdown filters shown in a column's heading, each with the values found in the rows. */
+    choiceFiltersFor: (column: ListColumn<T>) => choiceFiltersOf([column]).map(choice => {
       const found = new Set<string>();
       for (const row of source) {
-        const v = read ? asText(read(row)) : "";
+        const v = asText(choice.value(row));
         if (v) found.add(v);
       }
       // Keep the current choice listed even if no row has it any more.
-      const current = filters[column.key];
+      const current = filters[choice.stateKey];
       if (typeof current === "string" && isActive(current)) found.add(current);
-      const label = column.choiceLabel ?? ((v: string) => v);
-      const values = column.choiceOrder
-        ? [...column.choiceOrder.filter(v => found.has(v)), ...sortByLabel([...found].filter(v => !column.choiceOrder!.includes(v)), label)]
+      const label = choice.choiceLabel ?? ((v: string) => v);
+      const order = choice.choiceOrder;
+      const values = order
+        ? [...order.filter(v => found.has(v)), ...sortByLabel([...found].filter(v => !order.includes(v)), label)]
         : sortByLabel([...found], label);
-      return values.map(v => ({ value: v, label: label(v) }));
-    },
+      return {
+        stateKey: choice.stateKey,
+        label: choice.label,
+        value: typeof current === "string" ? current : "all",
+        options: values.map(v => ({ value: v, label: label(v) })),
+      };
+    }),
   };
 }
 
@@ -142,7 +188,7 @@ export function ListTableHeadings<T>({ table }: { table: ListTable<T> }) {
     <>
       {table.columns.map(column => {
         const sortOptions = sortOptionsFor(column);
-        if (!sortOptions.length && !column.filter) {
+        if (!sortOptions.length && !column.filter && !column.moreFilters?.length) {
           return (
             <th key={column.key} className={column.className ?? "text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider"}>
               {column.label}
@@ -150,18 +196,18 @@ export function ListTableHeadings<T>({ table }: { table: ListTable<T> }) {
           );
         }
         const filter = table.filters[column.key];
-        let controls: ReactNode = null;
-        if (column.filter === "choice") {
-          controls = (
-            <ColumnFilterChoices
-              label={column.label}
-              value={typeof filter === "string" ? filter : "all"}
-              allLabel="All"
-              options={table.choicesFor(column)}
-              onChange={v => table.setFilter(column.key, v === "all" ? undefined : v)}
-            />
-          );
-        } else if (column.filter === "search") {
+        const choices = table.choiceFiltersFor(column);
+        let controls: ReactNode = choices.length ? choices.map(choice => (
+          <ColumnFilterChoices
+            key={choice.stateKey}
+            label={choice.label}
+            value={choice.value}
+            allLabel="All"
+            options={choice.options}
+            onChange={v => table.setFilter(choice.stateKey, v === "all" ? undefined : v)}
+          />
+        )) : null;
+        if (column.filter === "search") {
           controls = (
             <ColumnSearch
               label={`Search ${column.label.toLowerCase()}`}
@@ -190,8 +236,11 @@ export function ListTableHeadings<T>({ table }: { table: ListTable<T> }) {
             sortOptions={sortOptions}
             sort={table.sort}
             onSortChange={table.setSort}
-            filterActive={isActive(filter)}
-            onClearFilter={() => table.setFilter(column.key, undefined)}
+            filterActive={isActive(filter) || choices.some(choice => choice.value !== "all")}
+            onClearFilter={() => {
+              table.setFilter(column.key, undefined);
+              choices.forEach(choice => table.setFilter(choice.stateKey, undefined));
+            }}
           >
             {controls}
           </ColumnHeader>
