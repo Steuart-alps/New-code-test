@@ -104,6 +104,7 @@ type ColdFoodRow = {
   unit: string;               // "Fridge 1", "Freezer 1" etc
   tempAm: string;             // AM temperature reading (°C)
   tempPm: string;             // PM temperature reading (°C)
+  recheckTemp?: string;       // Re-check an hour after a failed AM/PM reading (°C)
   correctiveAction: string;   // Action if out of range
 };
 type CookingRow = {
@@ -1204,6 +1205,20 @@ export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {
   /** A line that failed and still needs its corrective action filled in. */
   const needsAction = (section: string, rowIndex: number) =>
     temperatureAssessment.failures.some(failure => failure.section === section && failure.rowIndex === rowIndex && !failure.actionTaken);
+  /** Fridge and freezer lines whose saved AM or PM reading failed: they ask for a re-check an hour later. */
+  const recheckLines = (() => {
+    const rules = temperatureAssessment.rules;
+    const saved = (baseRecord as Record<string, unknown> | null)?.coldFood;
+    if (!rules || !Array.isArray(saved)) return new Set<number>();
+    try {
+      const units = JSON.parse(config?.food_cold_units || "[]");
+      return new Set(assessKitchenTemperatures(null, { coldFood: saved }, rules, units)
+        .filter(failure => failure.field === "tempAm" || failure.field === "tempPm")
+        .map(failure => failure.rowIndex));
+    } catch {
+      return new Set<number>();
+    }
+  })();
   const holdRules = temperatureAssessment.rules;
   const holdPlaceholder = (section: "hotTemperature" | "sousVide", item: string) => {
     const hold = holdRules ? kitchenHoldRequirement(holdRules, section, item) : null;
@@ -1527,7 +1542,7 @@ export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-base font-display font-bold">Cold Food Record</CardTitle>
-                  <CardDescription className="text-xs mt-1">Fridge limit: ≤5°C · Freezer limit: ≤-18°C · Recommended twice daily (AM &amp; PM)</CardDescription>
+                  <CardDescription className="text-xs mt-1">Fridge limit: ≤5°C · Freezer limit: ≤-18°C · Recommended twice daily (AM &amp; PM) · A failed reading asks for a re-check an hour later</CardDescription>
                 </div>
                 {!isSubmitted && (
                   <Button variant="outline" size="sm"
@@ -1544,6 +1559,7 @@ export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {
                     <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Unit</th>
                     <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">AM temp (°C)</th>
                     <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">PM temp (°C)</th>
+                    {(recheckLines.size > 0 || coldFood.some(row => row.recheckTemp?.trim())) && <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Re-check after 1 hour (°C)</th>}
                     <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Corrective action</th>
                     {!isSubmitted && <th className="w-8 px-2" />}
                   </tr>
@@ -1567,6 +1583,11 @@ export function DailyDiaryTab({ openDay }: { openDay?: KitchenDiaryOpenDay } = {
                             data-cold-unit-row={i} data-cold-unit-field="pm" inputMode="decimal"
                             className="h-7 text-xs rounded-sm w-24" placeholder="°C" />
                         </td>
+                        {(recheckLines.size > 0 || coldFood.some(line => line.recheckTemp?.trim())) && <td className="px-3 py-1.5">
+                          {(recheckLines.has(i) || row.recheckTemp?.trim()) && <Input aria-label={`Re-check temperature °C, line ${i + 1}`} value={row.recheckTemp ?? ""} disabled={isSubmitted} onChange={e => upd("recheckTemp", e.target.value)}
+                            data-testid={`input-cold-recheck-${i}`} inputMode="decimal"
+                            className={`h-7 text-xs rounded-sm w-24 ${!row.recheckTemp?.trim() ? "border-amber-500" : ""}`} placeholder="°C" />}
+                        </td>}
                         <td className="px-3 py-1.5">
                           <CorrectiveActionInput value={row.correctiveAction} disabled={isSubmitted} onChange={v => upd("correctiveAction", v)}
                             needed={needsAction("coldFood", i)} line={row.unit || `Fridge or freezer line ${i + 1}`} />

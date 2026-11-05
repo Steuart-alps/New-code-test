@@ -106,7 +106,7 @@ export function assessKitchenTemperatures(
     const previous = rowsOf(before, section);
     rowsOf(after, section).forEach((row, index) => {
       const old = previous[index] ?? {};
-      const fields = section === 'coldFood' ? ['tempAm', 'tempPm']
+      const fields = section === 'coldFood' ? ['tempAm', 'tempPm', 'recheckTemp']
         : section === 'deliveries' ? ['tempChilled', 'tempFrozen']
           : section === 'sousVide' ? ['coreTemp', 'waterTemp'] : ['coreTemp'];
       const label = String(row.unit ?? row.item ?? row.supplier ?? `${section} ${index + 1}`);
