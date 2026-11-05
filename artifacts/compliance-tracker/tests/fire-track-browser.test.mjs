@@ -439,24 +439,31 @@ try {
   await dialog.getByRole("button", { name: "Cancel" }).click();
   console.log("ok - the emergency lighting test explains the 5 minute flick test");
 
-  // ── Retired checks: not offered, not due, older records kept ─────────────
+  // ── Every check can be recorded; panel and services are not due here ────
   dialog = await openRecordDialog(page);
   await dialog.getByRole("combobox").first().click();
   await page.getByRole("option", { name: "Weekly fire alarm test" }).waitFor();
+  await page.getByText("Contractor services & annual tests").first().waitFor();
   assert.equal(await page.getByRole("option", { name: "Alarm panel check" }).count(), 0, "the alarm panel is on the opening and closing checks");
   for (const name of ["Annual 3-hour emergency lighting discharge test", "6-monthly fire alarm service", "Annual fire extinguisher service"]) {
-    assert.equal(await page.getByRole("option", { name }).count(), 0, `${name} is its compliance check`);
+    assert.equal(await page.getByRole("option", { name }).count(), 1, `${name} can be recorded in FireTrack`);
   }
-  await page.keyboard.press("Escape");
+  await page.getByRole("option", { name: "6-monthly fire alarm service" }).click();
+  await dialog.getByTestId("alarm-service-guide").waitFor();
+  assert.match(await dialog.getByTestId("alarm-service-guide").innerText(), /Fire Alarm Maintenance/);
   await dialog.getByRole("button", { name: "Cancel" }).click();
   const statusText = await page.locator("body").innerText();
   assert.match(statusText, /Alarm panel check/, "the older alarm panel record stays in the history");
-  await page.getByText("Filter History").waitFor();
+  // The history filter is at the top of the page, above the status cards.
+  const filterBox = await page.getByText("Filter History").boundingBox();
+  const statusBox = await page.getByText("Weekly fire alarm test").first().boundingBox();
+  assert.ok(filterBox && statusBox && filterBox.y < statusBox.y, "the filter is above the status cards");
   await page.getByRole("combobox").filter({ hasText: "All types" }).click();
-  await page.getByText("No longer recorded here").waitFor();
-  await page.getByRole("option", { name: "Alarm panel check" }).waitFor();
+  assert.equal(await page.getByText("No longer recorded here").count(), 0);
+  await page.getByRole("option", { name: "6-monthly fire alarm service" }).waitFor();
+  assert.equal(await page.getByRole("option", { name: "Alarm panel check" }).count(), 0, "the panel check is left off the filter");
   await page.keyboard.press("Escape");
-  console.log("ok - the alarm panel check and the contractor services are no longer offered or due; older records stay in the history");
+  console.log("ok - the contractor services can be recorded (not the alarm panel), the filter is at the top");
 
   // ── Contractor services: the compliance checks' own status ───────────────
   const contractorCard = page.getByTestId("track-contractor-checks-fire");

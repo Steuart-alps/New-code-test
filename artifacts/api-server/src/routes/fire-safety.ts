@@ -7,6 +7,7 @@ import type { FireSafetyCheck } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, denyViewers, requireClientAdmin, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { appendAuditEvent } from "../lib/audit";
+import { completeLinkedTasksFromCheck } from "../lib/trackTaskLink";
 import { siteVisibleToDepartment, sitesTableVisibleTo } from "../lib/departmentSites";
 import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
@@ -426,12 +427,11 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const parsed = postSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
-  // Older records of a retired check stay editable, but no new ones are made.
-  if ((RETIRED_FIRE_CHECK_TYPES as readonly string[]).includes(data.checkType)) {
+  // The alarm panel is checked on the premises opening and closing checks, not
+  // here (Steuart, Nov 2026); older panel records stay editable.
+  if (data.checkType === "alarm_panel") {
     return res.status(400).json({
-      error: data.checkType === "alarm_panel"
-        ? "The alarm panel is now checked on the premises opening and closing checks."
-        : "Contractor services are now recorded on their compliance check (Compliance Checks), which FireTrack shows.",
+      error: "The alarm panel is checked on the premises opening and closing checks.",
       code: "FIRE_CHECK_TYPE_RETIRED",
     });
   }
@@ -500,6 +500,9 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
 
   const staffPresent = isDrill ? (await listDrillAttendees(clientId, [inserted.id])).get(inserted.id) ?? [] : [];
   await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: inserted.id, action: "created", after: { ...inserted, staffPresent } });
+  // A passed contractor service (alarm or extinguisher service, annual 3-hour
+  // emergency lighting test) also marks its compliance check done.
+  await completeLinkedTasksFromCheck(req, "fire", inserted);
   res.status(201).json({ ...inserted, staffPresent });
 });
 
@@ -587,6 +590,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
     clientId, entityType: "fire_safety_check", entityId: id, action: "updated",
     before: { ...existing, staffPresent: before }, after: { ...updated, staffPresent },
   });
+  await completeLinkedTasksFromCheck(req, "fire", updated);
   res.json({ ...updated, staffPresent });
 });
 

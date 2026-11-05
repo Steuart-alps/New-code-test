@@ -133,16 +133,20 @@ const CHECK_TYPE_GROUPS: { label: string; types: AnyCheckType[] }[] = [
 ];
 
 /**
- * Checks no longer recorded here (the server's RETIRED_FIRE_CHECK_TYPES): the
- * alarm panel is on the premises opening and closing checks, and the
- * contractor services are their compliance checks, shown on this page by
- * TrackContractorChecks. Older records still show in the history and can be
- * filtered.
+ * Every check can be recorded here, in house or by a contractor (Steuart, Nov
+ * 2026). The contractor services also have a compliance check, which gives
+ * their due date and red/amber/green (TrackContractorChecks on this page): a
+ * pass recorded here marks that check done, and marking the check done records
+ * it here. The alarm panel is not recorded here: it is on the premises opening
+ * and closing checks (older panel records still show in the history).
  */
-const RETIRED_CHECK_GROUP: { label: string; types: AnyCheckType[] } = {
-  label: "No longer recorded here",
-  types: ["alarm_panel", "alarm_service", "extinguisher_service", "emergency_lights_annual"],
+const CONTRACTOR_CHECK_GROUP: { label: string; types: AnyCheckType[] } = {
+  label: "Contractor services & annual tests",
+  types: ["alarm_service", "extinguisher_service", "emergency_lights_annual"],
 };
+
+/** Every group, for the record form and the history filter. */
+const RECORD_CHECK_GROUPS = [...CHECK_TYPE_GROUPS, CONTRACTOR_CHECK_GROUP];
 
 /** How often, in words, for the status cards. */
 function frequencyLabel(days: number): string {
@@ -223,6 +227,39 @@ function NightDrillGuide() {
 // Drill notes are required: what needs to improve, or that nothing does.
 const DRILL_NOTES_LABEL = "Improvements required / notes";
 const DRILL_NOTES_PLACEHOLDER = "e.g. Fire door on the first floor was slow to close; everyone used the nearest exit";
+
+// ── Contractor services ───────────────────────────────────────────────────────
+
+/** Contractor jobs that are also compliance checks, and the check each one marks done. */
+const LINKED_CHECK_GUIDES: Partial<Record<AnyCheckType, { testId: string; heading: string; who: string; check: string }>> = {
+  emergency_lights_annual: {
+    testId: "discharge-test-guide", heading: "Annual 3-hour discharge test.",
+    who: "emergency lighting contractor, or in house by a competent person", check: "Emergency Light Maintenance",
+  },
+  alarm_service: {
+    testId: "alarm-service-guide", heading: "6-monthly fire alarm service.",
+    who: "fire alarm contractor (BS 5839)", check: "Fire Alarm Maintenance",
+  },
+  extinguisher_service: {
+    testId: "extinguisher-service-guide", heading: "Annual fire extinguisher service.",
+    who: "extinguisher contractor (BS 5306-3)", check: "Fire Extinguishers Maintenance",
+  },
+};
+
+function LinkedCheckGuide({ checkType }: { checkType: AnyCheckType }) {
+  const guide = LINKED_CHECK_GUIDES[checkType];
+  if (!guide) return null;
+  return (
+    <div className="flex gap-2 border border-border rounded-sm p-3 bg-muted/20 text-xs text-muted-foreground" data-testid={guide.testId}>
+      <Lightbulb className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
+      <p>
+        <span className="font-medium text-foreground">{guide.heading}</span> Usually done by your {guide.who}.
+        A pass here also marks the "{guide.check}" compliance check done, at this site. Its certificate still goes on
+        that compliance check, and it shows red until the certificate is in.
+      </p>
+    </div>
+  );
+}
 
 // ── Emergency lighting ────────────────────────────────────────────────────────
 
@@ -1260,7 +1297,7 @@ function RecordCheckDialog({
             <Select value={checkType} onValueChange={v => setCheckType(v as AnyCheckType)}>
               <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {CHECK_TYPE_GROUPS.map(g => (
+                {RECORD_CHECK_GROUPS.map(g => (
                   <div key={g.label}>
                     <p className="px-2 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{g.label}</p>
                     {sortByLabel(g.types.filter(offered), k => CHECK_TYPE_LABELS[k]).map(k => (
@@ -1295,6 +1332,7 @@ function RecordCheckDialog({
           )}
 
           {checkType === "emergency_lights" && <FlickTestGuide />}
+          <LinkedCheckGuide checkType={checkType} />
 
           {DRILL_TYPES.has(checkType) && (
             <>
@@ -1833,6 +1871,47 @@ export default function FireSafetyPage() {
           </div>
         </div>
 
+        {/* Filters */}
+        <Card>
+          <CardHeader className="border-b border-border/50 pb-4">
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-muted-foreground" />
+              <CardTitle className="text-base font-display font-bold">Filter History</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="p-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Check Type</Label>
+                <Select value={filterType || "all"} onValueChange={v => setFilterType(v === "all" ? "" : v as AnyCheckType)}>
+                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="All types" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All types</SelectItem>
+                    {RECORD_CHECK_GROUPS.map(g => (
+                      <div key={g.label}>
+                        <p className="px-2 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{g.label}</p>
+                        {sortByLabel(g.types, k => CHECK_TYPE_LABELS[k]).map(k => <SelectItem key={k} value={k}>{CHECK_TYPE_LABELS[k]}</SelectItem>)}
+                      </div>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {sites && sites.length > 0 && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Site</Label>
+                  <Select value={filterSite ? String(filterSite) : "all"} onValueChange={v => setFilterSite(v === "all" ? undefined : Number(v))}>
+                    <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All sites</SelectItem>
+                      {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Status overview — two rows */}
         {statusLoading ? (
           <Card>
@@ -1923,47 +2002,6 @@ export default function FireSafetyPage() {
         <NightWalksCard siteId={filterSite} enabled={hasFiretrack} canRecord={canEdit} onRecord={recordNightWalk} />
         <CallPointRotationCard siteId={filterSite} sites={sites} enabled={hasFiretrack} />
         {hasFiretrack && canEdit && <DrillAttendanceCard siteId={filterSite} />}
-
-        {/* Filters */}
-        <Card>
-          <CardHeader className="border-b border-border/50 pb-4">
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-muted-foreground" />
-              <CardTitle className="text-base font-display font-bold">Filter History</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="p-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Check Type</Label>
-                <Select value={filterType || "all"} onValueChange={v => setFilterType(v === "all" ? "" : v as AnyCheckType)}>
-                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="All types" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All types</SelectItem>
-                    {[...CHECK_TYPE_GROUPS, RETIRED_CHECK_GROUP].map(g => (
-                      <div key={g.label}>
-                        <p className="px-2 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{g.label}</p>
-                        {sortByLabel(g.types, k => CHECK_TYPE_LABELS[k]).map(k => <SelectItem key={k} value={k}>{CHECK_TYPE_LABELS[k]}</SelectItem>)}
-                      </div>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {sites && sites.length > 0 && (
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Site</Label>
-                  <Select value={filterSite ? String(filterSite) : "all"} onValueChange={v => setFilterSite(v === "all" ? undefined : Number(v))}>
-                    <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All sites</SelectItem>
-                      {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
 
         {/* Check history */}
         <Card>
