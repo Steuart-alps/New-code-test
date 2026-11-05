@@ -21,6 +21,11 @@ import { ComplianceItem, useListCategories, useListSites, useListContractors } f
 
 const ALL_SITES = "__all__";
 
+/** Boxes the check page can open the form on. Each is the id of the box's input. */
+export type ItemFormField =
+  | "dueDate" | "frequencyMonths" | "leadTimeDays" | "item-contractor"
+  | "item-site" | "item-assignee" | "notes";
+
 const formSchema = z.object({
   title: z.string().min(1, "Title is required"),
   description: z.string().optional(),
@@ -51,12 +56,15 @@ export function ItemFormDialog({
   item = null,
   defaultCategoryId = null,
   defaultSiteId = null,
+  focusField = null,
 }: {
   isOpen: boolean;
   onClose: () => void;
   item?: ComplianceItem | null;
   defaultCategoryId?: number | null;
   defaultSiteId?: number | null;
+  /** Opens with this box focused, e.g. after clicking "Due date" on the check page. */
+  focusField?: ItemFormField | null;
 }) {
   const { createItem, updateItem } = useAppMutations();
   const { data: categories = [] } = useListCategories();
@@ -172,7 +180,17 @@ export function ItemFormDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[580px] bg-card text-card-foreground p-0 gap-0">
+      <DialogContent
+        className="sm:max-w-[580px] bg-card text-card-foreground p-0 gap-0"
+        onOpenAutoFocus={(event) => {
+          if (!focusField) return;
+          const box = document.getElementById(focusField);
+          if (!box) return;
+          event.preventDefault();
+          box.focus();
+          box.scrollIntoView({ block: "center" });
+        }}
+      >
         <DialogHeader className="px-6 pt-5 pb-4 border-b border-border">
           <DialogTitle className="text-lg font-display font-bold">
             {item ? "Edit Compliance Check" : "Add Compliance Check"}
@@ -213,14 +231,14 @@ export function ItemFormDialog({
             </div>
 
             <div className="space-y-1">
-              <Label className="text-xs font-medium">Site</Label>
+              <Label htmlFor="item-site" className="text-xs font-medium">Site</Label>
               <Select
                 value={form.watch("siteId") || "none"}
                 onValueChange={(val) =>
                   form.setValue("siteId", val === "none" ? undefined : val)
                 }
               >
-                <SelectTrigger className="bg-background h-9">
+                <SelectTrigger id="item-site" className="bg-background h-9">
                   <SelectValue placeholder="None" />
                 </SelectTrigger>
                 <SelectContent>
@@ -285,12 +303,12 @@ export function ItemFormDialog({
             </div>
 
             <div className="space-y-1">
-              <Label className="text-xs font-medium">Contractor</Label>
+              <Label htmlFor="item-contractor" className="text-xs font-medium">Contractor</Label>
               <Select
                 value={form.watch("contractorId")?.toString() || "none"}
                 onValueChange={(val) => form.setValue("contractorId", val === "none" ? undefined : parseInt(val))}
               >
-                <SelectTrigger className="bg-background h-9"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                <SelectTrigger id="item-contractor" className="bg-background h-9"><SelectValue placeholder="Unassigned" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Unassigned</SelectItem>
                   {contractors.map((c) => (
@@ -314,13 +332,13 @@ export function ItemFormDialog({
             </div>
 
             <div className="space-y-1">
-              <Label className="text-xs font-medium">Due Date</Label>
+              <Label htmlFor="dueDate" className="text-xs font-medium">Due Date</Label>
               <Input type="datetime-local" id="dueDate" {...form.register("dueDate")} className="bg-background h-9 w-full" />
             </div>
 
             <div className="space-y-1">
-              <Label className="text-xs font-medium">Alert Lead Time (Days)</Label>
-              <Input type="number" {...form.register("leadTimeDays")} className="bg-background h-9" placeholder="7" />
+              <Label htmlFor="leadTimeDays" className="text-xs font-medium">Alert Lead Time (Days)</Label>
+              <Input id="leadTimeDays" type="number" {...form.register("leadTimeDays")} className="bg-background h-9" placeholder="7" />
             </div>
 
             <div className="col-span-2 space-y-1">
