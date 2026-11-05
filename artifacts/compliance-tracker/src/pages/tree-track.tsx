@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
@@ -347,6 +348,25 @@ export default function TreeTrackPage() {
     }
     return rows;
   }, [records, filterType, filterSite, search]);
+  const TH = "text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider";
+  const resultKey = (r: TreeInspection) => r.actionSeverity ?? r.observationResult ?? (r.result === "pass" ? "pass" : "fail");
+  const resultLabel = (v: string) => RESULT_CFG[v as CheckResult]?.label ?? SEVERITY_CFG[v as ActionSeverity]?.label ?? v;
+  const RESULT_ORDER = ["urgent_action", "action_required", "fail", "monitor", "pass"];
+  const inspectionsTable = useListTable(filtered, [
+    { key: "type", label: "Inspection Type", className: TH, value: r => CHECK_TYPE_LABELS[r.checkType as CheckType] ?? r.checkType,
+      sort: "text", filter: "choice", filterValue: r => r.checkType, choiceLabel: v => CHECK_TYPE_LABELS[v as CheckType] ?? v },
+    { key: "date", label: "Date", className: TH, value: r => r.checkDate, sort: "date", filter: "date" },
+    { key: "result", label: "Result", className: TH, value: r => RESULT_ORDER.indexOf(resultKey(r)), sort: ["Worst first", "Best first"],
+      filter: "choice", filterValue: resultKey, choiceLabel: resultLabel, choiceOrder: RESULT_ORDER },
+    { key: "tree", label: "Tree Ref", className: `${TH} hidden sm:table-cell`, value: r => r.treeRef, sort: "text", filter: "search" },
+    { key: "location", label: "Location", className: `${TH} hidden md:table-cell`, value: r => r.location, sort: "text", filter: "search",
+      filterValue: r => `${r.location ?? ""} ${r.what3words ?? ""}` },
+    { key: "inspector", label: "Inspector", className: `${TH} hidden lg:table-cell`, value: r => r.inspector, sort: "text", filter: "choice" },
+    { key: "followUp", label: "Follow-up", className: `${TH} hidden lg:table-cell`, value: r => r.followUpDate,
+      sort: ["Soonest first", "Latest first"], filter: "date" },
+    { key: "photos", label: "Photos", className: `${TH} hidden sm:table-cell` },
+    { key: "edit", label: "", className: `${TH} w-20` },
+  ] satisfies ListColumn<TreeInspection>[]);
 
   // ── Mutations ──────────────────────────────────────────────────────────────
 
@@ -897,22 +917,11 @@ export default function TreeTrackPage() {
         <div className="border border-border rounded-sm overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-muted/40 border-b border-border">
-              <tr>
-                {["Inspection Type", "Date", "Result", "Tree Ref", "Location", "Inspector", "Follow-up", "Photos", ""].map(h => (
-                  <th key={h} className={cn(
-                    "text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider",
-                    h === "Tree Ref" && "hidden sm:table-cell",
-                    h === "Location" && "hidden md:table-cell",
-                    h === "Inspector" && "hidden lg:table-cell",
-                    h === "Follow-up" && "hidden lg:table-cell",
-                    h === "Photos" && "hidden sm:table-cell",
-                    h === "" && "w-20",
-                  )}>{h}</th>
-                ))}
-              </tr>
+              <tr><ListTableHeadings table={inspectionsTable} /></tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filtered.map(r => {
+              <ListTableNoMatches table={inspectionsTable} colSpan={9} />
+              {inspectionsTable.rows.map(r => {
                 const days = daysUntil(r.followUpDate);
                 const followUpUrgent = days !== null && days <= 14;
                 return (

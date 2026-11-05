@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useSearch } from "wouter";
 import { format } from "date-fns";
@@ -208,6 +209,17 @@ export default function PortfolioPage() {
     return businesses.filter(business => business.name.toLowerCase().includes(needle)
       || (business.siteList ?? []).some(site => site.name.toLowerCase().includes(needle)));
   }, [businesses, query]);
+  const table = useListTable(shown, [
+    { key: "business", label: "Business", className: "p-3 font-medium", value: b => b.name, sort: "text" },
+    { key: "sites", label: "Sites", className: "p-3 text-right font-medium", value: b => b.sites, sort: "number" },
+    { key: "overdue", label: "Overdue checks", className: "p-3 text-right font-medium", value: b => b.overdueChecks, sort: ["Fewest first", "Most first"] },
+    { key: "actions", label: "Open actions", className: "p-3 text-right font-medium", value: b => b.openActions, sort: ["Fewest first", "Most first"] },
+    { key: "created", label: "Created", className: "p-3 font-medium", value: b => b.createdAt ?? null, sort: "date", filter: "date" },
+    { key: "activity", label: "Last activity", className: "p-3 font-medium", value: b => b.lastActivityAt, sort: "date", filter: "date" },
+    { key: "subscription", label: "Subscription", className: "p-3 font-medium", value: b => subscriptionLabel(b).text, sort: "text", filter: "choice",
+      filterValue: b => (b.subscription === "trial" && b.trialEndsAt ? "On trial" : subscriptionLabel(b).text) },
+    { key: "open", label: "", className: "p-3" },
+  ] satisfies ListColumn<PortfolioBusiness>[]);
 
   // The portfolio is the landing page only for consultants with two or more
   // businesses; everyone else continues to their dashboard.
@@ -261,7 +273,7 @@ export default function PortfolioPage() {
 
             {/* Phones: one card per business */}
             <div className="space-y-3 md:hidden">
-              {shown.map(business => (
+              {table.rows.map(business => (
                 <Card key={business.id} className="space-y-3 rounded-sm p-4" data-testid={`portfolio-card-${business.id}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -285,19 +297,11 @@ export default function PortfolioPage() {
             <div className="hidden overflow-x-auto rounded-sm border md:block">
               <table className="w-full text-sm">
                 <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
-                  <tr>
-                    <th className="p-3 font-medium">Business</th>
-                    <th className="p-3 text-right font-medium">Sites</th>
-                    <th className="p-3 text-right font-medium">Overdue checks</th>
-                    <th className="p-3 text-right font-medium">Open actions</th>
-                    <th className="p-3 font-medium">Created</th>
-                    <th className="p-3 font-medium">Last activity</th>
-                    <th className="p-3 font-medium">Subscription</th>
-                    <th className="p-3" />
-                  </tr>
+                  <tr><ListTableHeadings table={table} /></tr>
                 </thead>
                 <tbody>
-                  {shown.map(business => (
+                  <ListTableNoMatches table={table} colSpan={8} />
+                  {table.rows.map(business => (
                     <tr key={business.id} className="border-t" data-testid={`portfolio-row-${business.id}`}>
                       <td className="p-3">
                         <span className="font-medium">{business.name}</span>{!business.active && <span className="ml-2 text-xs text-muted-foreground">(inactive)</span>}

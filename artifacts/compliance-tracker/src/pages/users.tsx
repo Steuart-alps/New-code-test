@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
 import { format, formatDistanceToNow } from "date-fns";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
@@ -469,6 +470,22 @@ export default function UsersPage() {
   const [resendingInvite, setResendingInvite] = useState<number | null>(null);
   const [revokingInvite, setRevokingInvite] = useState<number | null>(null);
   const [actionMessage, setActionMessage] = useState<ActionMessage | null>(null);
+  const USER_TH = "text-left px-4 py-3 text-sm font-medium text-muted-foreground";
+  const departmentText = (u: User) => {
+    if (u.role === "consultant" || u.role === "client_admin" || (u.role === "client_manager" && u.allDepartments === true)) return "All departments";
+    const names = (u.departmentIds ?? (u.departmentId != null ? [u.departmentId] : []))
+      .map(id => departmentLabel(departments.find(d => d.id === id)))
+      .filter((name): name is string => !!name);
+    return names.length ? names.join(", ") : "No department";
+  };
+  const usersTable = useListTable(users, [
+    { key: "name", label: "Name", className: USER_TH, value: u => u.name, sort: "text", filter: "search" },
+    { key: "email", label: "Email", className: USER_TH, value: u => u.email, sort: "text", filter: "search" },
+    { key: "role", label: "Role", className: USER_TH, value: u => roleLabel(u.role, isConsultant), sort: "text", filter: "choice" },
+    { key: "department", label: "Department", className: USER_TH, value: departmentText, sort: "text", filter: "choice" },
+    { key: "status", label: "Status", className: USER_TH, value: u => (u.active ? "Active" : "Inactive"), sort: "text", filter: "choice" },
+    { key: "actions", label: "", className: "px-4 py-3" },
+  ] satisfies ListColumn<User>[]);
 
   async function load() {
     setLoading(true);
@@ -648,17 +665,11 @@ export default function UsersPage() {
           <div className="bg-card border border-border rounded-xl overflow-hidden">
             <table className="w-full">
               <thead className="bg-muted/50">
-                <tr>
-                  <th className="text-left px-4 py-3 text-sm font-medium text-muted-foreground">Name</th>
-                  <th className="text-left px-4 py-3 text-sm font-medium text-muted-foreground">Email</th>
-                  <th className="text-left px-4 py-3 text-sm font-medium text-muted-foreground">Role</th>
-                  <th className="text-left px-4 py-3 text-sm font-medium text-muted-foreground">Department</th>
-                  <th className="text-left px-4 py-3 text-sm font-medium text-muted-foreground">Status</th>
-                  <th className="px-4 py-3" />
-                </tr>
+                <tr><ListTableHeadings table={usersTable} /></tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {users.map(u => {
+                <ListTableNoMatches table={usersTable} colSpan={6} />
+                {usersTable.rows.map(u => {
                   const userDepartments = (u.departmentIds ?? (u.departmentId != null ? [u.departmentId] : []))
                     .map(id => departmentLabel(departments.find(d => d.id === id)))
                     .filter((name): name is string => !!name);

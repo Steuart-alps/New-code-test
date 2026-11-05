@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable } from "@/components/list-table";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -143,6 +144,16 @@ const PAGE_SIZE = 20;
 export default function DailyHistoryPage() {
   const [sites, setSites] = useState<Site[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const HIST_TH = "text-left px-5 py-3 text-sm font-medium text-muted-foreground";
+  const historyTable = useListTable(submissions, [
+    { key: "date", label: "Date", className: HIST_TH, value: s => s.checklistDate, sort: "date" },
+    { key: "site", label: "Site", className: `${HIST_TH} hidden sm:table-cell`, value: s => s.siteName ?? `Site #${s.siteId}`, sort: "text", filter: "choice" },
+    { key: "type", label: "Type", className: HIST_TH, value: s => (s.type === "am" ? "AM" : "PM"), sort: "text", filter: "choice" },
+    { key: "by", label: "Submitted by", className: `${HIST_TH} hidden md:table-cell`, value: s => s.submittedByName, sort: "text", filter: "choice" },
+    { key: "status", label: "Status", className: `${HIST_TH} hidden md:table-cell`,
+      value: s => (s.type === "pm" ? (s.signedOffAt ? "Signed off" : "Awaiting sign-off") : "Submitted"), sort: "text", filter: "choice" },
+    { key: "view", label: "", className: "w-20 px-3 py-3" },
+  ]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -245,17 +256,11 @@ export default function DailyHistoryPage() {
           <div className="bg-card border border-border rounded-xl overflow-hidden">
             <table className="w-full">
               <thead className="bg-muted/40 border-b border-border">
-                <tr>
-                  <th className="text-left px-5 py-3 text-sm font-medium text-muted-foreground">Date</th>
-                  <th className="text-left px-5 py-3 text-sm font-medium text-muted-foreground hidden sm:table-cell">Site</th>
-                  <th className="text-left px-5 py-3 text-sm font-medium text-muted-foreground">Type</th>
-                  <th className="text-left px-5 py-3 text-sm font-medium text-muted-foreground hidden md:table-cell">Submitted by</th>
-                  <th className="text-left px-5 py-3 text-sm font-medium text-muted-foreground hidden md:table-cell">Status</th>
-                  <th className="w-20 px-3 py-3" />
-                </tr>
+                <tr><ListTableHeadings table={historyTable} /></tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {submissions.map(sub => (
+                <ListTableNoMatches table={historyTable} colSpan={6} />
+                {historyTable.rows.map(sub => (
                   <tr
                     key={sub.id}
                     className="hover:bg-muted/20 transition-colors cursor-pointer"
