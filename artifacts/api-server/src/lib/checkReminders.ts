@@ -44,9 +44,10 @@ export type FireCheckType = (typeof FIRE_CHECK_TYPES)[number];
  * 6-monthly fire alarm service, the annual extinguisher service and the annual
  * 3-hour emergency lighting test) are due by their compliance checks, which
  * FireTrack shows with the checks' own status. They were not recorded in
- * FireTrack from Oct 2026; since Nov 2026 they can be again (every check can
- * be recorded in its own track), and a passed contractor service marks its
- * compliance check done (lib/trackTaskLink.ts). They are never due, overdue or
+ * FireTrack from Oct 2026; since Nov 2026 the contractor services can be
+ * again (every check can be recorded in its own track), and a pass marks its
+ * compliance check done (lib/trackTaskLink.ts). The alarm panel stays on the
+ * opening and closing checks only. They are never due, overdue or
  * reminded about here.
  */
 export const RETIRED_FIRE_CHECK_TYPES: readonly FireCheckType[] = [

@@ -118,7 +118,7 @@ const ROUTE_WALK_TYPES = new Set<AnyCheckType>(["fire_walk", "night_walk"]);
 const CHECK_TYPE_GROUPS: { label: string; types: AnyCheckType[] }[] = [
   {
     label: "Regular checks",
-    types: ["alarm", "alarm_panel", "emergency_lights", "extinguishers", "fire_doors"],
+    types: ["alarm", "emergency_lights", "extinguishers", "fire_doors"],
   },
   {
     label: "Walkthroughs & drills",
@@ -131,7 +131,8 @@ const CHECK_TYPE_GROUPS: { label: string; types: AnyCheckType[] }[] = [
  * 2026). The contractor services also have a compliance check, which gives
  * their due date and red/amber/green (TrackContractorChecks on this page): a
  * pass recorded here marks that check done, and marking the check done records
- * it here. The alarm panel is also on the premises opening and closing checks.
+ * it here. The alarm panel is not recorded here: it is on the premises opening
+ * and closing checks (older panel records still show in the history).
  */
 const CONTRACTOR_CHECK_GROUP: { label: string; types: AnyCheckType[] } = {
   label: "Contractor services & annual tests",
@@ -237,19 +238,6 @@ function LinkedCheckGuide({ checkType }: { checkType: AnyCheckType }) {
         <span className="font-medium text-foreground">{guide.heading}</span> Usually done by your {guide.who}.
         A pass here also marks the "{guide.check}" compliance check done, at this site. Its certificate still goes on
         that compliance check, and it shows red until the certificate is in.
-      </p>
-    </div>
-  );
-}
-
-/** The panel is looked at on every opening and closing check too. */
-function AlarmPanelGuide() {
-  return (
-    <div className="flex gap-2 border border-border rounded-sm p-3 bg-muted/20 text-xs text-muted-foreground" data-testid="alarm-panel-guide">
-      <Lightbulb className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
-      <p>
-        The panel is also checked on every premises opening and closing check. Record it here as well when you want a
-        fuller record, such as the zones tested or a fault and what was done.
       </p>
     </div>
   );
@@ -1003,7 +991,7 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
 
           <TabsContent value="zones" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
             <p className="text-xs text-muted-foreground">
-              List your alarm panel zones. They're filled in for you in "Zones tested" on alarm panel checks.
+              List your alarm panel zones, for reference (the panel itself is checked on the premises opening and closing checks).
             </p>
             <StringListEditor items={alarmZones} onChange={setAlarmZones} placeholder='e.g. "Zone 1 — Ground floor"' />
           </TabsContent>
@@ -1324,7 +1312,6 @@ function RecordCheckDialog({
           )}
 
           {checkType === "emergency_lights" && <FlickTestGuide />}
-          {checkType === "alarm_panel" && <AlarmPanelGuide />}
           <LinkedCheckGuide checkType={checkType} />
 
           {checkType === "fire_drill" && (

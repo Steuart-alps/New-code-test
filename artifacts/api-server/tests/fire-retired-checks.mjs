@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { createTenant, createUser, isoDay, pool } from './approval-workflow-fixtures.mjs';
 
-// FireTrack's alarm panel check (the panel is also on the premises opening and
-// closing checks) and its contractor services (the fire alarm and extinguisher
+// FireTrack's alarm panel check (on the premises opening and closing checks
+// only; no new FireTrack records) and its contractor services (the fire alarm and extinguisher
 // services and the annual 3-hour emergency lighting test, due by their
 // compliance checks, shown on FireTrack) have no FireTrack due date of their
-// own, but can all be recorded in FireTrack (Nov 2026). A passed contractor
+// own; the services can be recorded in FireTrack (Nov 2026). A passed contractor
 // service marks its compliance check done, and completing the compliance
 // check records it in FireTrack. A compliance check can be done in house by a
 // competent person, and no contractor certificate is then due. Run:
@@ -35,10 +35,13 @@ try {
   const alarmService = (await owner.request('POST', '/compliance-items', {
     title: 'Fire Alarm Maintenance', priority: 'high', siteId: site.id, frequencyMonths: 6, dueDate: `${today}T00:00:00.000Z`,
   })).data;
-  for (const checkType of RETIRED) {
+  for (const checkType of RETIRED.filter(type => type !== 'alarm_panel')) {
     const recorded = await staff.request('POST', '/fire-safety', { checkType, checkDate: today, result: 'pass', siteId: site.id });
     assert.equal(recorded.status, 201, `${checkType}: ${JSON.stringify(recorded.data)}`);
   }
+  const panel = await staff.request('POST', '/fire-safety', { checkType: 'alarm_panel', checkDate: today, result: 'pass', siteId: site.id });
+  assert.equal(panel.status, 400, 'the alarm panel stays on the opening and closing checks');
+  assert.equal(panel.data.code, 'FIRE_CHECK_TYPE_RETIRED');
   const recordedStatus = (await owner.request('GET', `/fire-safety/status?siteId=${site.id}`)).data;
   assert.deepEqual(recordedStatus.filter(row => RETIRED.includes(row.checkType)), [], 'still not due in FireTrack');
   const serviced = (await owner.request('GET', `/compliance-items/${alarmService.id}`)).data;
@@ -48,7 +51,7 @@ try {
      ORDER BY id DESC LIMIT 1`, [owner.clientId, alarmService.id]);
   assert.ok(linkAudit.metadata.fromFireSafetyCheck, 'the audit trail names the FireTrack record');
   await pool.query(`DELETE FROM fire_safety_checks WHERE client_id = $1`, [owner.clientId]);
-  console.log('ok - the alarm panel and contractor services can be recorded in FireTrack; a service pass marks its compliance check done');
+  console.log('ok - contractor services can be recorded in FireTrack (not the alarm panel); a service pass marks its compliance check done');
 
   // ── Older records stay, editable, and make nothing due ─────────────────────
   // (Dated today so the edit is inside the daily-record lock window.)

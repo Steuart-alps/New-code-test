@@ -405,6 +405,14 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const parsed = postSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
+  // The alarm panel is checked on the premises opening and closing checks, not
+  // here (Steuart, Nov 2026); older panel records stay editable.
+  if (data.checkType === "alarm_panel") {
+    return res.status(400).json({
+      error: "The alarm panel is checked on the premises opening and closing checks.",
+      code: "FIRE_CHECK_TYPE_RETIRED",
+    });
+  }
   const performer = await resolveStaffPerformer(clientId, data.staffRosterId, data.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
 

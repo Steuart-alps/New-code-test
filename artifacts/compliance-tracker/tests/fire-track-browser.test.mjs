@@ -441,7 +441,8 @@ try {
   await dialog.getByRole("combobox").first().click();
   await page.getByRole("option", { name: "Weekly fire alarm test" }).waitFor();
   await page.getByText("Contractor services & annual tests").first().waitFor();
-  for (const name of ["Alarm panel check", "Annual 3-hour emergency lighting discharge test", "6-monthly fire alarm service", "Annual fire extinguisher service"]) {
+  assert.equal(await page.getByRole("option", { name: "Alarm panel check" }).count(), 0, "the alarm panel is on the opening and closing checks");
+  for (const name of ["Annual 3-hour emergency lighting discharge test", "6-monthly fire alarm service", "Annual fire extinguisher service"]) {
     assert.equal(await page.getByRole("option", { name }).count(), 1, `${name} can be recorded in FireTrack`);
   }
   await page.getByRole("option", { name: "6-monthly fire alarm service" }).click();
@@ -456,9 +457,10 @@ try {
   assert.ok(filterBox && statusBox && filterBox.y < statusBox.y, "the filter is above the status cards");
   await page.getByRole("combobox").filter({ hasText: "All types" }).click();
   assert.equal(await page.getByText("No longer recorded here").count(), 0);
-  await page.getByRole("option", { name: "Alarm panel check" }).waitFor();
+  await page.getByRole("option", { name: "6-monthly fire alarm service" }).waitFor();
+  assert.equal(await page.getByRole("option", { name: "Alarm panel check" }).count(), 0, "the panel check is left off the filter");
   await page.keyboard.press("Escape");
-  console.log("ok - the alarm panel check and the contractor services can be recorded, the filter is at the top");
+  console.log("ok - the contractor services can be recorded (not the alarm panel), the filter is at the top");
 
   // ── Contractor services: the compliance checks' own status ───────────────
   const contractorCard = page.getByTestId("track-contractor-checks-fire");
