@@ -97,7 +97,8 @@ try {
 
   const typed = [
     { title: 'Repair the fire door closer on the first floor', instruction: 'Requirement 1: door does not self-close.', module: 'audit',
-      severity: 'urgent', siteId: siteA.id, dueDate: isoDay(7), assignedUserId: maintenance.userId, reportReference: 'Requirement 1', draftSource: 'ai' },
+      severity: 'urgent', siteId: siteA.id, dueDate: isoDay(7), assignedUserId: maintenance.userId, reportReference: 'Requirement 1', draftSource: 'ai',
+      sendToFixTrack: true },
     { title: 'Update the falls risk assessment', module: 'audit', severity: 'action_required', siteId: siteA.id,
       assignedUserId: owner.userId, draftSource: 'manual' },
     { title: 'Review night staffing', module: 'audit', severity: 'monitor', siteId: null, draftSource: 'manual' },
@@ -158,7 +159,16 @@ try {
   assert.equal(listed.actionCount, 3);
   assert.equal(listed.openCount, 3);
   assert.ok(ok(await owner.request('GET', '/track-actions?module=audit')).some((a) => a.id === door.id), 'the actions are on the Report actions list');
-  console.log('ok - confirming creates open actions linked to the report, marked AI-drafted or typed, with who confirmed them');
+  // "Send to FixTrack?" is the person's choice per action: Yes raises a job, No keeps it in its track.
+  assert.ok(Number.isInteger(door.fixTrackIssueId), 'Yes sends that action to FixTrack');
+  assert.equal(door.fixTrackDisposition, 'linked');
+  const job = ok(await owner.request('GET', `/fix-track/issues/${door.fixTrackIssueId}`));
+  assert.equal(job.title, door.title);
+  for (const kept of [falls, staffing]) {
+    assert.equal(kept.fixTrackIssueId, null, 'nothing goes to FixTrack without a Yes');
+    assert.equal(kept.fixTrackDisposition, 'not_needed');
+  }
+  console.log('ok - confirming creates open actions linked to the report, marked AI-drafted or typed, with who confirmed them, sent to FixTrack only when chosen');
 
   // ── The action plan email goes out the same day ──────────────────────────
   assert.deepEqual([...emailedTo].sort(), ['Alex ALPS', 'Morgan Manager', 'Sam Maintenance'],

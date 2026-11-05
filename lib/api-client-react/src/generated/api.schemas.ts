@@ -5634,6 +5634,8 @@ export interface InspectionReportDraftAction {
   assignedUserId?: number | null;
   reportReference?: string | null;
   draftSource?: InspectionReportDraftActionDraftSource;
+  /** Raise a FixTrack job for this action when the list is confirmed. Only ever the person's choice; absent means No. */
+  sendToFixTrack?: boolean;
 }
 
 export interface InspectionReportDraftRequest {
