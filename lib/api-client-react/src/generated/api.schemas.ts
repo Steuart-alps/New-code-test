@@ -3316,7 +3316,7 @@ export interface RequestUploadUrlResponse {
 }
 
 /**
- * "fire_walk" is the escape route sign-off (sites with sleeping accommodation). "night_walk" is a night porter's fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see /fire-safety/night-walks).
+ * "fire_walk" is the escape route sign-off (sites with sleeping accommodation). "fire_drill_night" is the night staff fire drill, a separate 6-monthly check at sites with sleeping accommodation. "night_walk" is a night porter's fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see /fire-safety/night-walks).
  */
 export type FireCheckType = typeof FireCheckType[keyof typeof FireCheckType];
 
@@ -3333,6 +3333,7 @@ export const FireCheckType = {
   alarm_service: 'alarm_service',
   extinguisher_service: 'extinguisher_service',
   night_walk: 'night_walk',
+  fire_drill_night: 'fire_drill_night',
 } as const;
 
 export type FireSafetyCheckResult = typeof FireSafetyCheckResult[keyof typeof FireSafetyCheckResult];
@@ -3344,7 +3345,7 @@ export const FireSafetyCheckResult = {
 } as const;
 
 /**
- * Fire drills. Whether night staff took part.
+ * Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check).
  */
 export type FireSafetyCheckNightStaff = typeof FireSafetyCheckNightStaff[keyof typeof FireSafetyCheckNightStaff] | null;
 
@@ -3398,7 +3399,7 @@ export interface FireSafetyCheck {
   callPointId?: number | null;
   /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
   callPoint?: string | null;
-  /** Fire drills. Whether night staff took part. */
+  /** Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check). */
   nightStaff?: FireSafetyCheckNightStaff;
   /**
      * Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
@@ -3434,7 +3435,7 @@ export const CreateFireSafetyCheckRequestResult = {
 } as const;
 
 /**
- * Fire drills. Whether night staff took part.
+ * Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check).
  */
 export type CreateFireSafetyCheckRequestNightStaff = typeof CreateFireSafetyCheckRequestNightStaff[keyof typeof CreateFireSafetyCheckRequestNightStaff] | null;
 
@@ -3480,7 +3481,7 @@ export interface CreateFireSafetyCheckRequest {
   callPointId?: number | null;
   /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
   callPoint?: string | null;
-  /** Fire drills. Whether night staff took part. */
+  /** Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check). */
   nightStaff?: CreateFireSafetyCheckRequestNightStaff;
   /**
      * Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
@@ -3517,7 +3518,7 @@ export const UpdateFireSafetyCheckRequestResult = {
 } as const;
 
 /**
- * Fire drills. Whether night staff took part.
+ * Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check).
  */
 export type UpdateFireSafetyCheckRequestNightStaff = typeof UpdateFireSafetyCheckRequestNightStaff[keyof typeof UpdateFireSafetyCheckRequestNightStaff] | null;
 
@@ -3562,7 +3563,7 @@ export interface UpdateFireSafetyCheckRequest {
   callPointId?: number | null;
   /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
   callPoint?: string | null;
-  /** Fire drills. Whether night staff took part. */
+  /** Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check). */
   nightStaff?: UpdateFireSafetyCheckRequestNightStaff;
   /**
      * Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
