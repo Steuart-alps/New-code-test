@@ -323,7 +323,7 @@ export default function ContractorPortalPage() {
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex-1 min-w-[180px]">
               <label className="block text-xs font-medium text-slate-600 mb-1">Renewal / expiry date</label>
-              <input type="date" value={insuranceExpiry} onChange={e => setInsuranceExpiry(e.target.value)}
+              <input type="date" data-empty={insuranceExpiry ? "false" : "true"} value={insuranceExpiry} onChange={e => setInsuranceExpiry(e.target.value)}
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
             </div>
             <div className="pt-5">
@@ -349,7 +349,7 @@ export default function ContractorPortalPage() {
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Expiry date</label>
-              <input type="date" value={dbsExpiryDate} onChange={e => setDbsExpiryDate(e.target.value)}
+              <input type="date" data-empty={dbsExpiryDate ? "false" : "true"} value={dbsExpiryDate} onChange={e => setDbsExpiryDate(e.target.value)}
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
             </div>
           </div>
@@ -430,7 +430,7 @@ export default function ContractorPortalPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">Completed</label>
-                  <input type="date" value={certCompleted} onChange={e => {
+                  <input type="date" data-empty={certCompleted ? "false" : "true"} value={certCompleted} onChange={e => {
                     setCertCompleted(e.target.value);
                     if (!certExpiry) setCertExpiry(suggestExpiry(certName, e.target.value));
                   }} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
@@ -438,7 +438,7 @@ export default function ContractorPortalPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Expiry date</label>
-                <input type="date" value={certExpiry} onChange={e => setCertExpiry(e.target.value)}
+                <input type="date" data-empty={certExpiry ? "false" : "true"} value={certExpiry} onChange={e => setCertExpiry(e.target.value)}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                 <p className="mt-1 text-xs text-slate-500">A common renewal interval is suggested for preset certificates. Check your certificate and edit this date if needed.</p>
               </div>

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
 import { Link } from "wouter";
 import { takeLinkParams } from "@/lib/deep-link";
 import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
@@ -1876,6 +1877,15 @@ function NstsSprayerPanel({ sprayers, hasSprayers, canAdmin, onLogTest }: {
   canAdmin: boolean;
   onLogTest: (machineId: number) => void;
 }) {
+  const S_TH = "text-left font-medium py-1.5 pr-4";
+  const sprayersTable = useListTable(sprayers, [
+    { key: "sprayer", label: "Sprayer", className: S_TH, value: s => s.machineName, sort: "text", filter: "search" },
+    { key: "type", label: "Type", className: `${S_TH} hidden sm:table-cell`, sort: "text", filter: "choice",
+      value: s => (isNstsSprayerCategory(s.sprayerCategory) ? NSTS_SPRAYER_CATEGORIES[s.sprayerCategory].label : s.sprayerCategory) },
+    { key: "last", label: "Last test", className: S_TH, value: s => s.lastTestDate, sort: "date" },
+    { key: "next", label: "Next due", className: S_TH, value: s => s.dueDate, sort: ["Soonest first", "Latest first"] },
+    ...(canAdmin ? [{ key: "log", label: "", className: "w-24" }] : []),
+  ] satisfies ListColumn<NstsSprayerRow>[]);
   if (sprayers.length === 0) {
     if (!hasSprayers) return null;
     return (
@@ -1896,17 +1906,10 @@ function NstsSprayerPanel({ sprayers, hasSprayers, canAdmin, onLogTest }: {
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-muted-foreground text-xs">
-                <th className="text-left font-medium py-1.5 pr-4">Sprayer</th>
-                <th className="text-left font-medium py-1.5 pr-4 hidden sm:table-cell">Type</th>
-                <th className="text-left font-medium py-1.5 pr-4">Last test</th>
-                <th className="text-left font-medium py-1.5 pr-4">Next due</th>
-                {canAdmin && <th className="w-24" />}
-              </tr>
-            </thead>
+            <thead><tr className="border-b text-muted-foreground text-xs"><ListTableHeadings table={sprayersTable} /></tr></thead>
             <tbody>
-              {sprayers.map(s => (
+              <ListTableNoMatches table={sprayersTable} colSpan={sprayersTable.columns.length} />
+              {sprayersTable.rows.map(s => (
                 <tr key={s.machineId} className="border-b last:border-0" data-testid={`nsts-row-${s.machineId}`}>
                   <td className="py-1.5 pr-4 font-medium">{s.machineName}</td>
                   <td className="py-1.5 pr-4 text-xs text-muted-foreground hidden sm:table-cell">
@@ -2113,6 +2116,24 @@ function HoursTab({ hours, readings, loading, filterMachine, q, canAdmin, onLog,
   const shownMachines = hours.filter(h =>
     (!filterMachine || String(h.machineId) === filterMachine) && h.machineName.toLowerCase().includes(q));
   const shownReadings = readings.filter(r => r.machineName.toLowerCase().includes(q) || (r.recordedBy ?? "").toLowerCase().includes(q));
+  const H_TH = "text-left font-medium py-2 pr-4";
+  const hoursTable = useListTable(shownMachines, [
+    { key: "machine", label: "Machine", className: H_TH, value: h => h.machineName, sort: "text", filter: "search" },
+    { key: "meter", label: "Hour meter", className: H_TH, value: h => h.currentHours, sort: "number" },
+    { key: "last", label: "Last reading", className: `${H_TH} hidden md:table-cell`, value: h => h.lastReadingDate, sort: "date" },
+    { key: "d7", label: "Last 7 days", className: `${H_TH} hidden sm:table-cell`, value: h => h.hoursLast7Days, sort: "number" },
+    { key: "d30", label: "Last 30 days", className: `${H_TH} hidden sm:table-cell`, value: h => h.hoursLast30Days, sort: "number" },
+    { key: "service", label: "Next service", className: H_TH, value: h => h.hoursToService, sort: ["Soonest first", "Latest first"] },
+    { key: "log", label: "", className: "w-24" },
+  ] satisfies ListColumn<MachineHours>[]);
+  const readingsTable = useListTable(shownReadings, [
+    { key: "date", label: "Date", className: H_TH, value: r => r.readingDate, sort: "date", filter: "date" },
+    { key: "machine", label: "Machine", className: H_TH, value: r => r.machineName, sort: "text", filter: "choice" },
+    { key: "hours", label: "Hours", className: H_TH, value: r => r.hours, sort: "number" },
+    { key: "from", label: "From", className: H_TH, value: r => r.sourceLabel, sort: "text", filter: "choice" },
+    { key: "by", label: "Recorded by", className: `${H_TH} hidden md:table-cell`, value: r => r.recordedBy, sort: "text", filter: "choice" },
+    { key: "edit", label: "", className: "w-16" },
+  ] satisfies ListColumn<HourReading>[]);
   if (loading) return <div className="py-10 text-center text-sm text-muted-foreground animate-pulse">Loading hours…</div>;
   return (
     <>
@@ -2128,19 +2149,10 @@ function HoursTab({ hours, readings, loading, filterMachine, q, canAdmin, onLog,
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm" data-testid="table-machine-hours">
-            <thead>
-              <tr className="border-b text-muted-foreground text-xs">
-                <th className="text-left font-medium py-2 pr-4">Machine</th>
-                <th className="text-left font-medium py-2 pr-4">Hour meter</th>
-                <th className="text-left font-medium py-2 pr-4 hidden md:table-cell">Last reading</th>
-                <th className="text-left font-medium py-2 pr-4 hidden sm:table-cell">Last 7 days</th>
-                <th className="text-left font-medium py-2 pr-4 hidden sm:table-cell">Last 30 days</th>
-                <th className="text-left font-medium py-2 pr-4">Next service</th>
-                <th className="w-24" />
-              </tr>
-            </thead>
+            <thead><tr className="border-b text-muted-foreground text-xs"><ListTableHeadings table={hoursTable} /></tr></thead>
             <tbody>
-              {shownMachines.map(h => (
+              <ListTableNoMatches table={hoursTable} colSpan={hoursTable.columns.length} />
+              {hoursTable.rows.map(h => (
                 <tr key={h.machineId} className="border-b last:border-0" data-testid={`hours-row-${h.machineId}`}>
                   <td className="py-2 pr-4 font-medium">{h.machineName}</td>
                   <td className="py-2 pr-4 tabular-nums" data-testid={`hours-current-${h.machineId}`}>{hoursText(h.currentHours)}</td>
@@ -2176,18 +2188,10 @@ function HoursTab({ hours, readings, loading, filterMachine, q, canAdmin, onLog,
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm" data-testid="table-hour-readings">
-              <thead>
-                <tr className="border-b text-muted-foreground text-xs">
-                  <th className="text-left font-medium py-2 pr-4">Date</th>
-                  <th className="text-left font-medium py-2 pr-4">Machine</th>
-                  <th className="text-left font-medium py-2 pr-4">Hours</th>
-                  <th className="text-left font-medium py-2 pr-4">From</th>
-                  <th className="text-left font-medium py-2 pr-4 hidden md:table-cell">Recorded by</th>
-                  <th className="w-16" />
-                </tr>
-              </thead>
+              <thead><tr className="border-b text-muted-foreground text-xs"><ListTableHeadings table={readingsTable} /></tr></thead>
               <tbody>
-                {shownReadings.map(r => (
+                <ListTableNoMatches table={readingsTable} colSpan={readingsTable.columns.length} />
+                {readingsTable.rows.map(r => (
                   <tr key={r.key} className="border-b last:border-0">
                     <td className="py-2 pr-4 tabular-nums">{fmt(r.readingDate)}</td>
                     <td className="py-2 pr-4">{r.machineName}</td>
@@ -2535,6 +2539,69 @@ export default function GreenTrackPage() {
       (f.filledBy ?? "").toLowerCase().includes(q)
     ), [fuelLogs, q]);
 
+  // Column headings: click to sort, filter or search.
+  const G_TH = "text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider";
+  const G2_TH = "text-left font-medium py-2 pr-4";
+  const machineTypeText = (t: string) => MACHINE_TYPE_LABELS[t] ?? t;
+  const machinesTable = useListTable(filteredMachines, [
+    { key: "machine", label: "Machine", className: G_TH, value: m => m.name, sort: "text", filter: "search" },
+    { key: "type", label: "Type", className: G_TH, value: m => machineTypeText(m.type), sort: "text", filter: "choice" },
+    { key: "make", label: "Make / Model", className: `${G_TH} hidden md:table-cell`, value: m => [m.make, m.model].filter(Boolean).join(" "), sort: "text", filter: "choice" },
+    { key: "serial", label: "Serial / Reg", className: `${G_TH} hidden lg:table-cell`, value: m => m.serialNo ?? m.regNo, sort: "text", filter: "search",
+      filterValue: m => `${m.serialNo ?? ""} ${m.regNo ?? ""}` },
+    { key: "site", label: "Site", className: `${G_TH} hidden sm:table-cell`, value: m => m.siteName, sort: "text", filter: "choice" },
+    { key: "status", label: "Status", className: G_TH, value: m => (m.active ? "Active" : "Inactive"), sort: "text", filter: "choice" },
+    { key: "edit", label: "", className: `${G_TH} w-20` },
+  ] satisfies ListColumn<Machine>[]);
+  const RESULT_ORDER = ["fail", "advisory", "pass"];
+  const resultText = (r: string) => ({ pass: "Pass", advisory: "Advisory", fail: "Fail" }[r] ?? r);
+  const preUseTable = useListTable(filteredPreUse, [
+    { key: "machine", label: "Machine", className: G_TH, value: c => c.machineName, sort: "text", filter: "choice",
+      moreFilters: [{ key: "type", label: "Type", value: c => machineTypeText(c.machineType) }] },
+    { key: "date", label: "Date", className: G_TH, value: c => c.checkDate, sort: "date", filter: "date" },
+    { key: "result", label: "Result", className: G_TH, value: c => RESULT_ORDER.indexOf(c.result), sort: ["Worst first", "Best first"],
+      filter: "choice", filterValue: c => c.result, choiceLabel: resultText, choiceOrder: RESULT_ORDER },
+    { key: "operator", label: "Operator", className: `${G_TH} hidden md:table-cell`, value: c => c.operator, sort: "text", filter: "choice" },
+    { key: "checklist", label: "Checklist", className: `${G_TH} hidden lg:table-cell` },
+    { key: "defect", label: "Defect?", className: G_TH, value: c => (c.defectNoted ? "Yes" : "No"), sort: ["No first", "Yes first"], filter: "choice" },
+    { key: "photos", label: "Photos", className: `${G_TH} hidden sm:table-cell` },
+    { key: "edit", label: "", className: `${G_TH} w-20` },
+  ] satisfies ListColumn<PreUseCheck>[]);
+  const servicesTable = useListTable(filteredServices, [
+    { key: "machine", label: "Machine", className: G_TH, value: s => s.machineName, sort: "text", filter: "choice",
+      moreFilters: [{ key: "type", label: "Machine type", value: s => machineTypeText(s.machineType) }] },
+    { key: "date", label: "Date", className: G_TH, value: s => s.serviceDate, sort: "date", filter: "date" },
+    { key: "type", label: "Type", className: G_TH, value: s => SERVICE_TYPE_LABELS[s.serviceType] ?? s.serviceType, sort: "text", filter: "choice" },
+    { key: "by", label: "Serviced By", className: `${G_TH} hidden md:table-cell`,
+      value: s => [s.doneBy === "contractor" ? s.contractorName : null, s.servicedBy].filter(Boolean).join(" · "), sort: "text", filter: "choice",
+      moreFilters: [{ key: "doneBy", label: "Done by", value: s => (s.doneBy === "in_house" ? "In house" : s.doneBy === "contractor" ? "Contractor" : null) }] },
+    { key: "next", label: "Next Due", className: `${G_TH} hidden md:table-cell`, value: s => s.nextServiceDate, sort: ["Soonest first", "Latest first"], filter: "date" },
+    { key: "cost", label: "Cost", className: `${G_TH} hidden lg:table-cell`, value: s => s.costPence, sort: "number" },
+    { key: "photos", label: "Photos", className: `${G_TH} hidden sm:table-cell` },
+    { key: "edit", label: "", className: `${G_TH} w-20` },
+  ] satisfies ListColumn<ServiceRecord>[]);
+  const puwerTable = useListTable(filteredPuwer, [
+    { key: "machine", label: "Machine", className: G2_TH, value: p => p.machineName, sort: "text", filter: "choice" },
+    { key: "type", label: "Type", className: `${G2_TH} hidden sm:table-cell`, value: p => PUWER_INSPECTION_TYPE_LABELS[p.inspectionType] ?? p.inspectionType, sort: "text", filter: "choice" },
+    { key: "date", label: "Date", className: G2_TH, value: p => p.inspectionDate, sort: "date", filter: "date" },
+    { key: "next", label: "Next due", className: `${G2_TH} hidden md:table-cell`, value: p => p.nextInspectionDate, sort: ["Soonest first", "Latest first"], filter: "date" },
+    { key: "inspector", label: "Inspector", className: `${G2_TH} hidden lg:table-cell`, value: p => p.inspectorName ?? p.inspectorCompany, sort: "text", filter: "choice" },
+    { key: "result", label: "Result", className: G2_TH, value: p => p.result.charAt(0).toUpperCase() + p.result.slice(1), sort: "text", filter: "choice" },
+    { key: "safe", label: "Safe to op?", className: `${G2_TH} hidden sm:table-cell`, value: p => (p.safeToOperate ? "Yes" : "No"), sort: ["No first", "Yes first"], filter: "choice" },
+    { key: "cert", label: "Certificate", className: G2_TH, value: p => (p.certificateObjectPath ? "Attached" : "None"), filter: "choice" },
+    ...(canAdmin ? [{ key: "edit", label: "", className: "w-16" }] : []),
+  ] satisfies ListColumn<PuwerInspection>[]);
+  const fuelTable = useListTable(filteredFuel, [
+    { key: "machine", label: "Machine", className: G2_TH, value: f => f.machineName, sort: "text", filter: "choice" },
+    { key: "date", label: "Date", className: G2_TH, value: f => f.logDate, sort: "date", filter: "date" },
+    { key: "type", label: "Type", className: G2_TH, value: f => FUEL_TYPE_LABELS[f.fuelType] ?? f.fuelType, sort: "text", filter: "choice" },
+    { key: "litres", label: "Litres", className: "text-right font-medium py-2 pr-4 hidden sm:table-cell", value: f => f.quantityLitres, sort: "number" },
+    { key: "hours", label: "Hours", className: "text-right font-medium py-2 pr-4 hidden md:table-cell", value: f => f.engineHours, sort: "number" },
+    { key: "cost", label: "Cost", className: "text-right font-medium py-2 pr-4 hidden md:table-cell", value: f => f.costPence, sort: "number" },
+    { key: "by", label: "Filled by", className: `${G2_TH} hidden lg:table-cell`, value: f => f.filledBy, sort: "text", filter: "choice" },
+    { key: "edit", label: "", className: "w-16" },
+  ] satisfies ListColumn<FuelLog>[]);
+
   const { data: greenConfig } = useGetGreenTrackConfig();
   const showFuelTab = greenConfig?.green_show_fuel !== "false";
   // The Template's default site (where the shed is), else the site the user
@@ -2792,21 +2859,10 @@ export default function GreenTrackPage() {
             ) : (
               <div className="border border-border rounded-sm overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead className="bg-muted/40 border-b border-border">
-                    <tr>
-                      {["Machine", "Type", "Make / Model", "Serial / Reg", "Site", "Status", ""].map(h => (
-                        <th key={h} className={cn(
-                          "text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider",
-                          h === "Make / Model" && "hidden md:table-cell",
-                          h === "Serial / Reg" && "hidden lg:table-cell",
-                          h === "Site" && "hidden sm:table-cell",
-                          h === "" && "w-20",
-                        )}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
+                  <thead className="bg-muted/40 border-b border-border"><tr><ListTableHeadings table={machinesTable} /></tr></thead>
                   <tbody className="divide-y divide-border">
-                    {filteredMachines.map(m => {
+                    <ListTableNoMatches table={machinesTable} colSpan={machinesTable.columns.length} />
+                    {machinesTable.rows.map(m => {
                       // Find open defects for this machine
                       const openDefects = defects.filter(d => d.machineId === m.id && d.status !== "resolved");
                       return (
@@ -2896,21 +2952,10 @@ export default function GreenTrackPage() {
             ) : (
               <div className="border border-border rounded-sm overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead className="bg-muted/40 border-b border-border">
-                    <tr>
-                      {["Machine", "Date", "Result", "Operator", "Checklist", "Defect?", "Photos", ""].map(h => (
-                        <th key={h} className={cn(
-                          "text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider",
-                          h === "Operator" && "hidden md:table-cell",
-                          h === "Checklist" && "hidden lg:table-cell",
-                          h === "Photos" && "hidden sm:table-cell",
-                          h === "" && "w-20",
-                        )}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
+                  <thead className="bg-muted/40 border-b border-border"><tr><ListTableHeadings table={preUseTable} /></tr></thead>
                   <tbody className="divide-y divide-border">
-                    {filteredPreUse.map(c => (
+                    <ListTableNoMatches table={preUseTable} colSpan={preUseTable.columns.length} />
+                    {preUseTable.rows.map(c => (
                       <tr id={`green-source-green_pre_use_checks-${c.id}`} key={c.id} className="bg-white hover:bg-muted/20 transition-colors group">
                         <td className="px-4 py-3">
                           <p className="font-medium">{c.machineName}</p>
@@ -3033,22 +3078,10 @@ export default function GreenTrackPage() {
             ) : (
               <div className="border border-border rounded-sm overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead className="bg-muted/40 border-b border-border">
-                    <tr>
-                      {["Machine", "Date", "Type", "Serviced By", "Next Due", "Cost", "Photos", ""].map(h => (
-                        <th key={h} className={cn(
-                          "text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider",
-                          h === "Serviced By" && "hidden md:table-cell",
-                          h === "Next Due" && "hidden md:table-cell",
-                          h === "Cost" && "hidden lg:table-cell",
-                          h === "Photos" && "hidden sm:table-cell",
-                          h === "" && "w-20",
-                        )}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
+                  <thead className="bg-muted/40 border-b border-border"><tr><ListTableHeadings table={servicesTable} /></tr></thead>
                   <tbody className="divide-y divide-border">
-                    {filteredServices.map(s => {
+                    <ListTableNoMatches table={servicesTable} colSpan={servicesTable.columns.length} />
+                    {servicesTable.rows.map(s => {
                       const days = daysUntil(s.nextServiceDate);
                       const overdue = days !== null && days < 0;
                       const dueSoon = days !== null && !overdue && days <= 14;
@@ -3221,21 +3254,10 @@ export default function GreenTrackPage() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-muted-foreground text-xs">
-                      <th className="text-left font-medium py-2 pr-4">Machine</th>
-                      <th className="text-left font-medium py-2 pr-4 hidden sm:table-cell">Type</th>
-                      <th className="text-left font-medium py-2 pr-4">Date</th>
-                      <th className="text-left font-medium py-2 pr-4 hidden md:table-cell">Next due</th>
-                      <th className="text-left font-medium py-2 pr-4 hidden lg:table-cell">Inspector</th>
-                      <th className="text-left font-medium py-2 pr-4">Result</th>
-                      <th className="text-left font-medium py-2 pr-4 hidden sm:table-cell">Safe to op?</th>
-                      <th className="text-left font-medium py-2 pr-4">Certificate</th>
-                      {canAdmin && <th className="w-16" />}
-                    </tr>
-                  </thead>
+                  <thead><tr className="border-b text-muted-foreground text-xs"><ListTableHeadings table={puwerTable} /></tr></thead>
                   <tbody>
-                    {filteredPuwer.map(p => {
+                    <ListTableNoMatches table={puwerTable} colSpan={puwerTable.columns.length} />
+                    {puwerTable.rows.map(p => {
                       const today = new Date().toISOString().split("T")[0];
                       const nextDay = isoDay(p.nextInspectionDate);
                       const overdue = nextDay && nextDay < today;
@@ -3336,20 +3358,10 @@ export default function GreenTrackPage() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-muted-foreground text-xs">
-                      <th className="text-left font-medium py-2 pr-4">Machine</th>
-                      <th className="text-left font-medium py-2 pr-4">Date</th>
-                      <th className="text-left font-medium py-2 pr-4">Type</th>
-                      <th className="text-right font-medium py-2 pr-4 hidden sm:table-cell">Litres</th>
-                      <th className="text-right font-medium py-2 pr-4 hidden md:table-cell">Hours</th>
-                      <th className="text-right font-medium py-2 pr-4 hidden md:table-cell">Cost</th>
-                      <th className="text-left font-medium py-2 pr-4 hidden lg:table-cell">Filled by</th>
-                      <th className="w-16" />
-                    </tr>
-                  </thead>
+                  <thead><tr className="border-b text-muted-foreground text-xs"><ListTableHeadings table={fuelTable} /></tr></thead>
                   <tbody>
-                    {filteredFuel.map(f => (
+                    <ListTableNoMatches table={fuelTable} colSpan={fuelTable.columns.length} />
+                    {fuelTable.rows.map(f => (
                       <tr key={f.id} className="border-b last:border-0">
                         <td className="py-2 pr-4 font-medium">{f.machineName}</td>
                         <td className="py-2 pr-4 tabular-nums">{f.logDate}</td>

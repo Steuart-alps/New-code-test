@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import { ListSortSelect, ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
+import { rankIn, sortRows, type SortState } from "@/lib/table-sort";
 import { AssigneeField, assigneeFields } from "@/components/assignee-field";
 import { takeLinkParams } from "@/lib/deep-link";
 import { useQuery } from "@tanstack/react-query";
@@ -82,6 +84,9 @@ const PRIORITIES: Record<string, { label: string; color: string }> = {
   high:   { label: "High",   color: "bg-amber-100 text-amber-700 border-amber-200" },
   urgent: { label: "Urgent", color: "bg-rose-100 text-rose-700 border-rose-200" },
 };
+
+/** Most urgent first when a list is sorted by priority. */
+const PRIORITY_ORDER = ["urgent", "high", "medium", "low"] as const;
 
 const STATUSES: Record<string, { label: string; icon: any; color: string }> = {
   reported:    { label: "Reported",    icon: AlertTriangle, color: "bg-rose-50 text-rose-700 border-rose-200" },
@@ -489,6 +494,20 @@ function FixTrackDashboard({ issues, onOpenIssue, onShow }: { issues: Issue[]; o
     .slice(0, 6);
 
   const daysOpen = (d: string) => elapsedBoardDays(d, today);
+  const oldestTable = useListTable(oldest, [
+    { key: "issue", label: "Issue", className: "text-left px-4 py-2.5 text-xs font-medium text-muted-foreground",
+      value: i => i.title, sort: "text", filter: "search", filterValue: i => `${i.title} ${i.location ?? ""}` },
+    { key: "type", label: "Type", className: "text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden sm:table-cell",
+      value: i => issueTypeMeta(i.issueType).label, filterValue: i => i.issueType, sort: "text", filter: "choice",
+      choiceLabel: v => issueTypeMeta(v).label },
+    { key: "site", label: "Site", className: "text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden md:table-cell",
+      value: i => i.siteName, sort: "text", filter: "choice" },
+    { key: "priority", label: "Priority", className: "text-left px-4 py-2.5 text-xs font-medium text-muted-foreground",
+      value: i => rankIn(PRIORITY_ORDER, i.priority), filterValue: i => i.priority, sort: ["Most urgent first", "Least urgent first"],
+      filter: "choice", choiceLabel: v => PRIORITIES[v]?.label ?? v, choiceOrder: PRIORITY_ORDER },
+    { key: "days", label: "Days open", className: "text-right px-4 py-2.5 text-xs font-medium text-muted-foreground",
+      value: i => daysOpen(i.reportedDate), sort: ["Fewest days first", "Most days first"] },
+  ] satisfies ListColumn<Issue>[]);
   const maxType  = Math.max(...byType.map(t => t.count), 1);
   const maxSite  = Math.max(...bySite.map(([, c]) => c), 1);
 
@@ -579,16 +598,11 @@ function FixTrackDashboard({ issues, onOpenIssue, onShow }: { issues: Issue[]; o
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-muted/40 border-b">
-                <tr>
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Issue</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden sm:table-cell">Type</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden md:table-cell">Site</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Priority</th>
-                  <th className="text-right px-4 py-2.5 text-xs font-medium text-muted-foreground">Days open</th>
-                </tr>
+                <tr><ListTableHeadings table={oldestTable} /></tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {oldest.map(issue => {
+                <ListTableNoMatches table={oldestTable} colSpan={5} />
+                {oldestTable.rows.map(issue => {
                   const days        = daysOpen(issue.reportedDate);
                   const typeMeta    = ISSUE_TYPES[issue.issueType]  ?? ISSUE_TYPES.general;
                   const priorityMeta = PRIORITIES[issue.priority]   ?? PRIORITIES.low;
@@ -650,6 +664,8 @@ export default function FixTrackPage() {
   const [search, setSearch]               = useState("");
   const [filterStatus, setFilterStatus]   = useState("");
   const [filterType, setFilterType]       = useState("");
+  const [filterSite, setFilterSite]       = useState("");
+  const [issueSort, setIssueSort]         = useState<SortState | null>(null);
   const [filterPriority, setFilterPriority] = useState("");
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -1011,10 +1027,21 @@ export default function FixTrackPage() {
     else if (filterStatus && i.status !== filterStatus) return false;
     if (filterType     && i.issueType !== filterType)     return false;
     if (filterPriority && i.priority  !== filterPriority) return false;
+    if (filterSite     && (i.siteName ?? "") !== filterSite) return false;
     if (q && ![i.title, i.location, i.reportedBy, i.description, i.assignedTo, i.contractorName]
       .some(v => v?.toLowerCase().includes(q))) return false;
     return true;
   });
+  const sortedIssues = sortRows(filtered, issueSort, {
+    reported: i => i.reportedDate,
+    priority: i => rankIn(PRIORITY_ORDER, i.priority),
+    target: i => i.targetDate,
+    title: i => i.title,
+    type: i => issueTypeMeta(i.issueType).label,
+    site: i => i.siteName,
+    status: i => rankIn(Object.keys(STATUSES), i.status),
+  });
+  const issueSites = sortByLabel([...new Set(issues.map(i => i.siteName).filter((n): n is string => !!n))], n => n);
 
   const openCount   = issues.filter(i => i.status === "reported" || i.status === "in_progress").length;
   const urgentCount = issues.filter(i => i.priority === "urgent" && (i.status === "reported" || i.status === "in_progress")).length;
@@ -1156,7 +1183,7 @@ export default function FixTrackPage() {
 
         {/* Issues tab — Filters */}
         {activeTab === "issues" && <>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <div className="relative sm:col-span-2 lg:col-span-1">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input placeholder="Search issues…" value={search} onChange={e => setSearch(e.target.value)} className="pl-9 bg-card" />
@@ -1183,6 +1210,29 @@ export default function FixTrackPage() {
               {Object.entries(PRIORITIES).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
             </SelectContent>
           </Select>
+          {issueSites.length > 1 && (
+            <Select value={filterSite || "all"} onValueChange={v => setFilterSite(v === "all" ? "" : v)}>
+              <SelectTrigger className="bg-card" aria-label="Filter issues by site"><SelectValue placeholder="All sites" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All sites</SelectItem>
+                {issueSites.map(n => <SelectItem key={n} value={n}>{n}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+          <ListSortSelect
+            value={issueSort}
+            onChange={setIssueSort}
+            options={[
+              { key: "reported", dir: "desc", label: "Newest reported first" },
+              { key: "reported", dir: "asc", label: "Oldest reported first" },
+              { key: "priority", dir: "asc", label: "Most urgent first" },
+              { key: "target", dir: "asc", label: "Target date, soonest first" },
+              { key: "status", dir: "asc", label: "Status (reported first)" },
+              { key: "type", dir: "asc", label: "Type, A to Z" },
+              { key: "site", dir: "asc", label: "Site, A to Z" },
+              { key: "title", dir: "asc", label: "Title, A to Z" },
+            ]}
+          />
         </div>
 
         {/* Issue list */}
@@ -1198,7 +1248,7 @@ export default function FixTrackPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {filtered.map(issue => {
+            {sortedIssues.map(issue => {
               const statusMeta   = STATUSES[issue.status]    ?? STATUSES.reported;
               const StatusIcon   = statusMeta.icon;
               const typeMeta     = ISSUE_TYPES[issue.issueType] ?? ISSUE_TYPES.general;

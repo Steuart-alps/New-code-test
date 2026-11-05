@@ -10941,9 +10941,10 @@ components:
 
     FireCheckType:
       type: string
-      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel, emergency_lights_annual, alarm_service, extinguisher_service, night_walk]
+      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel, emergency_lights_annual, alarm_service, extinguisher_service, night_walk, fire_drill_night]
       description: >-
-        "fire_walk" is the escape route sign-off (sites with sleeping accommodation). "night_walk" is a night
+        "fire_walk" is the escape route sign-off (sites with sleeping accommodation). "fire_drill_night" is the
+        night staff fire drill, a separate 6-monthly check at sites with sleeping accommodation. "night_walk" is a night
         porter's fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see /fire-safety/night-walks).
 
     FireSafetyCheck:
@@ -10984,7 +10985,7 @@ components:
           type: string
           nullable: true
           enum: [included, not_included, no_night_staff]
-          description: Fire drills. Whether night staff took part.
+          description: Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check).
         drillTime:
           type: string
           nullable: true
@@ -11068,7 +11069,7 @@ components:
           type: string
           nullable: true
           enum: [included, not_included, no_night_staff]
-          description: Fire drills. Whether night staff took part.
+          description: Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check).
         drillTime:
           type: string
           nullable: true
@@ -11141,7 +11142,7 @@ components:
           type: string
           nullable: true
           enum: [included, not_included, no_night_staff]
-          description: Fire drills. Whether night staff took part.
+          description: Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check).
         drillTime:
           type: string
           nullable: true

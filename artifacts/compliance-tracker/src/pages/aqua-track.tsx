@@ -1,4 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable } from "@/components/list-table";
+import { firstAidColumns, poolIncidentColumns, sessionColumns, surveillanceColumns } from "@/components/swim-list-columns";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
@@ -853,6 +855,11 @@ export default function AquaTrackPage() {
   const filteredSurveillance = useMemo(() => surveillance.filter(s => (s.checkedBy ?? "").toLowerCase().includes(q) || (s.siteName ?? "").toLowerCase().includes(q)), [surveillance, q]);
   const filteredFirstAid = useMemo(() => firstAidChecks.filter(f => (f.checkedBy ?? "").toLowerCase().includes(q) || (f.siteName ?? "").toLowerCase().includes(q)), [firstAidChecks, q]);
   const filteredIncidents = useMemo(() => incidents.filter(i => i.description.toLowerCase().includes(q) || (i.siteName ?? "").toLowerCase().includes(q) || INCIDENT_TYPE_LABELS[i.incidentType]?.toLowerCase().includes(q)), [incidents, q]);
+  const sessionsTable = useListTable(filteredSessions, sessionColumns<SwimSession>(SESSION_TYPE_LABELS, ["w-14", "w-16"]));
+  const surveillanceTable = useListTable(filteredSurveillance, surveillanceColumns<SurveillanceCheck>(["w-16"]));
+  const firstAidTable = useListTable(filteredFirstAid, firstAidColumns<FirstAidCheck>(FIRST_AID_ITEMS, ["w-16"]));
+  const incidentsTable = useListTable(filteredIncidents, poolIncidentColumns<Incident>(INCIDENT_TYPE_LABELS, SEVERITY_LABELS, ["w-14", "w-16"]));
+
 
   const firstAidOverdue = swimStatus?.lastFirstAidCheck ? new Date(swimStatus.lastFirstAidCheck) < new Date(Date.now() - 30 * 86400000) : true;
 
@@ -1169,19 +1176,10 @@ export default function AquaTrackPage() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead><tr className="border-b text-muted-foreground text-xs">
-                    <th className="text-left font-medium py-2 pr-4">Date</th>
-                    <th className="text-left font-medium py-2 pr-4 hidden sm:table-cell">Type</th>
-                    <th className="text-left font-medium py-2 pr-4 hidden md:table-cell">Site</th>
-                    <th className="text-left font-medium py-2 pr-4 hidden sm:table-cell">Lifeguard</th>
-                    <th className="text-left font-medium py-2 pr-4 hidden lg:table-cell">Times</th>
-                    <th className="text-right font-medium py-2 pr-4 hidden md:table-cell">Peak bathers</th>
-                    <th className="text-left font-medium py-2 pr-4">Pre-session</th>
-                    <th className="text-left font-medium py-2 pr-4">Status</th>
-                    <th className="w-14" /><th className="w-16" />
-                  </tr></thead>
+                  <thead><tr className="border-b text-muted-foreground text-xs"><ListTableHeadings table={sessionsTable} /></tr></thead>
                   <tbody>
-                    {filteredSessions.map(s => (
+                    <ListTableNoMatches table={sessionsTable} colSpan={sessionsTable.columns.length} />
+                    {sessionsTable.rows.map(s => (
                       <tr key={s.id} className={`border-b last:border-0 ${s.poolClosed ? "bg-red-50 dark:bg-red-900/10" : ""}`}>
                         <td className="py-2 pr-4 tabular-nums font-medium">{s.sessionDate}</td>
                         <td className="py-2 pr-4 text-muted-foreground hidden sm:table-cell">{SESSION_TYPE_LABELS[s.sessionType] ?? s.sessionType}</td>
@@ -1225,17 +1223,10 @@ export default function AquaTrackPage() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead><tr className="border-b text-muted-foreground text-xs">
-                    <th className="text-left font-medium py-2 pr-4">Date</th><th className="text-left font-medium py-2 pr-4">Time</th>
-                    <th className="text-left font-medium py-2 pr-4 hidden md:table-cell">Site</th>
-                    <th className="text-left font-medium py-2 pr-4 hidden sm:table-cell">Checked by</th>
-                    <th className="text-right font-medium py-2 pr-4 hidden sm:table-cell">Bathers</th>
-                    <th className="text-left font-medium py-2 pr-4">Scan done</th>
-                    <th className="text-left font-medium py-2 pr-4 hidden lg:table-cell">Observations</th>
-                    <th className="w-16" />
-                  </tr></thead>
+                  <thead><tr className="border-b text-muted-foreground text-xs"><ListTableHeadings table={surveillanceTable} /></tr></thead>
                   <tbody>
-                    {filteredSurveillance.map(c => (
+                    <ListTableNoMatches table={surveillanceTable} colSpan={surveillanceTable.columns.length} />
+                    {surveillanceTable.rows.map(c => (
                       <tr key={c.id} className="border-b last:border-0">
                         <td className="py-2 pr-4 tabular-nums">{c.checkDate}</td><td className="py-2 pr-4 tabular-nums">{c.checkTime ?? "—"}</td>
                         <td className="py-2 pr-4 text-muted-foreground hidden md:table-cell">{c.siteName ?? "—"}</td>
@@ -1283,15 +1274,10 @@ export default function AquaTrackPage() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead><tr className="border-b text-muted-foreground text-xs">
-                    <th className="text-left font-medium py-2 pr-4">Date</th>
-                    <th className="text-left font-medium py-2 pr-4 hidden md:table-cell">Site</th>
-                    <th className="text-left font-medium py-2 pr-4 hidden sm:table-cell">Checked by</th>
-                    {FIRST_AID_ITEMS.map(i => <th key={i.key} className="text-center font-medium py-2 px-1 hidden lg:table-cell text-xs max-w-[60px]">{i.label.split(" ")[0]}</th>)}
-                    <th className="text-left font-medium py-2 pr-4">Result</th><th className="w-16" />
-                  </tr></thead>
+                  <thead><tr className="border-b text-muted-foreground text-xs"><ListTableHeadings table={firstAidTable} /></tr></thead>
                   <tbody>
-                    {filteredFirstAid.map(f => {
+                    <ListTableNoMatches table={firstAidTable} colSpan={firstAidTable.columns.length} />
+                    {firstAidTable.rows.map(f => {
                       const items = FIRST_AID_ITEMS.map(i => ({ ...i, ok: !!(f as any)[i.key] }));
                       const failCount = items.filter(i => !i.ok).length;
                       return (
@@ -1332,18 +1318,10 @@ export default function AquaTrackPage() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead><tr className="border-b text-muted-foreground text-xs">
-                    <th className="text-left font-medium py-2 pr-4">Date</th>
-                    <th className="text-left font-medium py-2 pr-4 hidden sm:table-cell">Type</th>
-                    <th className="text-left font-medium py-2 pr-4">Severity</th>
-                    <th className="text-left font-medium py-2 pr-4 hidden md:table-cell">Site</th>
-                    <th className="text-left font-medium py-2 pr-4">Description</th>
-                    <th className="text-left font-medium py-2 pr-4 hidden lg:table-cell">Action taken</th>
-                    <th className="text-left font-medium py-2 pr-4">Outcome</th>
-                    <th className="w-14" /><th className="w-16" />
-                  </tr></thead>
+                  <thead><tr className="border-b text-muted-foreground text-xs"><ListTableHeadings table={incidentsTable} /></tr></thead>
                   <tbody>
-                    {filteredIncidents.map(i => (
+                    <ListTableNoMatches table={incidentsTable} colSpan={incidentsTable.columns.length} />
+                    {incidentsTable.rows.map(i => (
                       <tr key={i.id} className={`border-b last:border-0 ${i.severity === "critical" || i.severity === "high" ? "bg-red-50" : ""}`}>
                         <td className="py-2 pr-4 tabular-nums whitespace-nowrap">{i.incidentDate}{i.incidentTime && <span className="text-muted-foreground text-xs ml-1">{i.incidentTime}</span>}</td>
                         <td className="py-2 pr-4 text-muted-foreground hidden sm:table-cell">{INCIDENT_TYPE_LABELS[i.incidentType] ?? i.incidentType}</td>

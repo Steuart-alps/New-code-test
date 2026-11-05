@@ -7,7 +7,7 @@
  */
 
 /**
- * "fire_walk" is the escape route sign-off (sites with sleeping accommodation). "night_walk" is a night porter's fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see /fire-safety/night-walks).
+ * "fire_walk" is the escape route sign-off (sites with sleeping accommodation). "fire_drill_night" is the night staff fire drill, a separate 6-monthly check at sites with sleeping accommodation. "night_walk" is a night porter's fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see /fire-safety/night-walks).
  */
 export type FireCheckType = typeof FireCheckType[keyof typeof FireCheckType];
 
@@ -24,4 +24,5 @@ export const FireCheckType = {
   alarm_service: 'alarm_service',
   extinguisher_service: 'extinguisher_service',
   night_walk: 'night_walk',
+  fire_drill_night: 'fire_drill_night',
 } as const;

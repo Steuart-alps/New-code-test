@@ -3868,7 +3868,7 @@ function TwoFactorPolicyCard() {
         </div>
         {required === false && (
           <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-sm px-3 py-2">
-            Turning this off makes accounts easier to break into if a password is guessed or leaked. We recommend leaving it on.
+            We strongly recommend turning this on. ComplyTrack holds sensitive information, such as injury and incident records and people's personal details, and without two-step sign-in a guessed or leaked password is enough to get in.
           </p>
         )}
       </CardContent>
@@ -4103,7 +4103,7 @@ export function TwoFactorCard() {
                 <p className="text-xs text-muted-foreground">
                   {twoFactorRequired
                     ? "Your organisation requires two-factor authentication. Contact an administrator if you lose access to your authenticator."
-                    : "Your organisation has made two-factor authentication optional, but we recommend keeping it on."}
+                    : "Your organisation has made two-factor authentication optional, but we strongly recommend keeping it on because ComplyTrack holds sensitive records."}
                 </p>
               </div>
             )}
@@ -4141,7 +4141,7 @@ export function TwoFactorCard() {
               <span>
                 {twoFactorRequired
                   ? "Two-factor authentication setup is required before using the application."
-                  : "Two-factor authentication is off for your account. It's optional for your organisation, but we recommend turning it on."}
+                  : "Two-factor authentication is off for your account. It's optional for your organisation, but we strongly recommend turning it on: ComplyTrack holds sensitive information such as injury and incident records and people's personal details."}
               </span>
             </div>
 
