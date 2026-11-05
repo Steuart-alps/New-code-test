@@ -102,11 +102,12 @@ try {
   assert.equal(legacyEdit.data.location, 'Old free-text call point');
   console.log('ok - edits keep recorded call points; older records stay editable');
 
-  // ── Drills record whether night staff took part ─────────────────────────
+  // ── Drills may still record whether night staff took part ──────────────
+  // (optional since the night staff drill became its own check, Nov 2026)
   const drill = { checkType: 'fire_drill', checkDate: today, result: 'pass', siteId: siteA.id, drillTime: '10:30', evacuationSeconds: 150, notes: 'No improvements needed' };
   const noAnswer = await owner.request('POST', '/fire-safety', drill);
-  assert.equal(noAnswer.status, 400);
-  assert.equal(noAnswer.data.error, 'Say whether night staff took part in the drill');
+  assert.equal(noAnswer.status, 201, JSON.stringify(noAnswer.data));
+  assert.equal(noAnswer.data.nightStaff, null);
   assert.equal((await owner.request('POST', '/fire-safety', { ...drill, nightStaff: 'maybe' })).status, 400);
   const withNight = await staff.request('POST', '/fire-safety', { ...drill, nightStaff: 'not_included' });
   assert.equal(withNight.status, 201, JSON.stringify(withNight.data));
@@ -114,7 +115,7 @@ try {
   const changed = await staff.request('PUT', `/fire-safety/${withNight.data.id}`, { nightStaff: 'included' });
   assert.equal(changed.data.nightStaff, 'included');
   assert.equal((await staff.request('PUT', `/fire-safety/${withNight.data.id}`, { nightStaff: null })).status, 400);
-  console.log('ok - drills must say whether night staff took part');
+  console.log('ok - an older drill keeps its night staff answer');
 
   // ── Other check types store neither field ───────────────────────────────
   const lights = await owner.request('POST', '/fire-safety', {
