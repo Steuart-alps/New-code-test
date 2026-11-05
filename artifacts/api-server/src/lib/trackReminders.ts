@@ -337,6 +337,7 @@ async function overdueReminders(
     WHERE ci.client_id = ${clientId}
       AND (ci.site_id IS NULL OR s.id IS NOT NULL)
       AND ci.status <> 'completed'
+      AND ci.not_required_at IS NULL
       AND ci.due_date IS NOT NULL
       AND ci.due_date::date < ${today}::date
     GROUP BY s.id, s.name

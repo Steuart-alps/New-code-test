@@ -111,6 +111,8 @@ export default function ExternalChecksPage() {
     const now = new Date();
     const in30 = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     return (siteFilteredItems as any[]).filter((i) => {
+      // Marked "Not required" (N/A) on its track: never due, overdue or needing action.
+      if (i.notRequiredAt && ["due-soon", "overdue", "action-needed"].includes(filterParam)) return false;
       switch (filterParam) {
         case "due-soon": {
           if (!i.dueDate || i.status === "completed") return false;
@@ -263,6 +265,11 @@ export default function ExternalChecksPage() {
           >
             <td className="px-6 py-4">
               <p className="font-semibold text-foreground hover:text-primary transition-colors">{item.title}</p>
+              {item.notRequiredAt && (
+                <p className="text-xs text-muted-foreground mt-0.5" data-testid="check-not-required">
+                  N/A: not required here, no reminders (add it back from its track&apos;s Contractor checks box)
+                </p>
+              )}
               {(item.siteName || item.categoryName) && (
                 <div className="flex flex-wrap gap-1 mt-1">
                   {item.categoryName && (

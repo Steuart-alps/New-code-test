@@ -2195,6 +2195,7 @@ export const ListComplianceItemsResponseItem = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
+  "notRequiredAt": zod.date().nullish().describe('When an Owner or consultant marked the check \"Not required\" (N\/A). Such a check is kept but sends no reminders and is left out of overdue counts and compliance figures; null when it is required. Set with PUT \/compliance-items\/{id}\/not-required.'),
   "equipmentPart": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads', 'ppe_examination', 'rpe_filters', 'ppe_replace_by']).nullish().describe('Set when this check is the replacement date of a part of an equipment list item (a defibrillator\'s pads or battery); its due date is the part\'s expiry date. Marking it done asks for the new part\'s expiry date (nextDueDate).'),
   "notes": zod.string().nullish(),
   "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
@@ -2257,6 +2258,7 @@ export const CreateComplianceItemResponse = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
+  "notRequiredAt": zod.date().nullish().describe('When an Owner or consultant marked the check \"Not required\" (N\/A). Such a check is kept but sends no reminders and is left out of overdue counts and compliance figures; null when it is required. Set with PUT \/compliance-items\/{id}\/not-required.'),
   "equipmentPart": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads', 'ppe_examination', 'rpe_filters', 'ppe_replace_by']).nullish().describe('Set when this check is the replacement date of a part of an equipment list item (a defibrillator\'s pads or battery); its due date is the part\'s expiry date. Marking it done asks for the new part\'s expiry date (nextDueDate).'),
   "notes": zod.string().nullish(),
   "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
@@ -2300,6 +2302,7 @@ export const GetComplianceItemResponse = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
+  "notRequiredAt": zod.date().nullish().describe('When an Owner or consultant marked the check \"Not required\" (N\/A). Such a check is kept but sends no reminders and is left out of overdue counts and compliance figures; null when it is required. Set with PUT \/compliance-items\/{id}\/not-required.'),
   "equipmentPart": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads', 'ppe_examination', 'rpe_filters', 'ppe_replace_by']).nullish().describe('Set when this check is the replacement date of a part of an equipment list item (a defibrillator\'s pads or battery); its due date is the part\'s expiry date. Marking it done asks for the new part\'s expiry date (nextDueDate).'),
   "notes": zod.string().nullish(),
   "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
@@ -2363,6 +2366,7 @@ export const UpdateComplianceItemResponse = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
+  "notRequiredAt": zod.date().nullish().describe('When an Owner or consultant marked the check \"Not required\" (N\/A). Such a check is kept but sends no reminders and is left out of overdue counts and compliance figures; null when it is required. Set with PUT \/compliance-items\/{id}\/not-required.'),
   "equipmentPart": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads', 'ppe_examination', 'rpe_filters', 'ppe_replace_by']).nullish().describe('Set when this check is the replacement date of a part of an equipment list item (a defibrillator\'s pads or battery); its due date is the part\'s expiry date. Marking it done asks for the new part\'s expiry date (nextDueDate).'),
   "notes": zod.string().nullish(),
   "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
@@ -2429,6 +2433,7 @@ export const UpdateComplianceItemStatusResponse = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
+  "notRequiredAt": zod.date().nullish().describe('When an Owner or consultant marked the check \"Not required\" (N\/A). Such a check is kept but sends no reminders and is left out of overdue counts and compliance figures; null when it is required. Set with PUT \/compliance-items\/{id}\/not-required.'),
   "equipmentPart": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads', 'ppe_examination', 'rpe_filters', 'ppe_replace_by']).nullish().describe('Set when this check is the replacement date of a part of an equipment list item (a defibrillator\'s pads or battery); its due date is the part\'s expiry date. Marking it done asks for the new part\'s expiry date (nextDueDate).'),
   "notes": zod.string().nullish(),
   "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
@@ -2436,6 +2441,24 @@ export const UpdateComplianceItemStatusResponse = zod.object({
   "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
+})
+
+
+/**
+ * Owners and consultants only. A check marked not required is kept, with its history and certificates, but sends no reminders and is left out of overdue counts and compliance figures until it is put back. Audited.
+ * @summary Mark a compliance check "Not required" (N/A), or put it back
+ */
+export const SetComplianceItemNotRequiredParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SetComplianceItemNotRequiredBody = zod.object({
+  "notRequired": zod.boolean().describe('true marks the check not required (N\/A); false puts it back.')
+})
+
+export const SetComplianceItemNotRequiredResponse = zod.object({
+  "ok": zod.boolean(),
+  "notRequiredAt": zod.date().nullable()
 })
 
 
