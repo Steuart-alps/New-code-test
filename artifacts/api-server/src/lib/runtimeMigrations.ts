@@ -2350,6 +2350,12 @@ async function runRuntimeMigrationsOnce() {
     await db.execute(sql`ALTER TABLE "incidents" ADD COLUMN IF NOT EXISTS "involved_address" text`);
     await db.execute(sql`ALTER TABLE "incidents" ADD COLUMN IF NOT EXISTS "reporter_address" text`);
 
+    // ---- Incident exact spot: what3words + GPS (Nov 2026) ----
+    // Mirrors lib/db/src/schema/incidents.ts what3words / latitude / longitude.
+    await db.execute(sql`ALTER TABLE "incidents" ADD COLUMN IF NOT EXISTS "what3words" text`);
+    await db.execute(sql`ALTER TABLE "incidents" ADD COLUMN IF NOT EXISTS "latitude" double precision`);
+    await db.execute(sql`ALTER TABLE "incidents" ADD COLUMN IF NOT EXISTS "longitude" double precision`);
+
     // ---- A compliance check done in house by a competent person (Oct 2026) ----
     // Mirrors lib/db/src/schema/compliance-items.ts completedInHouseBy.
     await db.execute(sql`ALTER TABLE "compliance_items" ADD COLUMN IF NOT EXISTS "completed_in_house_by" text`);

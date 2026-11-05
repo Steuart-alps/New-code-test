@@ -6,6 +6,7 @@ import { treeInspectionsTable, treesTable, sitesTable, TREE_CHECK_TYPES, TREE_RI
 import { eq, and, or, isNull, inArray, desc, asc, sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { siteVisibleToDepartment, sitesTableVisibleTo } from "../lib/departmentSites";
+import { normaliseWhat3Words, what3wordsField, latitudeField, longitudeField } from "../lib/what3words";
 
 const router = Router();
 
@@ -18,29 +19,8 @@ export const TREE_FREQUENCY_DAYS: Record<(typeof TREE_CHECK_TYPES)[number], numb
   risk_assessment:     365, // Full tree risk assessment review
 };
 
-/**
- * A what3words address as typed or pasted ("///filled.count.soap",
- * "Filled.Count.Soap", "filled count soap"), stored as "filled.count.soap".
- * Anything else is refused, so the link to what3words.com always opens.
- */
-export function normaliseWhat3Words(value: string): string | null {
-  const words = value.replace(/[\u200b\s]+$/u, "").trim().replace(/^\/+/u, "").replace(/[\u200b]/gu, "")
-    .toLowerCase().split(/[.\s。．｡・]+/u).filter(Boolean);
-  return words.length === 3 && words.every((w) => /^\p{L}+$/u.test(w)) ? words.join(".") : null;
-}
-
-const what3wordsField = z.string().max(120).nullable().optional()
-  .transform((value, ctx) => {
-    if (value == null || !value.trim()) return value == null ? value : null;
-    const words = normaliseWhat3Words(value);
-    if (!words) {
-      ctx.addIssue({ code: "custom", message: "A what3words address is three words with dots, like ///filled.count.soap" });
-      return z.NEVER;
-    }
-    return words;
-  });
-const latitudeField = z.number().min(-90).max(90).nullable().optional();
-const longitudeField = z.number().min(-180).max(180).nullable().optional();
+// what3words parsing is shared with incidents (lib/what3words.ts).
+export { normaliseWhat3Words };
 
 /** Inspections that restart a tree's routine clock; post-storm walks and works records don't. */
 const ROUTINE_TREE_CHECKS = ["visual_assessment", "detailed_assessment", "risk_assessment"];
