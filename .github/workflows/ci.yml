@@ -125,6 +125,8 @@ jobs:
         run: pnpm --filter @workspace/compliance-tracker run test:nav-groups
       - name: Dropdown A to Z order test
         run: pnpm --filter @workspace/compliance-tracker run test:sort-options
+      - name: List table sorting
+        run: pnpm --filter @workspace/compliance-tracker run test:table-sort
       - name: Old Word (.doc) import reading test
         run: pnpm --filter @workspace/compliance-tracker run test:word-doc
       - name: Upload your lists sorting test

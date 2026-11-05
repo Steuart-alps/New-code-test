@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
+import { rankIn } from "@/lib/table-sort";
 import { useLocation, useSearch } from "wouter";
 import { AppLayout } from "@/components/layout";
 import { useListComplianceItems, useSendReminderForItem, useListSites } from "@workspace/api-client-react";
@@ -142,17 +144,41 @@ export default function ExternalChecksPage() {
     });
   }, [rawItems, filterParam]);
 
+  // Column headings: click to sort, filter or search.
+  const CHECK_TH = "px-6 py-4 font-semibold tracking-wider";
+  const STATUS_ORDER = ["overdue", "pending", "in_progress", "completed"];
+  const STATUS_TEXT: Record<string, string> = { overdue: "Overdue", pending: "Pending", in_progress: "In Progress", completed: "Completed" };
+  const PRIORITY_ORDER = ["critical", "high", "medium", "low"];
+  const PRIORITY_TEXT: Record<string, string> = { critical: "Critical", high: "High", medium: "Medium", low: "Low" };
+  const checksTable = useListTable(items as any[], [
+    { key: "task", label: "Task", className: CHECK_TH, value: i => i.title, sort: "text", filter: "search",
+      filterValue: i => `${i.title ?? ""} ${i.categoryName ?? ""} ${i.siteName ?? ""}`,
+      moreFilters: [
+        { key: "category", label: "Type", value: i => i.categoryName },
+        ...(filterParam ? [] : [{ key: "site", label: "Site", value: (i: any) => i.siteName ?? "No site assigned" }]),
+      ] },
+    { key: "contractor", label: "Contractor", className: CHECK_TH, value: i => i.contractorName, sort: "text", filter: "choice",
+      filterValue: i => i.contractorName ?? "Unassigned" },
+    { key: "status", label: "Status", className: CHECK_TH, value: i => rankIn(STATUS_ORDER, i.status),
+      sort: ["Overdue first", "Completed first"], filter: "choice", filterValue: i => i.status,
+      choiceLabel: v => STATUS_TEXT[v] ?? v, choiceOrder: STATUS_ORDER,
+      moreFilters: [{ key: "priority", label: "Priority", value: i => i.priority, choiceLabel: v => PRIORITY_TEXT[v] ?? v, choiceOrder: PRIORITY_ORDER }],
+      moreSorts: [{ key: "priority", labels: ["Priority, most urgent first", "Priority, least urgent first"], value: i => rankIn(PRIORITY_ORDER, i.priority) }] },
+    { key: "due", label: "Due Date", className: CHECK_TH, value: i => i.dueDate, sort: ["Soonest first", "Latest first"], filter: "date" },
+    { key: "actions", label: "Actions", className: `${CHECK_TH} text-right` },
+  ] satisfies ListColumn<any>[]);
+
   // When a filter is active, group by site so it's easy to scan per location.
   const groupedBySite = useMemo(() => {
     if (!filterParam) return null;
     const map = new Map<string, { siteName: string; items: any[] }>();
-    for (const it of items as any[]) {
+    for (const it of checksTable.rows) {
       const key = it.siteName ?? "__unassigned__";
       if (!map.has(key)) map.set(key, { siteName: it.siteName ?? "No site assigned", items: [] });
       map.get(key)!.items.push(it);
     }
     return Array.from(map.values()).sort((a, b) => a.siteName.localeCompare(b.siteName));
-  }, [items, filterParam]);
+  }, [checksTable.rows, filterParam]);
   const { deleteItem, updateItemStatus, triggerReminders } = useAppMutations();
   const sendOne = useSendReminderForItem({
     mutation: {
@@ -360,13 +386,7 @@ export default function ExternalChecksPage() {
 
         const tableHead = (
           <thead className="text-xs text-muted-foreground uppercase bg-muted/50 border-b border-border/50">
-            <tr>
-              <th className="px-6 py-4 font-semibold tracking-wider">Task</th>
-              <th className="px-6 py-4 font-semibold tracking-wider">Contractor</th>
-              <th className="px-6 py-4 font-semibold tracking-wider">Status</th>
-              <th className="px-6 py-4 font-semibold tracking-wider">Due Date</th>
-              <th className="px-6 py-4 font-semibold tracking-wider text-right">Actions</th>
-            </tr>
+            <tr><ListTableHeadings table={checksTable} /></tr>
           </thead>
         );
 
@@ -403,7 +423,7 @@ export default function ExternalChecksPage() {
           );
         }
 
-        if (groupedBySite) {
+        if (groupedBySite && checksTable.rows.length > 0) {
           return (
             <div className="space-y-5">
               {groupedBySite.map((group) => (
@@ -433,7 +453,8 @@ export default function ExternalChecksPage() {
               <table className="w-full text-sm text-left">
                 {tableHead}
                 <tbody className="divide-y divide-border/50">
-                  {items.map(renderRow)}
+                  <ListTableNoMatches table={checksTable} colSpan={5} />
+                  {checksTable.rows.map(renderRow)}
                 </tbody>
               </table>
             </div>
