@@ -76,7 +76,12 @@ export function ColumnHeader({
             )}
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-64 p-0 normal-case tracking-normal">
+        <PopoverContent
+          align="start"
+          collisionPadding={8}
+          // Long lists scroll inside the pop-up rather than running off the screen.
+          className="w-64 p-0 normal-case tracking-normal max-h-[min(28rem,var(--radix-popover-content-available-height))] overflow-y-auto"
+        >
           {canSort && (
             <div className="p-1" role="group" aria-label={`Sort by ${label}`}>
               <p className="px-2 pt-1.5 pb-1 text-xs font-semibold text-muted-foreground">Sort</p>
