@@ -25,7 +25,7 @@ on:
 jobs:
   compliance-hub-profile:
     name: Compliance Hub profile boxes can be typed over
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

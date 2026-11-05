@@ -29,7 +29,7 @@ on:
 jobs:
   sidebar:
     name: Sidebar sections and pins (desktop and phone drawer)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
