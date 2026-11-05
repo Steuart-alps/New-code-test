@@ -387,9 +387,20 @@ try {
   assert.equal(await bedhead.getAttribute("data-state"), "checked", "a sleeping-area call point sets the bedhead limit");
   const measure = dialog.getByTestId("button-measure-sound");
   await measure.click();
-  await page.waitForFunction(() => /^\d+$/.test(document.querySelector('[data-testid="input-sound-level"]')?.value ?? ""), null, { timeout: 15_000 });
+  // It listens for 10 seconds, stops on its own and puts the average in the box.
+  const startedAt = Date.now();
+  await page.waitForFunction(() => /^\d+$/.test(document.querySelector('[data-testid="input-sound-level"]')?.value ?? ""), null, { timeout: 25_000 });
+  assert.ok(Date.now() - startedAt >= 9_000, "listens for about 10 seconds");
+  assert.match(await dialog.getByTestId("sound-level-measured").innerText(), /Average over 10 seconds put in the box/);
   assert.match(await dialog.getByTestId("select-sound-level-method").innerText(), /phone \(rough guide\)/);
   assert.match(await dialog.getByTestId("sound-level-field").innerText(), /isn't set up yet/);
+  // Stopping early keeps the average so far instead of throwing it away.
+  await dialog.getByTestId("input-sound-level").fill("");
+  await measure.click();
+  await page.waitForTimeout(2_500);
+  await dialog.getByTestId("button-stop-sound").click();
+  await page.waitForFunction(() => /^\d+$/.test(document.querySelector('[data-testid="input-sound-level"]')?.value ?? ""), null, { timeout: 5_000 });
+  assert.match(await dialog.getByTestId("sound-level-measured").innerText(), /Average over [23] seconds/);
   await dialog.getByTestId("input-sound-level").fill("70");
   await dialog.getByTestId("select-sound-level-method").click();
   await page.getByRole("option", { name: "From a sound meter" }).click();
