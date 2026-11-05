@@ -13,7 +13,7 @@ import {
   UpdateComplianceItemStatusParams,
   ListComplianceItemsQueryParams,
 } from "@workspace/api-zod";
-import { requireAuth, requireClientAdmin, getClientId, canAccessClient, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, requireRole, getClientId, canAccessClient, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { filterName } from "../lib/contentFilter";
 import { appendAuditEvent } from "../lib/audit";
 import { addMonthsUtc, completionFields, completionDateFromDay } from "../lib/complianceCompletion";
@@ -346,7 +346,11 @@ router.get("/compliance-items/:id", requireAuth, async (req, res) => {
     await itemActionState(joined.item.clientId, joined.item.id)));
 });
 
-router.put("/compliance-items/:id", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+// Owners, consultants and Managers (including Maintenance managers) can change a
+// check; a Manager only on the sites their departments can see.
+const requireCheckEditor = requireRole("consultant", "client_admin", "client_manager");
+
+router.put("/compliance-items/:id", requireAuth, denyViewers, requireCheckEditor, async (req, res) => {
   const { id } = UpdateComplianceItemParams.parse({ id: Number(req.params.id) });
   // Read the date done before the generic date coercion turns it into a Date.
   const completedDay = CompletedDay.safeParse(req.body?.completedAt);
@@ -382,10 +386,26 @@ router.put("/compliance-items/:id", requireAuth, denyViewers, requireClientAdmin
     return;
   }
 
+  const deptId = getActiveDepartmentId(req);
+  if (deptId !== null && existing[0].siteId != null) {
+    const [itemSite] = await db
+      .select({ id: sitesTable.id, departmentId: sitesTable.departmentId })
+      .from(sitesTable)
+      .where(eq(sitesTable.id, existing[0].siteId))
+      .limit(1);
+    if (itemSite && !(await siteVisibleToDepartment(itemSite, deptId))) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+  }
   if (body.siteId != null) {
     const [s] = await db.select().from(sitesTable).where(eq(sitesTable.id, body.siteId));
     if (!s || s.clientId !== existing[0].clientId) {
       res.status(400).json({ error: "Invalid siteId" });
+      return;
+    }
+    if (!(await siteVisibleToDepartment({ id: s.id, departmentId: s.departmentId }, deptId))) {
+      res.status(403).json({ error: "You can only move a check to one of your own sites" });
       return;
     }
   }

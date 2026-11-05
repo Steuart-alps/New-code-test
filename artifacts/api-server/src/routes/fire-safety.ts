@@ -10,7 +10,7 @@ import { appendAuditEvent } from "../lib/audit";
 import { siteVisibleToDepartment, sitesTableVisibleTo } from "../lib/departmentSites";
 import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
-import { ACTIVE_FIRE_CHECK_TYPES, FIRE_CHECK_TYPES, FIRE_FREQUENCY_DAYS, RETIRED_FIRE_CHECK_TYPES, effectiveFireFrequencies, getFireSiteStatuses, worstFireStatusByType } from "../lib/checkReminders";
+import { ACTIVE_FIRE_CHECK_TYPES, FIRE_CHECK_TYPES, FIRE_DRILL_TYPES, FIRE_FREQUENCY_DAYS, RETIRED_FIRE_CHECK_TYPES, effectiveFireFrequencies, getFireSiteStatuses, worstFireStatusByType } from "../lib/checkReminders";
 import { getAccountToday } from "../lib/accountClock";
 import { callPointLabel, callPointRotation } from "../lib/fireCallPointRotation";
 import { SOUND_LEVEL_METHODS } from "../lib/fireSoundLevel";
@@ -68,8 +68,11 @@ const createSchema = z.object({
   // in when the site has no list yet.
   callPointId: z.number().int().positive().nullable().optional(),
   callPoint: z.string().trim().max(200).nullable().optional(),
-  // Fire drills only: night staff, the time of the drill ("HH:MM"), how long
-  // the evacuation took in seconds, and the roster ids of the staff present.
+  // Fire drills only: the time of the drill ("HH:MM"), how long the
+  // evacuation took in seconds, and the roster ids of the staff present.
+  // Night staff (Yes / No / N/A) was asked on drills before the night staff
+  // drill became its own check (Nov 2026); it is optional and kept on older
+  // records.
   nightStaff: z.enum(NIGHT_STAFF_VALUES).nullable().optional(),
   drillTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullable().optional(),
   evacuationSeconds: z.number().int().min(1).max(24 * 60 * 60).nullable().optional(),
@@ -97,9 +100,9 @@ type FireDetailInput = {
 
 /**
  * The call point and drill fields a check stores. A weekly alarm test must say
- * which call point was used. A drill must say whether night staff took part,
- * the time of the drill, how long the evacuation took, and the improvements
- * required (the notes). Other check types store none of these. On an edit,
+ * which call point was used. A drill (the everyday drill or the night staff
+ * drill) must give the time of the drill, how long the evacuation took, and
+ * the improvements required (the notes). Other check types store none of these. On an edit,
  * `existing` is the stored record: older records saved before these fields
  * existed may stay blank, but a recorded answer cannot be removed.
  */
@@ -140,10 +143,15 @@ async function resolveFireDetails(
       details.soundLevelBedhead = (input.soundLevelBedhead !== undefined ? input.soundLevelBedhead : existing?.soundLevelBedhead) ?? false;
     }
   }
-  if (checkType === "fire_drill") {
-    const nightStaff = input.nightStaff !== undefined ? input.nightStaff : existing?.nightStaff ?? null;
-    if (!nightStaff && (!existing || existing.nightStaff)) return { error: "Say whether night staff took part in the drill" };
-    details.nightStaff = nightStaff;
+  if (FIRE_DRILL_TYPES.includes(checkType)) {
+    // The night staff drill is the night staff's own drill, so it doesn't ask.
+    // On an everyday drill the answer is optional, but one already recorded
+    // on an older drill cannot be removed.
+    if (checkType === "fire_drill") {
+      const nightStaff = input.nightStaff !== undefined ? input.nightStaff : existing?.nightStaff ?? null;
+      if (!nightStaff && existing?.nightStaff) return { error: "Say whether night staff took part in the drill" };
+      details.nightStaff = nightStaff;
+    }
     const drillTime = input.drillTime !== undefined ? input.drillTime : existing?.drillTime ?? null;
     if (!drillTime && (!existing || existing.drillTime)) return { error: "Give the time of the drill" };
     details.drillTime = drillTime;
@@ -260,9 +268,23 @@ router.get("/", requireAuth, async (req, res) => {
     .where(and(...conditions))
     .orderBy(desc(fireSafetyChecksTable.checkDate), desc(fireSafetyChecksTable.id));
 
-  const attendees = await listDrillAttendees(clientId, rows.filter(row => row.checkType === "fire_drill").map(row => row.id));
+  const attendees = await listDrillAttendees(clientId, rows.filter(row => FIRE_DRILL_TYPES.includes(row.checkType)).map(row => row.id));
   res.json(rows.map(row => ({ ...row, staffPresent: attendees.get(row.id) ?? [] })));
 });
+
+/**
+ * The night staff fire drill is for sites with sleeping accommodation, as
+ * answered in set-up or on the Sites page.
+ */
+async function refuseNightStaffDrill(clientId: number, siteId: number | null): Promise<string | null> {
+  if (siteId == null) return "Choose the site for the night staff fire drill";
+  const [site] = await db.select({ sleepingAccommodation: sitesTable.sleepingAccommodation })
+    .from(sitesTable).where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId))).limit(1);
+  if (site?.sleepingAccommodation !== true) {
+    return "The night staff fire drill is for sites with sleeping accommodation. Say the site has sleeping accommodation on the Sites page first.";
+  }
+  return null;
+}
 
 /**
  * A night walk can't be recorded more than an hour before its time, and each
@@ -429,7 +451,11 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     const refused = await refuseNightWalk(clientId, data.siteId!, data.checkDate, details.walkTime as (typeof NIGHT_WALK_TIMES)[number], data.clientEntryId);
     if (refused) return res.status(refused.status).json({ error: refused.error });
   }
-  const isDrill = data.checkType === "fire_drill";
+  if (data.checkType === "fire_drill_night") {
+    const refused = await refuseNightStaffDrill(clientId, data.siteId ?? null);
+    if (refused) return res.status(400).json({ error: refused });
+  }
+  const isDrill = FIRE_DRILL_TYPES.includes(data.checkType);
   const present = isDrill ? await resolveDrillAttendees(clientId, deptId, data.staffPresentIds ?? []) : { attendees: [] };
   if ("error" in present) return res.status(400).json({ error: present.error });
 
@@ -534,7 +560,11 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
       details.walkTime as (typeof NIGHT_WALK_TIMES)[number], undefined, id);
     if (refused) return res.status(refused.status).json({ error: refused.error });
   }
-  const isDrill = existing.checkType === "fire_drill";
+  if (existing.checkType === "fire_drill_night" && siteId !== existing.siteId) {
+    const refused = await refuseNightStaffDrill(clientId, siteId);
+    if (refused) return res.status(400).json({ error: refused });
+  }
+  const isDrill = FIRE_DRILL_TYPES.includes(existing.checkType);
   // Leaving the list out keeps who was present as recorded.
   const present = isDrill && staffPresentIds !== undefined
     ? await resolveDrillAttendees(clientId, deptId, staffPresentIds, id) : null;

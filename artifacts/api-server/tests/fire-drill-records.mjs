@@ -5,7 +5,8 @@ import { createTenant, createUser, isoDay, pool } from './approval-workflow-fixt
 // taken to evacuate and the improvements required (notes); the staff present
 // are ticked from the roster, and each roster member's latest drill shows who
 // has not taken part in one in the last 12 months. Older drills saved before
-// these fields stay editable blank. Run:
+// these fields stay editable blank. The night staff drill is its own 6-monthly
+// check, only at sites with sleeping accommodation. Run:
 //   FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/fire-drill-records.mjs
 
 const today = isoDay();
@@ -34,7 +35,7 @@ try {
   const outsider = await addStaff(other, 'Not Ours');
 
   const drill = {
-    checkType: 'fire_drill', checkDate: today, result: 'pass', siteId: siteA, nightStaff: 'included',
+    checkType: 'fire_drill', checkDate: today, result: 'pass', siteId: siteA,
     drillTime: '14:30', evacuationSeconds: 155, notes: 'Fire door on the first floor slow to close',
   };
 
@@ -123,6 +124,35 @@ try {
   const byStaffB = await staffB.request('POST', '/fire-safety', { ...drillB, staffPresentIds: [dan, cat] });
   assert.equal(byStaffB.status, 201, JSON.stringify(byStaffB.data));
   console.log('ok - department staff tick only the staff they can see');
+
+  // ── Night staff drill: its own check at sites with sleeping accommodation ──
+  const hotel = await owner.request('POST', '/sites', { name: 'Drill hotel', seedStarterChecks: false, sleepingAccommodation: true, nightPorter: false });
+  assert.equal(hotel.status, 201, JSON.stringify(hotel.data));
+  const eve = await addStaff(owner, 'Eve Night', hotel.data.id);
+  const nightDrill = { ...drill, checkType: 'fire_drill_night', siteId: hotel.data.id, drillTime: '02:15', staffPresentIds: [eve] };
+  for (const siteId of [siteB, null]) {
+    const refused = await owner.request('POST', '/fire-safety', { ...nightDrill, siteId, staffPresentIds: [] });
+    assert.equal(refused.status, 400, JSON.stringify(refused.data));
+  }
+  const statusBefore = await owner.request('GET', `/fire-safety/status?siteId=${siteB}`);
+  assert.ok(!statusBefore.data.some(row => row.checkType === 'fire_drill_night'), 'no night staff drill at a site without sleeping accommodation');
+  const dayDrill = await owner.request('POST', '/fire-safety', { ...drill, siteId: hotel.data.id, checkDate: isoDay(-1) });
+  assert.equal(dayDrill.status, 201, JSON.stringify(dayDrill.data));
+  assert.equal(dayDrill.data.nightStaff, null, 'the everyday drill no longer asks about night staff');
+  const night = await owner.request('POST', '/fire-safety', { ...nightDrill, nightStaff: 'included' });
+  assert.equal(night.status, 201, JSON.stringify(night.data));
+  assert.deepEqual([night.data.drillTime, night.data.evacuationSeconds, night.data.nightStaff], ['02:15', 155, null]);
+  assert.deepEqual(night.data.staffPresent, [{ staffRosterId: eve, name: 'Eve Night' }]);
+  const { [ 'notes' ]: _notes, ...nightWithoutNotes } = nightDrill;
+  assert.equal((await owner.request('POST', '/fire-safety', nightWithoutNotes)).status, 400, 'the night drill needs notes too');
+  const hotelStatus = await owner.request('GET', `/fire-safety/status?siteId=${hotel.data.id}`);
+  const byType = new Map(hotelStatus.data.map(row => [row.checkType, row]));
+  assert.deepEqual([byType.get('fire_drill').lastDate, byType.get('fire_drill').frequencyDays], [isoDay(-1), 180]);
+  assert.deepEqual([byType.get('fire_drill_night').lastDate, byType.get('fire_drill_night').frequencyDays], [today, 180],
+    'day and night drills days apart keep their own records and schedules');
+  const hotelAttendance = await owner.request('GET', `/fire-safety/drill-attendance?siteId=${hotel.data.id}`);
+  assert.equal(hotelAttendance.data.staff.find(p => p.name === 'Eve Night').lastDrillDate, today, 'the night drill counts as taking part');
+  console.log('ok - the night staff drill is its own 6-monthly record at sites with sleeping accommodation');
 
   // ── Deleting a drill removes its ticks; other checks have none ─────────
   assert.equal((await owner.request('DELETE', `/fire-safety/${created.data.id}`)).status, 204);

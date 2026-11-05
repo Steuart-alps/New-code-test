@@ -206,7 +206,7 @@ router.post("/auth/mobile-passkeys/registration/options", requireAuth, async (re
 /**
  * POST /api/auth/mobile-passkeys/registration/verify
  * Saves the new passkey. Adding a passkey changes nothing about the session or
- * the mandatory authenticator code.
+ * whether the account needs an authenticator code.
  */
 router.post("/auth/mobile-passkeys/registration/verify", requireAuth, async (req, res) => {
   const userId = req.currentUser!.id;

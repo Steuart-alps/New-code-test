@@ -94,7 +94,7 @@ async function open(role, viewport = { width: 1280, height: 1000 }) {
   });
   await page.goto(`${baseUrl}/items/5`);
   await page.getByRole("heading", { name: "Gas safety inspection" }).first().waitFor();
-  await page.getByTitle("Edit", { exact: true }).click();
+  await page.getByRole("button", { name: "Make changes" }).click();
   await page.getByRole("dialog").getByText("Edit Compliance Check").waitFor();
   return { page, context, requests, pageErrors };
 }
@@ -136,7 +136,7 @@ try {
     assert.equal("assignedTo" in put.body || "assigneeUserId" in put.body, false, "the person already assigned is left alone");
 
     // Last done given: the server works the due date out from it.
-    await page.getByTitle("Edit", { exact: true }).click();
+    await page.getByRole("button", { name: "Make changes" }).click();
     await dialog.getByText("Edit Compliance Check").waitFor();
     await dialog.getByLabel("Last done").fill("2026-09-30");
     await dialog.getByText("Next due 30 Sept 2027, worked out from Repeat.").or(dialog.getByText("Next due 30 Sep 2027, worked out from Repeat.")).waitFor();
@@ -147,7 +147,7 @@ try {
     assert.equal("dueDate" in put.body, false);
 
     // A future date is refused on the form.
-    await page.getByTitle("Edit", { exact: true }).click();
+    await page.getByRole("button", { name: "Make changes" }).click();
     await dialog.getByText("Edit Compliance Check").waitFor();
     await dialog.getByLabel("Last done").fill(addMonthsToDay(localToday, 1));
     await dialog.getByText("The date last done cannot be in the future").waitFor();
@@ -160,7 +160,7 @@ try {
     assert.equal(put.body.dueDate, `${addMonthsToDay(localToday, 6)}T00:00:00.000Z`);
 
     // No contractor: Assigned to comes back. One-off: Due date comes back.
-    await page.getByTitle("Edit", { exact: true }).click();
+    await page.getByRole("button", { name: "Make changes" }).click();
     await dialog.getByText("Edit Compliance Check").waitFor();
     await dialog.locator("#item-contractor, button[role=combobox]").filter({ hasText: "Gary Gas" }).first().click();
     await page.getByRole("option", { name: "Unassigned" }).click();

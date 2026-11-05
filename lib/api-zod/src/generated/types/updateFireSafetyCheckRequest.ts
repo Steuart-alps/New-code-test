@@ -21,7 +21,7 @@ export interface UpdateFireSafetyCheckRequest {
   callPointId?: number | null;
   /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
   callPoint?: string | null;
-  /** Fire drills. Whether night staff took part. */
+  /** Everyday fire drills, optional. Whether night staff took part (asked before the night staff drill became its own check). */
   nightStaff?: UpdateFireSafetyCheckRequestNightStaff;
   /**
      * Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
