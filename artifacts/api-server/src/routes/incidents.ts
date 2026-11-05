@@ -20,6 +20,7 @@ import {
 } from "../lib/objectStorage";
 import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { ensureUploadCapacity } from "../lib/storageLimit";
+import { what3wordsField, latitudeField, longitudeField } from "../lib/what3words";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -43,6 +44,10 @@ const createSchema = z.object({
   incidentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   incidentTime: z.string().max(10).nullable().optional(),
   location: z.string().min(1).max(500),
+  // Exact spot: what3words address and/or the GPS spot from "Use my location".
+  what3words: what3wordsField,
+  latitude: latitudeField,
+  longitude: longitudeField,
   description: z.string().min(1).max(10000),
   involvedName: z.string().min(1).max(200),
   involvedJobTitle: z.string().max(200).nullable().optional(),

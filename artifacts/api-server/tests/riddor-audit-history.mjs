@@ -93,6 +93,23 @@ async function main() {
   }));
   check("create an assessed incident", created.status === 201, String(created.status));
   const id = created.data?.id;
+
+  // Exact spot: what3words (stored tidied, refused unless three words) and GPS.
+  const located = await owner("POST", "/incidents", incident({
+    riddorRationale: "Not reportable.", what3words: "///Filled.Count.Soap", latitude: 51.520847, longitude: -0.195521,
+  }));
+  check("an incident saves its what3words and GPS spot",
+    located.status === 201 && located.data?.what3words === "filled.count.soap"
+      && located.data?.latitude === 51.520847 && located.data?.longitude === -0.195521,
+    JSON.stringify(located.data && { s: located.status, w: located.data.what3words, lat: located.data.latitude }));
+  const badWords = await owner("POST", "/incidents", incident({ riddorRationale: "Not reportable.", what3words: "not three words here" }));
+  check("an incident refuses a what3words address that isn't three words", badWords.status === 400, String(badWords.status));
+  if (located.data?.id) {
+    const cleared = await owner("PUT", `/incidents/${located.data.id}`, { what3words: "", latitude: null, longitude: null });
+    check("clearing an incident's exact spot saves nulls",
+      cleared.status === 200 && cleared.data?.what3words === null && cleared.data?.latitude === null,
+      JSON.stringify(cleared.data && { s: cleared.status, w: cleared.data.what3words }));
+  }
   const mobileCreated = await owner("POST", "/incidents", {
     incidentType: "accident", severity: "minor", incidentDate: day,
     location: "Mobile inspection", description: "Incident reported from a device",

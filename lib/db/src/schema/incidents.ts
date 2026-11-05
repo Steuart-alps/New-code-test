@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, date, timestamp, boolean, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, date, timestamp, boolean, uniqueIndex, doublePrecision } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
@@ -35,6 +35,11 @@ export const incidentsTable = pgTable("incidents", {
   incidentDate: date("incident_date").notNull(),
   incidentTime: text("incident_time"),
   location: text("location").notNull(),
+  // Exact spot (Nov 2026): "filled.count.soap" and/or the GPS spot from
+  // "Use my location". Mirrors runtimeMigrations.ts.
+  what3words: text("what3words"),
+  latitude: doublePrecision("latitude"),
+  longitude: doublePrecision("longitude"),
   description: text("description").notNull(),
   involvedName: text("involved_name").notNull(),
   involvedJobTitle: text("involved_job_title"),

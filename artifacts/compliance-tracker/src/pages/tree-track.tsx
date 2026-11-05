@@ -24,7 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   TreePine, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX,
   Pencil, Trash2, Lock, Search, Building2, Filter, CalendarDays,
-  UserCheck, MapPin, Loader2, ExternalLink, ClipboardCheck,
+  UserCheck, ClipboardCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
@@ -36,6 +36,7 @@ import { sortByLabel } from "@/lib/sort-options";
 import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import { RecordSignedBy } from "@/components/record-signature";
 import { RecordSiteField } from "@/components/record-site-field";
+import { LocationFields, MapLink, What3WordsLink, normaliseWhat3Words } from "@/components/location-fields";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -168,128 +169,6 @@ async function apiFetch(path: string, opts?: RequestInit) {
 function fmt(d: string | null) {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
-
-/** A what3words address as typed ("///Filled.Count.Soap", "filled count soap") as "filled.count.soap", or null. */
-function normaliseWhat3Words(value: string): string | null {
-  const words = value.trim().replace(/^\/+/u, "").replace(/\u200b/gu, "").toLowerCase()
-    .split(/[.\s。．｡・]+/u).filter(Boolean);
-  return words.length === 3 && words.every(w => /^\p{L}+$/u.test(w)) ? words.join(".") : null;
-}
-
-function What3WordsLink({ words }: { words: string | null | undefined }) {
-  if (!words) return null;
-  return (
-    <a href={`https://what3words.com/${words}`} target="_blank" rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-xs font-medium text-rose-700 hover:underline"
-      onClick={e => e.stopPropagation()}>
-      ///{words} <ExternalLink className="w-3 h-3" />
-    </a>
-  );
-}
-
-function MapLink({ latitude, longitude }: { latitude?: number | null; longitude?: number | null }) {
-  if (latitude == null || longitude == null) return null;
-  return (
-    <a href={`https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`} target="_blank" rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:underline"
-      onClick={e => e.stopPropagation()}>
-      <MapPin className="w-3 h-3" /> Map
-    </a>
-  );
-}
-
-/**
- * Where something is: the place in words, its what3words address and, when
- * a phone saved one, its GPS spot. Shared by the tree and inspection forms.
- */
-function LocationFields({ location, what3words, latitude, longitude, onChange, locationLabel, what3wordsLabel }: {
-  location: string; what3words: string; latitude: number | null; longitude: number | null;
-  onChange: (patch: Partial<{ location: string; what3words: string; latitude: number | null; longitude: number | null }>) => void;
-  locationLabel: string; what3wordsLabel: string;
-}) {
-  const { toast } = useToast();
-  const [locating, setLocating] = useState(false);
-  const words = what3words.trim() ? normaliseWhat3Words(what3words) : null;
-
-  function captureMyLocation() {
-    if (!navigator.geolocation) {
-      toast({ title: "Location unavailable", description: "This browser can't share its location.", variant: "destructive" });
-      return;
-    }
-    setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const latitude = Math.round(pos.coords.latitude * 1e6) / 1e6;
-        const longitude = Math.round(pos.coords.longitude * 1e6) / 1e6;
-        onChange({ latitude, longitude });
-        // The three words are filled in automatically for businesses with the
-        // AI add-on; others save the GPS spot and type the words in.
-        let found: string | null = null;
-        let needsAi = false;
-        try {
-          const res = await sharedApiFetch(`/w3w/convert?lat=${latitude}&lng=${longitude}`);
-          if (res.ok) found = ((await res.json()) as { words?: string }).words ?? null;
-          else if (res.status === 403) needsAi = ((await res.json().catch(() => ({}))) as { code?: string }).code === "W3W_NEEDS_AI";
-        } catch { /* the GPS spot is saved either way */ }
-        if (found) onChange({ what3words: found });
-        toast({
-          title: "Location saved",
-          description: found ? `///${found}`
-            : needsAi ? "GPS spot saved. Type the three words from the free what3words app, or add the AI add-on in Settings to fill them in automatically."
-            : "GPS spot saved. Add the what3words address from the what3words app if you have it.",
-        });
-        setLocating(false);
-      },
-      (err) => {
-        setLocating(false);
-        const msg = err.code === 1 ? "Location permission denied." : err.code === 2 ? "Location unavailable." : "Location timed out.";
-        toast({ title: "Couldn't get your location", description: msg, variant: "destructive" });
-      },
-      { enableHighAccuracy: true, timeout: 10000 },
-    );
-  }
-
-  return (
-    <>
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <Label htmlFor="location">{locationLabel}</Label>
-          <button type="button" onClick={captureMyLocation} disabled={locating}
-            className="flex items-center gap-1 text-xs text-emerald-700 hover:text-emerald-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-            {locating ? <Loader2 className="w-3 h-3 animate-spin" /> : <MapPin className="w-3 h-3" />}
-            {locating ? "Getting location…" : "Use my location"}
-          </button>
-        </div>
-        <Input id="location" dictation placeholder="e.g. By the 9th tee, car park perimeter, east boundary"
-          value={location} onChange={e => onChange({ location: e.target.value })} className="rounded-sm" />
-        {latitude != null && longitude != null && (
-          <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-            <span>GPS {latitude.toFixed(5)}, {longitude.toFixed(5)}</span>
-            <MapLink latitude={latitude} longitude={longitude} />
-            <button type="button" className="hover:underline" onClick={() => onChange({ latitude: null, longitude: null })}>Clear</button>
-          </div>
-        )}
-      </div>
-      <div>
-        <Label htmlFor="what3words">{what3wordsLabel}</Label>
-        <div className="relative mt-1">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-rose-600">///</span>
-          <Input id="what3words" placeholder="filled.count.soap" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-            value={what3words.replace(/^\/+/, "")} onChange={e => onChange({ what3words: e.target.value })} className="pl-9 rounded-sm" />
-        </div>
-        {what3words.trim() && !words ? (
-          <p className="text-xs text-rose-600 mt-1">Three words with dots between them, like filled.count.soap</p>
-        ) : words ? (
-          <div className="mt-1"><What3WordsLink words={words} /></div>
-        ) : (
-          <p className="text-xs text-muted-foreground mt-1">
-            From the free what3words app or <a href="https://what3words.com" target="_blank" rel="noopener noreferrer" className="underline">what3words.com</a>, so anyone can find the exact spot.
-          </p>
-        )}
-      </div>
-    </>
-  );
 }
 
 function daysUntil(d: string | null) {

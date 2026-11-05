@@ -50,6 +50,11 @@ import { useManagedBy } from "@/components/managed-by-badge";
 import { VIDEO_PATH } from "@/lib/media-upload";
 import { takeLinkParams } from "@/lib/deep-link";
 import { RecordSiteField } from "@/components/record-site-field";
+import { LocationFields, MapLink, What3WordsLink, normaliseWhat3Words } from "@/components/location-fields";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -154,6 +159,9 @@ interface Incident {
   incidentDate: string;
   incidentTime: string | null;
   location: string;
+  what3words?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   description: string;
   involvedName: string;
   involvedJobTitle: string | null;
@@ -428,6 +436,9 @@ const emptyForm = () => ({
   incidentDate: localDate(),
   incidentTime: "",
   location: "",
+  what3words: "",
+  latitude: null as number | null,
+  longitude: null as number | null,
   description: "",
   involvedName: "",
   involvedJobTitle: "",
@@ -456,6 +467,16 @@ const emptyForm = () => ({
   reportedBy: "",
   siteId: "",
 });
+
+type IncidentForm = ReturnType<typeof emptyForm>;
+
+// The "Actions & RIDDOR" page's own boxes: its Cancel puts back just these,
+// leaving the incident details as they were.
+const ACTIONS_PAGE_FIELDS = [
+  "immediateActions", "investigationFindings", "correctiveActions",
+  "riddorReportable", "riddorCategory", "riddorRationale", "reportedToHse", "hseReference", "hseReportDate",
+  "submittedAt", "submissionEvidence", "receiptUpload", "receiptAttachmentId",
+] as const satisfies readonly (keyof IncidentForm)[];
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
@@ -492,6 +513,32 @@ export default function IncidentsPage() {
   const [savingAction, setSavingAction] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [formSection, setFormSection] = useState<"details" | "actions">("details");
+  // What the Actions & RIDDOR page held when it was opened, for its Cancel.
+  const actionsPageSnapshot = useRef<Pick<IncidentForm, (typeof ACTIONS_PAGE_FIELDS)[number]> | null>(null);
+  // The form as it opened, so closing with unsaved entries asks first.
+  const openedForm = useRef("");
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+
+  function showSection(section: "details" | "actions") {
+    if (section === "actions" && formSection !== "actions") {
+      actionsPageSnapshot.current = Object.fromEntries(ACTIONS_PAGE_FIELDS.map(k => [k, form[k]])) as typeof actionsPageSnapshot.current;
+    }
+    setFormSection(section);
+  }
+
+  /** Cancel on Actions & RIDDOR: undo that page only and go back to the details; the incident stays open to save or cancel. */
+  function cancelActionsPage() {
+    const before = actionsPageSnapshot.current;
+    if (before) setForm(f => ({ ...f, ...before }));
+    setFormSection("details");
+  }
+
+  const formChanged = showDialog && (JSON.stringify(form) !== openedForm.current || media.files.length > 0);
+  function requestCloseForm() {
+    if (saving) return;
+    if (formChanged) setConfirmDiscard(true);
+    else setShowDialog(false);
+  }
 
   const { data: incidentConfig, isFetched: incidentConfigFetched } = useGetIncidentConfig();
   const northernIreland = incidentConfig?.regulator_nation === "northern_ireland";
@@ -567,6 +614,7 @@ export default function IncidentsPage() {
       rows = rows.filter(r =>
         r.involvedName.toLowerCase().includes(q) ||
         r.location.toLowerCase().includes(q) ||
+        (r.what3words ?? "").includes(q.replace(/^\/+/, "")) ||
         r.description.toLowerCase().includes(q) ||
         r.reportedBy.toLowerCase().includes(q)
       );
@@ -650,7 +698,7 @@ ${rows.map(r => `<tr>
   <td>${esc(typeLabel(r.incidentType))}</td>
   <td>${esc(severityLabel(r.severity))}</td>
   <td>${esc(r.involvedName)}${r.involvedJobTitle ? `<br><span style="color:#666">${esc(r.involvedJobTitle)}</span>` : ""}<br><span style="color:#666">${esc(EMPLOYMENT_LABELS[r.involvedEmploymentType] ?? r.involvedEmploymentType)}</span></td>
-  <td>${esc(r.location)}${r.siteId ? `<br><span style="color:#666">${esc(siteName(r.siteId))}</span>` : ""}</td>
+  <td>${esc(r.location)}${r.what3words ? `<br><span style="color:#666">///${esc(r.what3words)}</span>` : ""}${r.siteId ? `<br><span style="color:#666">${esc(siteName(r.siteId))}</span>` : ""}</td>
   <td>${r.riddorReportable ? `<span class="riddor">Yes${r.reportedToHse ? ` (reported${r.hseReference ? ` ${esc(r.hseReference)}` : ""})` : " — outstanding"}</span>` : "No"}</td>
 </tr>`).join("")}
 </table>`}
@@ -680,7 +728,9 @@ ${rows.map(r => `<tr>
     f.severity = severityOptions[0] ?? "";
     if (incidentConfig?.incident_default_reporter) f.reportedBy = incidentConfig.incident_default_reporter;
     if (workingSiteId) f.siteId = String(workingSiteId);
-    setForm({ ...f, ...spoken });
+    const opened = { ...f, ...spoken };
+    setForm(opened);
+    openedForm.current = JSON.stringify(opened);
     setFormSection("details");
     media.clear();
     setShowDialog(true);
@@ -708,13 +758,16 @@ ${rows.map(r => `<tr>
 
   function openEdit(r: Incident) {
     setEditItem(r);
-    setForm({
+    const opened: IncidentForm = {
       incidentType: r.incidentType,
       severity: r.severity,
       status: r.status,
       incidentDate: r.incidentDate?.slice(0, 10) ?? "",
       incidentTime: r.incidentTime ?? "",
       location: r.location,
+      what3words: r.what3words ?? "",
+      latitude: r.latitude ?? null,
+      longitude: r.longitude ?? null,
       description: r.description,
       involvedName: r.involvedName,
       involvedJobTitle: r.involvedJobTitle ?? "",
@@ -740,7 +793,9 @@ ${rows.map(r => `<tr>
       correctiveActions: r.correctiveActions ?? "",
       reportedBy: r.reportedBy,
       siteId: r.siteId ? String(r.siteId) : "",
-    });
+    };
+    setForm(opened);
+    openedForm.current = JSON.stringify(opened);
     setFormSection("details");
     media.clear();
     setShowDialog(true);
@@ -772,6 +827,12 @@ ${rows.map(r => `<tr>
   async function handleSave() {
     if (!form.incidentDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
     if (!form.location.trim()) { toast({ title: "Location is required", variant: "destructive" }); return; }
+    const what3words = form.what3words.trim() ? normaliseWhat3Words(form.what3words) : null;
+    if (form.what3words.trim() && !what3words) {
+      setFormSection("details");
+      toast({ title: "Check the what3words address", description: "Three words with dots between them, like filled.count.soap", variant: "destructive" });
+      return;
+    }
     if (!form.involvedName.trim()) { toast({ title: "Person involved is required", variant: "destructive" }); return; }
     if (!form.description.trim()) { toast({ title: "Description is required", variant: "destructive" }); return; }
     if (!form.reportedBy.trim()) { toast({ title: "Reported by is required", variant: "destructive" }); return; }
@@ -781,14 +842,14 @@ ${rows.map(r => `<tr>
       form.hseReference.trim() !== (editItem.hseReference ?? "") ||
       form.hseReportDate !== (editItem.hseReportDate?.slice(0, 10) ?? "");
     if (assessmentChanged && !form.riddorRationale.trim()) {
-      setFormSection("actions");
+      showSection("actions");
       toast({ title: "Explain the RIDDOR decision", variant: "destructive" });
       return;
     }
     if (submissionChanged &&
       (!form.hseReference.trim() || !form.hseReportDate || !form.submittedAt ||
         (!form.submissionEvidence.trim() && !receiptChosen))) {
-      setFormSection("actions");
+      showSection("actions");
       toast({ title: "Record the HSE reference, date, time and submission evidence or receipt", variant: "destructive" });
       return;
     }
@@ -801,6 +862,9 @@ ${rows.map(r => `<tr>
         incidentDate: form.incidentDate,
         incidentTime: form.incidentTime.trim() || null,
         location: form.location.trim(),
+        what3words,
+        latitude: form.latitude,
+        longitude: form.longitude,
         description: form.description.trim(),
         involvedName: form.involvedName.trim(),
         involvedJobTitle: form.involvedJobTitle.trim() || null,
@@ -1130,7 +1194,15 @@ ${rows.map(r => `<tr>
                     {r.involvedJobTitle && <div className="text-xs text-muted-foreground">{r.involvedJobTitle}</div>}
                     <div className="text-xs text-muted-foreground">{EMPLOYMENT_LABELS[r.involvedEmploymentType]}</div>
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground hidden md:table-cell max-w-[180px] truncate">{r.location}</td>
+                  <td className="px-4 py-3 text-muted-foreground hidden md:table-cell max-w-[180px]">
+                    <div className="truncate">{r.location}</div>
+                    {(r.what3words || (r.latitude != null && r.longitude != null)) && (
+                      <div className="flex flex-wrap items-center gap-x-2">
+                        <What3WordsLink words={r.what3words} />
+                        <MapLink latitude={r.latitude} longitude={r.longitude} />
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell max-w-[240px]">
                     <span className="line-clamp-2">{r.description}</span>
                   </td>
@@ -1207,7 +1279,7 @@ ${rows.map(r => `<tr>
       </div>
 
       {/* Add / Edit dialog */}
-      <Dialog open={showDialog} onOpenChange={v => { if (!saving) setShowDialog(v); }}>
+      <Dialog open={showDialog} onOpenChange={v => { if (v) setShowDialog(true); else requestCloseForm(); }}>
         <DialogContent className="max-w-2xl rounded-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1221,7 +1293,7 @@ ${rows.map(r => `<tr>
             {(["details", "actions"] as const).map(s => (
               <button
                 key={s}
-                onClick={() => setFormSection(s)}
+                onClick={() => showSection(s)}
                 className={cn(
                   "px-3 py-1.5 text-sm rounded-sm transition-colors",
                   formSection === s
@@ -1285,24 +1357,31 @@ ${rows.map(r => `<tr>
                   </div>
                 </div>
 
-                {/* Location & Site */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Location / Area *</Label>
-                    {(() => {
-                      const locs = parseJsonArray<string>(incidentConfig?.incident_locations);
-                      return (
-                        <>
-                          {locs.length > 0 && <datalist id="incident-locations-list">{locs.map(l => <option key={l} value={l} />)}</datalist>}
-                          <Input placeholder="e.g. Kitchen, Car park, Reception"
-                            value={form.location}
-                            list={locs.length > 0 ? "incident-locations-list" : undefined}
-                            onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
-                            className="mt-1 rounded-sm" />
-                        </>
-                      );
-                    })()}
-                  </div>
+                {/* Location, exact spot (what3words / GPS) & Site */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {(() => {
+                    const locs = parseJsonArray<string>(incidentConfig?.incident_locations);
+                    return (
+                      <LocationFields
+                        idPrefix="incident-"
+                        location={form.location} what3words={form.what3words}
+                        latitude={form.latitude} longitude={form.longitude}
+                        onChange={patch => setForm(f => ({ ...f, ...patch }))}
+                        locationLabel="Location / Area *"
+                        what3wordsLabel={<>Exact spot (what3words) <span className="text-muted-foreground text-xs">optional</span></>}
+                        locationInput={
+                          <>
+                            {locs.length > 0 && <datalist id="incident-locations-list">{locs.map(l => <option key={l} value={l} />)}</datalist>}
+                            <Input id="incident-location" placeholder="e.g. Kitchen, Car park, Reception"
+                              value={form.location}
+                              list={locs.length > 0 ? "incident-locations-list" : undefined}
+                              onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
+                              className="rounded-sm" />
+                          </>
+                        }
+                      />
+                    );
+                  })()}
                   <RecordSiteField value={form.siteId} onChange={id => setForm(f => ({ ...f, siteId: id ? String(id) : "" }))}
                     keepSiteId={editItem ? editItem.siteId ?? null : undefined} />
                 </div>
@@ -1602,9 +1681,19 @@ ${rows.map(r => `<tr>
           </div>
 
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setShowDialog(false)} disabled={saving} className="rounded-sm">Cancel</Button>
+            {formSection === "actions" ? (
+              // Cancels this page only: the incident stays open to save or cancel.
+              <Button variant="outline" onClick={cancelActionsPage} disabled={saving} className="rounded-sm"
+                title="Undo the changes on this page and go back to the incident details"
+                data-testid="button-cancel-actions-page">
+                Cancel
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={requestCloseForm} disabled={saving} className="rounded-sm"
+                data-testid="button-cancel-incident">Cancel</Button>
+            )}
             {formSection === "details" && (
-              <Button onClick={() => setFormSection("actions")} variant="outline" className="rounded-sm">
+              <Button onClick={() => showSection("actions")} variant="outline" className="rounded-sm">
                 Next: Actions & RIDDOR →
               </Button>
             )}
@@ -1614,6 +1703,28 @@ ${rows.map(r => `<tr>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Closing the form with unsaved entries asks first, so nothing is lost by a stray click. */}
+      <AlertDialog open={confirmDiscard} onOpenChange={setConfirmDiscard}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{editItem ? "Discard your changes?" : "Discard this incident?"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {editItem
+                ? "The changes you've made to this incident won't be saved."
+                : "This incident hasn't been logged yet. Everything you've entered will be lost."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-keep-editing">Keep editing</AlertDialogCancel>
+            <AlertDialogAction data-testid="button-discard-incident"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => { setConfirmDiscard(false); setShowDialog(false); }}>
+              Discard
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={historyIncident !== null} onOpenChange={v => { if (!v) setHistoryIncident(null); }}>
         <DialogContent className="max-w-2xl rounded-sm">
