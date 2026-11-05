@@ -72,8 +72,7 @@ jobs:
           ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
         run: |
           key_path="$RUNNER_TEMP/asc-api-key.p8"
-          printf '%s\n' "$ASC_API_KEY_P8" > "$key_path"
-          chmod 600 "$key_path"
+          node scripts/write-asc-key.mjs "$key_path"
           echo "EXPO_ASC_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
       - name: Link the Expo project
