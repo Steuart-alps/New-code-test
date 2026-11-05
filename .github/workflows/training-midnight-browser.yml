@@ -39,7 +39,7 @@ on:
 jobs:
   training-midnight:
     name: Training expiry at midnight and induction forms
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
