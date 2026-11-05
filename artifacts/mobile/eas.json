@@ -10,7 +10,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_DOMAIN": "complytrack-aavy.onrender.com"
+        "EXPO_PUBLIC_DOMAIN": "complytrack.alpsconsultancy.co.uk"
       }
     },
     "preview": {
@@ -19,7 +19,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_DOMAIN": "complytrack-aavy.onrender.com"
+        "EXPO_PUBLIC_DOMAIN": "complytrack.alpsconsultancy.co.uk"
       }
     },
     "production": {
@@ -27,7 +27,7 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_DOMAIN": "complytrack-aavy.onrender.com"
+        "EXPO_PUBLIC_DOMAIN": "complytrack.alpsconsultancy.co.uk"
       }
     }
   },

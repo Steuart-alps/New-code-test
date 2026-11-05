@@ -15,7 +15,7 @@ What's already in the repository:
   - Encryption: `ITSAppUsesNonExemptEncryption=false`, because the app only uses HTTPS.
   - Permissions: photo and camera wording, no microphone, and location/overlay permissions blocked. `expo-location` is excluded from linking.
 - **Build profiles** (`eas.json`):
-  - `development`, `preview` and `production` all set `EXPO_PUBLIC_DOMAIN=complytrack-aavy.onrender.com`.
+  - `development`, `preview` and `production` all set `EXPO_PUBLIC_DOMAIN=complytrack.alpsconsultancy.co.uk` (the live custom domain).
   - Production Android builds an app bundle (`.aab`).
   - `submit.production.android` uploads to the **internal** track as a **draft**, using `artifacts/mobile/google-play-service-account.json`. That file is gitignored, so never commit it.
 - **In-app legal links and account deletion.** Privacy policy and terms links are on the sign-in and Profile screens. Profile also has **Delete my account** (see "Account deletion" below).
@@ -265,7 +265,7 @@ App Store Connect needs 3 to 10 screenshots per size. iPad screenshots aren't ne
 
 - [ ] API with the replay support (this branch) is deployed to Render, and `/readyz` is healthy.
 - [ ] `pnpm run typecheck` passes, and all `pnpm --filter @workspace/mobile run test:*` scripts pass.
-- [ ] `EXPO_PUBLIC_DOMAIN=complytrack-aavy.onrender.com pnpm --filter @workspace/mobile run export:ios` and `export:android` both succeed.
+- [ ] `EXPO_PUBLIC_DOMAIN=complytrack.alpsconsultancy.co.uk pnpm --filter @workspace/mobile run export:ios` and `export:android` both succeed.
 - [ ] `npx expo-doctor` is clean. Offline, it can only fail the two checks that need exp.host / reactnative.directory.
 - [ ] `eas init` is done and `extra.eas.projectId` is committed. Push permission prompts appear on a real device.
 - [ ] The privacy policy page is updated (section 4) and `https://complytrack.alpsconsultancy.co.uk/privacy` and `/terms` load.

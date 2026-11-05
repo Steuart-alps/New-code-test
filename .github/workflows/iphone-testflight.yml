@@ -1,0 +1,94 @@
+name: Build iPhone app for TestFlight
+
+# Press "Run workflow" on GitHub (Actions > Build iPhone app for TestFlight) to
+# build the iPhone app on Expo's cloud (EAS) from main and upload it to
+# App Store Connect, where it appears under TestFlight about 10-30 minutes
+# after the upload. Only runs when started by hand.
+#
+# Repository secrets it needs (Settings > Secrets and variables > Actions):
+#   EXPO_TOKEN       Expo access token (expo.dev > Account settings > Access tokens)
+#   ASC_API_KEY_P8   the whole text of the App Store Connect API key file (.p8)
+#   ASC_KEY_ID       that key's Key ID
+#   ASC_ISSUER_ID    the Issuer ID shown above the keys list
+#   APPLE_TEAM_ID    Apple Developer > Membership details > Team ID
+#
+# Before each upload after the first, raise expo.ios.buildNumber in
+# artifacts/mobile/app.json (eas.json uses the local version source).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iphone-testflight
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and upload to TestFlight
+    runs-on: ubuntu-24.04
+    # The job waits while Expo builds, so it uses GitHub Actions minutes for
+    # that wait (usually 15-40 minutes on Expo's free plan queue).
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: artifacts/mobile
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      EXPO_ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      EXPO_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      EXPO_APPLE_TEAM_TYPE: COMPANY_OR_ORGANIZATION
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the secrets are set
+        env:
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+        run: |
+          missing=""
+          for name in EXPO_TOKEN EXPO_ASC_KEY_ID EXPO_ASC_ISSUER_ID EXPO_APPLE_TEAM_ID ASC_API_KEY_P8; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing (see the top of this workflow file)"
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        working-directory: .
+        run: pnpm install --frozen-lockfile
+
+      - name: Write the App Store Connect key to a temporary file
+        env:
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+        run: |
+          key_path="$RUNNER_TEMP/asc-api-key.p8"
+          printf '%s\n' "$ASC_API_KEY_P8" > "$key_path"
+          chmod 600 "$key_path"
+          echo "EXPO_ASC_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
+      - name: Link the Expo project
+        # Creates the Expo project the first time and links it on later runs.
+        run: |
+          npx --yes eas-cli@latest init --non-interactive --force
+          echo "Expo project ID (commit it to app.json as expo.extra.eas.projectId):"
+          node -e "const c=require('./app.json');console.log(c.expo.extra?.eas?.projectId ?? 'not set')"
+
+      - name: Build on Expo
+        run: npx --yes eas-cli@latest build --platform ios --profile production --non-interactive --wait
+
+      - name: Upload to App Store Connect (TestFlight)
+        run: npx --yes eas-cli@latest submit --platform ios --profile production --latest --non-interactive --wait
+
+      - name: Remove the key file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/asc-api-key.p8"
