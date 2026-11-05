@@ -658,6 +658,12 @@ readings can be 5 to 10 dB out, so it belongs in the phone app.
 **When:** after launch. Bluetooth probes come with the phone app (item 4);
 Wi-Fi sensors can come at any time after launch. Nothing has been built yet.
 
+You confirmed the direction again on 5 November: "future developments will be
+continuous monitoring via bluetooth / wifi and alerts as required". So the aim
+is round-the-clock monitoring of KitchenTrack fridges and freezers (and water
+tanks), with an alert to the responsible person only when a reading stays out
+of range, rather than staff writing readings down twice a day.
+
 ### Bluetooth probes
 
 Staff use a Bluetooth food probe (for example cooking, cooling, reheating or
