@@ -16,4 +16,7 @@ export const ComplianceItemEquipmentPart = {
   defib_pads: 'defib_pads',
   defib_battery: 'defib_battery',
   defib_child_pads: 'defib_child_pads',
+  ppe_examination: 'ppe_examination',
+  rpe_filters: 'rpe_filters',
+  ppe_replace_by: 'ppe_replace_by',
 } as const;

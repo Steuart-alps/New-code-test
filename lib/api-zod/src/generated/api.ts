@@ -2195,7 +2195,7 @@ export const ListComplianceItemsResponseItem = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
-  "equipmentPart": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads']).nullish().describe('Set when this check is the replacement date of a part of an equipment list item (a defibrillator\'s pads or battery); its due date is the part\'s expiry date. Marking it done asks for the new part\'s expiry date (nextDueDate).'),
+  "equipmentPart": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads', 'ppe_examination', 'rpe_filters', 'ppe_replace_by']).nullish().describe('Set when this check is the replacement date of a part of an equipment list item (a defibrillator\'s pads or battery); its due date is the part\'s expiry date. Marking it done asks for the new part\'s expiry date (nextDueDate).'),
   "notes": zod.string().nullish(),
   "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
   "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
@@ -2257,7 +2257,7 @@ export const CreateComplianceItemResponse = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
-  "equipmentPart": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads']).nullish().describe('Set when this check is the replacement date of a part of an equipment list item (a defibrillator\'s pads or battery); its due date is the part\'s expiry date. Marking it done asks for the new part\'s expiry date (nextDueDate).'),
+  "equipmentPart": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads', 'ppe_examination', 'rpe_filters', 'ppe_replace_by']).nullish().describe('Set when this check is the replacement date of a part of an equipment list item (a defibrillator\'s pads or battery); its due date is the part\'s expiry date. Marking it done asks for the new part\'s expiry date (nextDueDate).'),
   "notes": zod.string().nullish(),
   "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
   "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
@@ -2300,7 +2300,7 @@ export const GetComplianceItemResponse = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
-  "equipmentPart": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads']).nullish().describe('Set when this check is the replacement date of a part of an equipment list item (a defibrillator\'s pads or battery); its due date is the part\'s expiry date. Marking it done asks for the new part\'s expiry date (nextDueDate).'),
+  "equipmentPart": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads', 'ppe_examination', 'rpe_filters', 'ppe_replace_by']).nullish().describe('Set when this check is the replacement date of a part of an equipment list item (a defibrillator\'s pads or battery); its due date is the part\'s expiry date. Marking it done asks for the new part\'s expiry date (nextDueDate).'),
   "notes": zod.string().nullish(),
   "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
   "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
@@ -2363,7 +2363,7 @@ export const UpdateComplianceItemResponse = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
-  "equipmentPart": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads']).nullish().describe('Set when this check is the replacement date of a part of an equipment list item (a defibrillator\'s pads or battery); its due date is the part\'s expiry date. Marking it done asks for the new part\'s expiry date (nextDueDate).'),
+  "equipmentPart": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads', 'ppe_examination', 'rpe_filters', 'ppe_replace_by']).nullish().describe('Set when this check is the replacement date of a part of an equipment list item (a defibrillator\'s pads or battery); its due date is the part\'s expiry date. Marking it done asks for the new part\'s expiry date (nextDueDate).'),
   "notes": zod.string().nullish(),
   "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
   "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
@@ -2429,7 +2429,7 @@ export const UpdateComplianceItemStatusResponse = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
-  "equipmentPart": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads']).nullish().describe('Set when this check is the replacement date of a part of an equipment list item (a defibrillator\'s pads or battery); its due date is the part\'s expiry date. Marking it done asks for the new part\'s expiry date (nextDueDate).'),
+  "equipmentPart": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads', 'ppe_examination', 'rpe_filters', 'ppe_replace_by']).nullish().describe('Set when this check is the replacement date of a part of an equipment list item (a defibrillator\'s pads or battery); its due date is the part\'s expiry date. Marking it done asks for the new part\'s expiry date (nextDueDate).'),
   "notes": zod.string().nullish(),
   "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
   "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
@@ -7697,7 +7697,7 @@ export const ListEquipmentResponseItem = zod.object({
   "siteId": zod.number().nullable(),
   "siteName": zod.string().nullable(),
   "name": zod.string(),
-  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'defibrillator', 'ladder', 'other']),
+  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'defibrillator', 'fall_arrest', 'hard_hat', 'respirator', 'ladder', 'other']),
   "typeLabel": zod.string(),
   "location": zod.string().nullable(),
   "make": zod.string().nullable(),
@@ -7711,7 +7711,7 @@ export const ListEquipmentResponseItem = zod.object({
 })),
   "labelCode": zod.string().nullable(),
   "parts": zod.array(zod.object({
-  "part": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads']),
+  "part": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads', 'ppe_examination', 'rpe_filters', 'ppe_replace_by']),
   "label": zod.string(),
   "checkId": zod.number(),
   "expiryDate": zod.string().nullable().describe('YYYY-MM-DD; null once marked replaced without a new expiry date.'),
@@ -7731,7 +7731,7 @@ export const ListEquipmentResponse = zod.array(ListEquipmentResponseItem)
  */
 export const CreateEquipmentBody = zod.object({
   "name": zod.string(),
-  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'defibrillator', 'ladder', 'other']),
+  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'defibrillator', 'fall_arrest', 'hard_hat', 'respirator', 'ladder', 'other']),
   "siteId": zod.number().nullish(),
   "location": zod.string().nullish(),
   "make": zod.string().nullish(),
@@ -7743,8 +7743,11 @@ export const CreateEquipmentBody = zod.object({
   "partExpiryDates": zod.object({
   "defib_pads": zod.string().nullish(),
   "defib_battery": zod.string().nullish(),
-  "defib_child_pads": zod.string().nullish()
-}).optional().describe('Expiry dates (YYYY-MM-DD) of a defibrillator\'s parts; null clears one, a missing one is left as it is.'),
+  "defib_child_pads": zod.string().nullish(),
+  "ppe_examination": zod.string().nullish(),
+  "rpe_filters": zod.string().nullish(),
+  "ppe_replace_by": zod.string().nullish()
+}).optional().describe('Dates (YYYY-MM-DD) of the item\'s parts (a defibrillator\'s pads and battery; PPE\'s next thorough examination, filters and replace-by date); null clears one, a missing one is left as it is.'),
   "partsAssigneeUserId": zod.number().nullish().describe('The person who replaces the parts; their reminders reach them.')
 })
 
@@ -7753,7 +7756,7 @@ export const CreateEquipmentResponse = zod.object({
   "siteId": zod.number().nullable(),
   "siteName": zod.string().nullable(),
   "name": zod.string(),
-  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'defibrillator', 'ladder', 'other']),
+  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'defibrillator', 'fall_arrest', 'hard_hat', 'respirator', 'ladder', 'other']),
   "typeLabel": zod.string(),
   "location": zod.string().nullable(),
   "make": zod.string().nullable(),
@@ -7767,7 +7770,7 @@ export const CreateEquipmentResponse = zod.object({
 })),
   "labelCode": zod.string().nullable(),
   "parts": zod.array(zod.object({
-  "part": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads']),
+  "part": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads', 'ppe_examination', 'rpe_filters', 'ppe_replace_by']),
   "label": zod.string(),
   "checkId": zod.number(),
   "expiryDate": zod.string().nullable().describe('YYYY-MM-DD; null once marked replaced without a new expiry date.'),
@@ -7790,7 +7793,7 @@ export const UpdateEquipmentParams = zod.object({
 
 export const UpdateEquipmentBody = zod.object({
   "name": zod.string().optional(),
-  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'defibrillator', 'ladder', 'other']).optional(),
+  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'defibrillator', 'fall_arrest', 'hard_hat', 'respirator', 'ladder', 'other']).optional(),
   "siteId": zod.number().nullish(),
   "location": zod.string().nullish(),
   "make": zod.string().nullish(),
@@ -7802,8 +7805,11 @@ export const UpdateEquipmentBody = zod.object({
   "partExpiryDates": zod.object({
   "defib_pads": zod.string().nullish(),
   "defib_battery": zod.string().nullish(),
-  "defib_child_pads": zod.string().nullish()
-}).optional().describe('Expiry dates (YYYY-MM-DD) of a defibrillator\'s parts; null clears one, a missing one is left as it is.'),
+  "defib_child_pads": zod.string().nullish(),
+  "ppe_examination": zod.string().nullish(),
+  "rpe_filters": zod.string().nullish(),
+  "ppe_replace_by": zod.string().nullish()
+}).optional().describe('Dates (YYYY-MM-DD) of the item\'s parts (a defibrillator\'s pads and battery; PPE\'s next thorough examination, filters and replace-by date); null clears one, a missing one is left as it is.'),
   "partsAssigneeUserId": zod.number().nullish().describe('The person who replaces the parts; their reminders reach them.')
 })
 
@@ -7812,7 +7818,7 @@ export const UpdateEquipmentResponse = zod.object({
   "siteId": zod.number().nullable(),
   "siteName": zod.string().nullable(),
   "name": zod.string(),
-  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'defibrillator', 'ladder', 'other']),
+  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'defibrillator', 'fall_arrest', 'hard_hat', 'respirator', 'ladder', 'other']),
   "typeLabel": zod.string(),
   "location": zod.string().nullable(),
   "make": zod.string().nullable(),
@@ -7826,7 +7832,7 @@ export const UpdateEquipmentResponse = zod.object({
 })),
   "labelCode": zod.string().nullable(),
   "parts": zod.array(zod.object({
-  "part": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads']),
+  "part": zod.enum(['defib_pads', 'defib_battery', 'defib_child_pads', 'ppe_examination', 'rpe_filters', 'ppe_replace_by']),
   "label": zod.string(),
   "checkId": zod.number(),
   "expiryDate": zod.string().nullable().describe('YYYY-MM-DD; null once marked replaced without a new expiry date.'),

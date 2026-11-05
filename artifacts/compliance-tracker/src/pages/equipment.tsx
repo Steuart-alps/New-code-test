@@ -43,6 +43,9 @@ const TYPE_LABELS: Record<EquipmentType, string> = {
   air_conditioning: "Air conditioning",
   fire_extinguisher: "Fire extinguisher",
   defibrillator: "Defibrillator (AED)",
+  fall_arrest: "Harness, lanyard or fall-arrest kit",
+  hard_hat: "Hard hat or safety helmet",
+  respirator: "Respirator (RPE)",
   ladder: "Ladder or step",
   other: "Other equipment",
 };
@@ -58,6 +61,9 @@ const TYPE_HINTS: Partial<Record<EquipmentType, string>> = {
   gas_appliance: "Link its gas safety Compliance Check below so a scan shows whether it is in date.",
   fire_extinguisher: "Scanning the label shows the last extinguisher check for its location in FireTrack.",
   defibrillator: "Enter the expiry dates printed on the pads and battery. Each one shows on the dashboard and under Compliance Checks, and the person below is reminded before it runs out. The regular \"defibrillator checked\" tick stays on the opening and closing checklists.",
+  fall_arrest: "Enter when the next thorough examination is due (at least every 6 months for harnesses and lanyards) and the maker's replace-by date. Each one shows on the dashboard and under Compliance Checks, and the person below is reminded before it runs out. Add one item per harness, or one for a set examined together.",
+  hard_hat: "Enter the replace-by date (the maker's date, usually printed or stamped inside the shell). It shows on the dashboard and under Compliance Checks, and the person below is reminded before it runs out.",
+  respirator: "Enter when the filters must be replaced, when the next thorough examination is due, and the mask's replace-by date. Leave a date blank if it does not apply (a disposable mask has no examination). Each one shows on the dashboard and under Compliance Checks.",
 };
 
 /** Parts of an item with a printed expiry date, by type (matches the server). */
@@ -67,18 +73,39 @@ const TYPE_PARTS: Partial<Record<EquipmentType, Array<{ part: EquipmentPart; lab
     { part: "defib_battery", label: "Battery expires on", hint: "The install-by or replace-by date on the battery." },
     { part: "defib_child_pads", label: "Child pads expire on (if it has them)", hint: "Child pads, key or cartridge. Leave blank if there are none." },
   ],
+  fall_arrest: [
+    { part: "ppe_examination", label: "Next thorough examination due", hint: "At least every 6 months, by a competent person." },
+    { part: "ppe_replace_by", label: "Replace by", hint: "The maker's end-of-life date on the label. Leave blank if none." },
+  ],
+  hard_hat: [
+    { part: "ppe_replace_by", label: "Replace by", hint: "The date printed or stamped inside the shell." },
+  ],
+  respirator: [
+    { part: "rpe_filters", label: "Filters to be replaced by", hint: "The date on the filter pack. Leave blank if none." },
+    { part: "ppe_examination", label: "Next thorough examination due", hint: "For a reusable mask or powered respirator. Leave blank if none." },
+    { part: "ppe_replace_by", label: "Replace by", hint: "The maker's end-of-life date. Leave blank if none." },
+  ],
 };
 
-const PART_NAMES: Record<EquipmentPart, string> = { defib_pads: "Pads", defib_battery: "Battery", defib_child_pads: "Child pads" };
+/** How each part's date reads: "Pads expire 3 Mar", "Thorough examination due 3 Mar". */
+const PART_TEXT: Record<EquipmentPart, { name: string; due: string; overdue: string; done: string }> = {
+  defib_pads: { name: "Pads", due: "expire", overdue: "expired", done: "replaced" },
+  defib_battery: { name: "Battery", due: "expires", overdue: "expired", done: "replaced" },
+  defib_child_pads: { name: "Child pads", due: "expire", overdue: "expired", done: "replaced" },
+  ppe_examination: { name: "Thorough examination", due: "due", overdue: "overdue since", done: "done" },
+  rpe_filters: { name: "Filters", due: "expire", overdue: "expired", done: "replaced" },
+  ppe_replace_by: { name: "Replacement", due: "due", overdue: "overdue since", done: "done" },
+};
+const PART_NAMES = Object.fromEntries(Object.entries(PART_TEXT).map(([part, text]) => [part, text.name])) as Record<EquipmentPart, string>;
 
 /** How soon a part expires: red once expired, amber within 30 days. */
 function partState(part: EquipmentPartState, today: string): { text: string; tone: "red" | "amber" | "green" } {
   if (!part.expiryDate) {
-    return { text: `${PART_NAMES[part.part]} replaced${part.lastReplaced ? ` ${formatDay(part.lastReplaced)}` : ""}: add the new expiry date`, tone: "amber" };
+    return { text: `${PART_TEXT[part.part].name} ${PART_TEXT[part.part].done}${part.lastReplaced ? ` ${formatDay(part.lastReplaced)}` : ""}: add the next date`, tone: "amber" };
   }
   const days = Math.round((Date.parse(`${part.expiryDate}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
-  if (days < 0) return { text: `${PART_NAMES[part.part]} expired ${formatDay(part.expiryDate)}`, tone: "red" };
-  return { text: `${PART_NAMES[part.part]} expire${part.part === "defib_battery" ? "s" : ""} ${formatDay(part.expiryDate)}`, tone: days <= 30 ? "amber" : "green" };
+  if (days < 0) return { text: `${PART_TEXT[part.part].name} ${PART_TEXT[part.part].overdue} ${formatDay(part.expiryDate)}`, tone: "red" };
+  return { text: `${PART_TEXT[part.part].name} ${PART_TEXT[part.part].due} ${formatDay(part.expiryDate)}`, tone: days <= 30 ? "amber" : "green" };
 }
 
 const TONE_CLASSES = {
@@ -204,11 +231,11 @@ function ItemDialog({ item, sites, defaultSite, open, onOpenChange, onSaved }: {
     for (const { part } of typeParts) {
       const date = form.partDates[part] ?? "";
       if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-        toast({ title: `Check the ${PART_NAMES[part].toLowerCase()} expiry date`, variant: "destructive" });
+        toast({ title: `Check the ${PART_NAMES[part].toLowerCase()} date`, variant: "destructive" });
         return;
       }
       if (date && date < "2000-01-01") {
-        toast({ title: `Check the ${PART_NAMES[part].toLowerCase()} expiry date`, description: `${formatDay(date)} looks wrong.`, variant: "destructive" });
+        toast({ title: `Check the ${PART_NAMES[part].toLowerCase()} date`, description: `${formatDay(date)} looks wrong.`, variant: "destructive" });
         return;
       }
     }
@@ -281,9 +308,9 @@ function ItemDialog({ item, sites, defaultSite, open, onOpenChange, onSaved }: {
           ))}
           {typeParts.length > 0 && (
             <div className="space-y-1.5">
-              <Label>Who replaces them?</Label>
+              <Label>{form.type === "defibrillator" ? "Who replaces them?" : "Who looks after it?"}</Label>
               <Select value={form.partsAssignee} onValueChange={value => update("partsAssignee", value)}>
-                <SelectTrigger aria-label="Who replaces the pads and battery"><SelectValue /></SelectTrigger>
+                <SelectTrigger aria-label={form.type === "defibrillator" ? "Who replaces the pads and battery" : "Who looks after it"}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NOBODY}>Not assigned</SelectItem>
                   {sortByLabel(people, person => person.name).map(person => <SelectItem key={person.id} value={String(person.id)}>{person.name}</SelectItem>)}
@@ -444,7 +471,7 @@ function EquipmentList({ site, sites }: { site: string; sites: SiteOption[] }) {
       {query.error && <Card className="p-6 text-sm text-red-700">{(query.error as Error).message}</Card>}
       {query.data && items.length === 0 && (
         <Card className="p-6 text-sm text-muted-foreground">
-          No equipment listed here yet. Add boilers, water tanks, calorifiers, lifts, defibrillators and anything else no track keeps a record of.
+          No equipment listed here yet. Add boilers, water tanks, calorifiers, lifts, defibrillators, harnesses, hard hats, respirators and anything else no track keeps a record of.
         </Card>
       )}
 

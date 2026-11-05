@@ -173,6 +173,7 @@ assert.ok(contractors.rows[2].errors.some((error) => error.includes("200 charact
   assert.equal(title("NSTS (Sprayer)", () => false), null, "the GreenTrack line only with GreenTrack");
   assert.equal(title("LOLER Inspections (front loaders / vehicle lifts)"), null, "two kinds of equipment: kept as written");
   assert.equal(title("Front loader LOLER"), "Front Loader — Thorough Examination");
+  assert.equal(title("Harness & lanyard inspection"), "Fall-arrest Equipment — Thorough Examination");
   assert.equal(title("Fire alarm manual break glass call points"), null, "the weekly test is not the service");
   assert.equal(title("Asbestos Survey"), null);
   assert.equal(title("Pressure Equipment - Shoe Cleaner"), null);

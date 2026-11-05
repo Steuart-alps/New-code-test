@@ -22,6 +22,9 @@ export const EquipmentType = {
   air_conditioning: 'air_conditioning',
   fire_extinguisher: 'fire_extinguisher',
   defibrillator: 'defibrillator',
+  fall_arrest: 'fall_arrest',
+  hard_hat: 'hard_hat',
+  respirator: 'respirator',
   ladder: 'ladder',
   other: 'other',
 } as const;

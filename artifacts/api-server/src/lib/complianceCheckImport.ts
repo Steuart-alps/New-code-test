@@ -131,6 +131,7 @@ const RULES: Rule[] = [
   { test: has(/coffee|espresso/), title: "Coffee Machine — Written Scheme Examination", alsoKnownAs: [], category: "Pressure Systems" },
   { test: has(/compressor/), title: "Compressor — Written Scheme Examination", alsoKnownAs: [], category: "Pressure Systems" },
   // Lifting equipment: only when the line names one kind of equipment.
+  { test: has(/\bharness(es)?\b|\blanyards?\b|fall.?arrest|fall protection/), title: "Fall-arrest Equipment — Thorough Examination", alsoKnownAs: [], category: "LOLER" },
   { test: (t) => /front loader/.test(t) && !/vehicle lift|fork ?lift|passenger lift|goods lift|hoist/.test(t), title: "Front Loader — Thorough Examination", alsoKnownAs: [], category: "LOLER" },
   { test: (t) => /vehicle lift/.test(t) && !/front loader|fork ?lift|passenger lift|goods lift/.test(t), title: "Vehicle Lift — Thorough Examination", alsoKnownAs: [], category: "LOLER" },
   { test: (t) => /fork ?lift/.test(t) && !/front loader|vehicle lift|passenger lift|goods lift/.test(t), title: "Fork Lift Truck — Thorough Examination", alsoKnownAs: [], category: "LOLER" },

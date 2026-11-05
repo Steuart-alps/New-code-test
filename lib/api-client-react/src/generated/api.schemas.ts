@@ -2322,6 +2322,9 @@ export const ComplianceItemEquipmentPart = {
   defib_pads: 'defib_pads',
   defib_battery: 'defib_battery',
   defib_child_pads: 'defib_child_pads',
+  ppe_examination: 'ppe_examination',
+  rpe_filters: 'rpe_filters',
+  ppe_replace_by: 'ppe_replace_by',
 } as const;
 
 export type ComplianceItemNeedsActionReason = typeof ComplianceItemNeedsActionReason[keyof typeof ComplianceItemNeedsActionReason] | null;
@@ -5287,6 +5290,9 @@ export const EquipmentType = {
   air_conditioning: 'air_conditioning',
   fire_extinguisher: 'fire_extinguisher',
   defibrillator: 'defibrillator',
+  fall_arrest: 'fall_arrest',
+  hard_hat: 'hard_hat',
+  respirator: 'respirator',
   ladder: 'ladder',
   other: 'other',
 } as const;
@@ -5298,6 +5304,9 @@ export const EquipmentPart = {
   defib_pads: 'defib_pads',
   defib_battery: 'defib_battery',
   defib_child_pads: 'defib_child_pads',
+  ppe_examination: 'ppe_examination',
+  rpe_filters: 'rpe_filters',
+  ppe_replace_by: 'ppe_replace_by',
 } as const;
 
 /**
@@ -5315,12 +5324,15 @@ export interface EquipmentPartState {
 }
 
 /**
- * Expiry dates (YYYY-MM-DD) of a defibrillator's parts; null clears one, a missing one is left as it is.
+ * Dates (YYYY-MM-DD) of the item's parts (a defibrillator's pads and battery; PPE's next thorough examination, filters and replace-by date); null clears one, a missing one is left as it is.
  */
 export interface EquipmentPartExpiryDates {
   defib_pads?: string | null;
   defib_battery?: string | null;
   defib_child_pads?: string | null;
+  ppe_examination?: string | null;
+  rpe_filters?: string | null;
+  ppe_replace_by?: string | null;
 }
 
 export type EquipmentLabelKind = typeof EquipmentLabelKind[keyof typeof EquipmentLabelKind];

@@ -97,6 +97,7 @@ export const STARTER: StarterCategory[] = [
       { title: "Vehicle Lift — Thorough Examination", description: "Six-monthly thorough examination of vehicle lifts under LOLER 1998.", priority: "high", leadTimeDays: 30, frequencyMonths: 6 },
       { title: "Fork Lift Truck — Thorough Examination", description: "Twelve-monthly thorough examination of fork lift trucks under LOLER 1998.", priority: "high", leadTimeDays: 30, frequencyMonths: 12 },
       { title: "Front Loader — Thorough Examination", description: "Twelve-monthly thorough examination of tractor, telehandler and loader front loaders used for lifting under LOLER 1998. Attachments used for lifting (pallet forks, bale spikes and handlers) are examined at least every six months, and so is the loader if it is ever used to lift people.", priority: "high", leadTimeDays: 30, frequencyMonths: 12 },
+      { title: "Fall-arrest Equipment — Thorough Examination", description: "Thorough examination of harnesses, lanyards, fall-arrest blocks and other personal fall-protection equipment at least every six months by a competent person (LOLER 1998 reg 9, Work at Height Regulations 2005). Keep each item's own examination and replace-by dates on the Equipment list.", priority: "high", leadTimeDays: 30, frequencyMonths: 6 },
       { title: "Vehicle Stands — Thorough Examination", description: "Twelve-monthly thorough examination of axle / vehicle support stands under LOLER 1998.", priority: "high", leadTimeDays: 30, frequencyMonths: 12 },
     ],
   },
