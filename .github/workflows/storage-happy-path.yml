@@ -76,7 +76,7 @@ concurrency:
 jobs:
   storage:
     name: Private document storage round trips
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     services:
