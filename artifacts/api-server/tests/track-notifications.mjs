@@ -364,6 +364,54 @@ try {
     ok("FireTrack checks due today or tomorrow remind the owner the day before");
   }
 
+  // ── Tracks picked in setup are reminded before anything is recorded ─────
+  {
+    // A new business that picked FireTrack and KitchenTrack in setup and has
+    // recorded nothing yet: without the pick it would hear nothing at all.
+    const ownerC = await register("owner-c");
+    const C = ownerC.clientId;
+    const [siteC] = await q(`INSERT INTO sites (client_id, name) VALUES ($1, 'Glasgow Test') RETURNING id`, [C]);
+    const runC = (iso) => runTrackReminderJob({ now: at(iso), clientIds: [C], sendPush, skipPurge: true });
+    const kindsC = async (day) => (await q(
+      `SELECT DISTINCT kind FROM user_notifications WHERE client_id = $1 AND dedupe_key LIKE $2 ORDER BY kind`,
+      [C, `%:${day}`])).map((row) => row.kind);
+
+    // Nothing picked: no reminders for tracks the business has never used.
+    for (const iso of ["2026-10-20T08:10:00Z", "2026-10-20T10:30:00Z", "2026-10-20T20:15:00Z"]) {
+      assert.equal((await runC(iso)).errors, 0);
+    }
+    assert.deepEqual(await kindsC("2026-10-20"), [], "nothing picked and nothing recorded: quiet");
+
+    await q(`INSERT INTO app_settings (client_id, key, value, updated_at) VALUES ($1, 'setup_modules', $2, now())`,
+      [C, JSON.stringify(["firetrack", "kitchentrack"])]);
+    assert.equal((await runC("2026-10-21T08:10:00Z")).errors, 0); // 09:10 London
+    const [neverFire] = await q(`SELECT * FROM user_notifications WHERE client_id = $1 AND kind = 'never_fire'`, [C]);
+    assert.ok(neverFire, "FireTrack checks never recorded are reminded");
+    assert.equal(neverFire.user_id, ownerC.userId, "to the Owner when no FireTrack owner is set");
+    assert.equal(neverFire.site_id, siteC.id);
+    assert.match(neverFire.title, /^\d+ FireTrack checks not recorded yet — Glasgow Test$/);
+    assert.match(neverFire.body, /^Not recorded yet: .*Alarm test/);
+    assert.equal(neverFire.link_path, "/fire-safety");
+    assert.equal(neverFire.dedupe_key, `never_fire:site:${siteC.id}:2026-10-21`);
+    assert.equal((await runC("2026-10-21T10:30:00Z")).errors, 0); // 11:30 London
+    assert.equal((await runC("2026-10-21T20:15:00Z")).errors, 0); // 21:15 London
+    const kinds = await kindsC("2026-10-21");
+    for (const kind of ["daily_am", "daily_pm", "kitchen_diary", "never_fire"]) {
+      assert.ok(kinds.includes(kind), `${kind} reminded for a picked track: ${kinds.join(", ")}`);
+    }
+    assert.ok(!kinds.some((kind) => /legionella|pool|hot_tub/.test(kind)), `tracks not picked stay quiet: ${kinds.join(", ")}`);
+    assert.equal((await runC("2026-10-21T09:10:00Z")).notificationsCreated, 0, "once a day");
+
+    // Once the alarm test is recorded it is no longer listed as never recorded.
+    await q(`INSERT INTO fire_safety_checks (client_id, site_id, check_type, check_date, result, call_point)
+             VALUES ($1, $2, 'alarm', '2026-10-21', 'pass', 'CP1')`, [C, siteC.id]);
+    assert.equal((await runC("2026-10-22T08:10:00Z")).errors, 0);
+    const [nextDay] = await q(`SELECT body FROM user_notifications WHERE client_id = $1 AND kind = 'never_fire'
+                               AND dedupe_key LIKE '%:2026-10-22'`, [C]);
+    assert.ok(nextDay && !/Alarm test/.test(nextDay.body), nextDay?.body);
+    ok("tracks picked in setup are reminded from day one, including checks never recorded");
+  }
+
   // ── Notification API: scoped to the user and the active business ─────────
   {
     const staffList = await asStaff("GET", "/notifications");
