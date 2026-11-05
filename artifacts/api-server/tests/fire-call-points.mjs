@@ -158,6 +158,8 @@ try {
   assert.equal(test1.status, 201, JSON.stringify(test1.data));
   assert.equal(test1.data.callPoint, 'CP1 – Reception', 'the test records the call point and its location');
   assert.deepEqual(await nextName(), ['CP2'], 'the next one after the call point tested last');
+  const testedLastName = async () => (await rotationList()).filter(p => p.testedLast).map(p => p.name);
+  assert.deepEqual(await testedLastName(), ['CP1'], 'the call point used in the last test is flagged, to warn against testing it twice in a row');
 
   assert.equal((await staff.request('PUT', '/fire-safety/call-points/order', { siteId: rotation.id, ids: [r3.id, r1.id, r2.id] })).status, 403);
   assert.equal((await viewer.request('PUT', '/fire-safety/call-points/order', { siteId: rotation.id, ids: [r3.id, r1.id, r2.id] })).status, 403);
@@ -173,6 +175,7 @@ try {
 
   assert.equal((await staff.request('POST', '/fire-safety', alarm(rotation.id, { callPointId: r2.id }))).status, 201);
   assert.deepEqual(await nextName(), ['CP3'], 'after the last one, the rotation wraps round to the first');
+  assert.deepEqual(await testedLastName(), ['CP2'], 'only the latest test counts as tested last');
   // A test for an earlier date (an old record) does not move the rotation on.
   await pool.query(
     `INSERT INTO fire_safety_checks (client_id, site_id, check_type, check_date, result, call_point_id, call_point)

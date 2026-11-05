@@ -687,6 +687,7 @@ async function listCallPoints(clientId: number, conditions: ReturnType<typeof eq
     lastTestedDate: row.lastTestedDate ? String(row.lastTestedDate).slice(0, 10) : null,
     nextInTurn: rotation.nextIds.has(row.id),
     notTestedThisRound: rotation.notTestedThisRound.has(row.id),
+    testedLast: lastPointBySite.get(row.siteId) === row.id,
   }));
 }
 
@@ -754,7 +755,7 @@ router.post("/call-points", requireAuth, denyViewers, requireClientAdmin, async 
     .returning();
   await appendAuditEvent(req, { clientId, entityType: "fire_call_point", entityId: created.id, action: "created", after: created });
   const [withRotation] = await listCallPoints(clientId, [eq(fireCallPointsTable.id, created.id)]);
-  res.status(201).json(withRotation ?? { ...created, lastTestedDate: null, nextInTurn: false, notTestedThisRound: true });
+  res.status(201).json(withRotation ?? { ...created, lastTestedDate: null, nextInTurn: false, notTestedThisRound: true, testedLast: false });
 });
 
 // PUT /api/fire-safety/call-points/order — the site's rotation order: every
@@ -824,7 +825,7 @@ router.put("/call-points/:id", requireAuth, denyViewers, requireClientAdmin, asy
     .returning();
   await appendAuditEvent(req, { clientId, entityType: "fire_call_point", entityId: id, action: "updated", before: existing, after: updated });
   const [withRotation] = await listCallPoints(clientId, [eq(fireCallPointsTable.id, id)]);
-  res.json(withRotation ?? { ...updated, lastTestedDate: null, nextInTurn: false, notTestedThisRound: false });
+  res.json(withRotation ?? { ...updated, lastTestedDate: null, nextInTurn: false, notTestedThisRound: false, testedLast: false });
 });
 
 // ── Template config ───────────────────────────────────────────────────────────
