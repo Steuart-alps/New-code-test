@@ -26,10 +26,9 @@
  * used them in the last 30 days, once an owner has been set for the track, or
  * when the business picked the track in setup ("Modules to start with"), so a
  * business trialling every module is not reminded about tracks it does not
- * use. The same rule lets the 09:00 run chase FireTrack, LegionellaTrack,
- * AquaTrack and TubTrack checks that have never been recorded at a site: on a
- * picked (or owned) track they are reminded as "not recorded yet" until the
- * first one is recorded, instead of staying silent until they become overdue.
+ * use. Periodic checks (FireTrack, LegionellaTrack, AquaTrack, TubTrack) are
+ * only chased once overdue, so a check never recorded stays quiet and a new
+ * business is not deluged.
  */
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
@@ -256,31 +255,6 @@ async function overdueReminders(
       module: first.module, siteId: first.siteId ?? null, kind: `overdue_${first.module}`,
       title: `${plural(group.length, `${module.label} check`)} overdue — ${where(siteName)}`,
       body: `Overdue: ${summarise(labels)}.`,
-      linkPath: first.modulePath || module.path,
-    });
-  }
-
-  // Checks never recorded at a site, on the tracks the business uses (picked
-  // in setup or given an owner). Without this a new business hears nothing
-  // about FireTrack, LegionellaTrack, AquaTrack or TubTrack until a first
-  // record makes a check due.
-  const never = new Map<string, CheckAlert[]>();
-  for (const alert of alerts) {
-    if (alert.status !== "never" || !entitledTo(services, alert.module)) continue;
-    if (!batch.usesTrack(alert.module, alert.siteId ?? null)) continue;
-    const groupKey = `${alert.module}:${alert.siteId ?? ""}`;
-    never.set(groupKey, [...(never.get(groupKey) ?? []), alert]);
-  }
-  for (const group of never.values()) {
-    const first = group[0]!;
-    const module = getTrackModule(first.module)!;
-    const siteName = first.siteName ?? null;
-    const labels = [...new Set(group.map((alert) =>
-      siteName && alert.checkLabel.startsWith(`${siteName}: `) ? alert.checkLabel.slice(siteName.length + 2) : alert.checkLabel))];
-    batch.add({
-      module: first.module, siteId: first.siteId ?? null, kind: `never_${first.module}`,
-      title: `${plural(labels.length, `${module.label} check`)} not recorded yet — ${where(siteName)}`,
-      body: `Not recorded yet: ${summarise(labels)}.`,
       linkPath: first.modulePath || module.path,
     });
   }
