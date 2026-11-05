@@ -118,16 +118,17 @@ try {
     await page.getByRole("button", { name: "Change due date" }).click();
     dialog = page.getByRole("dialog");
     await dialog.getByText("Edit Compliance Check").waitFor();
-    await page.waitForFunction(() => document.activeElement?.id === "dueDate");
+    // A repeating check asks when it was last done; the due date follows from Repeat.
+    await page.waitForFunction(() => document.activeElement?.id === "lastDone");
     await shot(page, "2-due-date-ready-to-change");
-    await dialog.locator("#dueDate").fill("2027-01-20T09:00");
+    await dialog.locator("#lastDone").fill("2026-10-20");
     await dialog.getByRole("button", { name: "Save" }).click();
     await dialog.waitFor({ state: "hidden" });
     const put = requests.find(r => r.method === "PUT" && r.path === "/api/compliance-items/5");
     assert.ok(put, "saving sends the change");
-    assert.equal(put.body.dueDate, new Date("2027-01-20T09:00").toISOString());
+    assert.equal(put.body.lastDone, "2026-10-20");
 
-    for (const [box, id] of [["Change repeats", "frequencyMonths"], ["Change reminder lead time", "leadTimeDays"], ["Change contractor", "item-contractor"], ["Change site", "item-site"], ["Change assigned to", "item-assignee"], ["Change notes", "notes"]]) {
+    for (const [box, id] of [["Change repeats", "frequencyMonths"], ["Change reminder lead time", "leadTimeDays"], ["Change contractor", "item-contractor"], ["Change site", "item-site"], ["Change assigned to", "item-contractor"], ["Change notes", "notes"]]) {
       await page.getByRole("button", { name: box }).click();
       await page.waitForFunction((want) => document.activeElement?.id === want, id);
       await page.keyboard.press("Escape");
@@ -177,7 +178,8 @@ try {
     await shot(page, "3-phone-check-page");
     await page.getByRole("button", { name: "Change due date" }).tap();
     await page.getByRole("dialog").getByText("Edit Compliance Check").waitFor();
-    await page.waitForFunction(() => document.activeElement?.id === "dueDate");
+    // A repeating check asks when it was last done; the due date follows from Repeat.
+    await page.waitForFunction(() => document.activeElement?.id === "lastDone");
     await shot(page, "4-phone-due-date");
     assert.deepEqual(pageErrors, []);
     await context.close();

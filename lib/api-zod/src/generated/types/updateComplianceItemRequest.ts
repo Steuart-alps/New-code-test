@@ -27,5 +27,10 @@ export interface UpdateComplianceItemRequest {
      * @maximum 120
      */
   frequencyMonths?: number | null;
+  /**
+     * Date a repeating check was last done (YYYY-MM-DD), not in the future. With a repeat interval it is recorded as the last completion and the due date becomes that date plus the interval, overriding dueDate. Ignored without an interval or when the check is being completed.
+     * @pattern ^\d{4}-\d{2}-\d{2}$
+     */
+  lastDone?: string | null;
   notes?: string | null;
 }
