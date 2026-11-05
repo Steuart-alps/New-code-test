@@ -14,6 +14,7 @@ import { departmentLabel } from "@/lib/departments";
 import { roleLabel } from "@/lib/roles";
 import { UserDialog, type RosterEntry, type User as Person } from "@/pages/users";
 import { SiteFireWalkQuestions, type FireWalkAnswers } from "@/components/site-fire-walk-questions";
+import { SetupCallPoints } from "@/components/fire-call-points";
 import {
   BUSINESS_TYPE_OPTIONS, DEPARTMENT_SUGGESTIONS, FIRST_RECORD_PRIORITY, MODULE_INFO, NATION_OPTIONS, RECOMMENDED_MODULES,
   formatDay, localToday, onboardingRequest,
@@ -649,6 +650,9 @@ export default function SetupPage() {
                       </label>
                     ))}
                   </div>
+                )}
+                {state.canManage && picked.includes("firetrack") && state.modules?.available.includes("firetrack") && (
+                  <SetupCallPoints sites={sites} />
                 )}
                 <StepActions busy={busy} onSave={saveModules} onSkip={() => setStep(5)} />
               </>

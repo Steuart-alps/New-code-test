@@ -4194,7 +4194,8 @@ export const ListFireCallPointsResponseItem = zod.object({
   "archivedAt": zod.date().nullable(),
   "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
   "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
-  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).'),
+  "testedLast": zod.boolean().optional().describe('The call point used in its site\'s most recent alarm test, so choosing it again would test the same call point twice in a row.')
 })
 export const ListFireCallPointsResponse = zod.array(ListFireCallPointsResponseItem)
 
@@ -4219,7 +4220,8 @@ export const CreateFireCallPointResponse = zod.object({
   "archivedAt": zod.date().nullable(),
   "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
   "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
-  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).'),
+  "testedLast": zod.boolean().optional().describe('The call point used in its site\'s most recent alarm test, so choosing it again would test the same call point twice in a row.')
 })
 
 
@@ -4241,7 +4243,8 @@ export const OrderFireCallPointsResponseItem = zod.object({
   "archivedAt": zod.date().nullable(),
   "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
   "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
-  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).'),
+  "testedLast": zod.boolean().optional().describe('The call point used in its site\'s most recent alarm test, so choosing it again would test the same call point twice in a row.')
 })
 export const OrderFireCallPointsResponse = zod.array(OrderFireCallPointsResponseItem)
 
@@ -4656,7 +4659,8 @@ export const UpdateFireCallPointResponse = zod.object({
   "archivedAt": zod.date().nullable(),
   "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
   "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
-  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).'),
+  "testedLast": zod.boolean().optional().describe('The call point used in its site\'s most recent alarm test, so choosing it again would test the same call point twice in a row.')
 })
 
 

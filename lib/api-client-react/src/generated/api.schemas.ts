@@ -3705,6 +3705,8 @@ export interface FireCallPoint {
   nextInTurn: boolean;
   /** In use but never tested, or not tested within one full round (call points in use x the alarm test frequency). */
   notTestedThisRound: boolean;
+  /** The call point used in its site's most recent alarm test, so choosing it again would test the same call point twice in a row. */
+  testedLast?: boolean;
 }
 
 export interface CreateFireCallPointRequest {

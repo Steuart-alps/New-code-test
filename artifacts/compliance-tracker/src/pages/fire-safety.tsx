@@ -20,9 +20,6 @@ import {
   useUpdateFireSafetyConfig,
   useListFireCallPoints,
   getListFireCallPointsQueryKey,
-  useCreateFireCallPoint,
-  useUpdateFireCallPoint,
-  useOrderFireCallPoints,
   FireCallPoint,
   getGetFireDrillAttendanceQueryKey,
   getGetNightFireWalksQueryKey,
@@ -44,7 +41,7 @@ import { format } from "date-fns";
 import {
   Flame, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX,
   Filter, Pencil, Trash2, Lock, Route, Cpu, Check, X, Minus, Settings, XCircle, ShieldAlert,
-  BellRing, Lightbulb, Moon, Archive, RotateCcw, ChevronUp, ChevronDown, Footprints,
+  BellRing, Lightbulb, Moon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin, useCanEdit } from "@/context/auth-context";
@@ -54,14 +51,9 @@ import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { AuditLog } from "@/components/audit-log";
 import { LoadError } from "@/components/load-error";
 import { takeLinkParams } from "@/lib/deep-link";
-import { ImportCsvButton } from "@/components/import-csv-dialog";
-import { WalkRoundDialog, type WalkRoundPoint } from "@/components/walk-round-dialog";
-import { useActiveClientApi } from "@/hooks/use-active-client-api";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   EMPTY_SOUND_LEVEL, parseSoundLevel, SoundLevelField, soundLevelRequest, SoundLevelVerdictText, type SoundLevelValue,
 } from "@/components/sound-level-field";
-import { SOUND_LEVEL_MIN_DB } from "@/lib/fire-sound-level";
 import { StringListEditor } from "@/components/string-list-editor";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 import { useSiteFilterId, useWorkingSiteId } from "@/hooks/use-working-site";
@@ -76,6 +68,7 @@ import {
 } from "@/components/fire-night-walks";
 import { RecordSignedBy } from "@/components/record-signature";
 import { RecordSiteField } from "@/components/record-site-field";
+import { CallPointsEditor, callPointLabel, callPointSiteParam, lastTestedText } from "@/components/fire-call-points";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
@@ -277,21 +270,6 @@ function FlickTestGuide() {
 
 // ── Call points (weekly alarm tests) ──────────────────────────────────────────
 
-/** A call point's name, plus its location when the name does not already say it. */
-function callPointLabel(point: Pick<FireCallPoint, "name" | "location">): string {
-  const location = point.location?.trim();
-  if (!location || point.name.toLowerCase().includes(location.toLowerCase())) return point.name;
-  return `${point.name} – ${location}`;
-}
-
-function lastTestedText(point: FireCallPoint) {
-  return point.lastTestedDate ? `last tested ${format(new Date(point.lastTestedDate), "dd/MM/yyyy")}` : "not tested yet";
-}
-
-function callPointSiteParam(siteId: number | undefined | null) {
-  return { siteId: siteId ? String(siteId) : "none" };
-}
-
 /**
  * Pick the call point used for this week's alarm test. With a list set up for
  * the site, the next one in the site's rotation order (after the one tested
@@ -325,6 +303,12 @@ function CallPointPicker({
   const suggested = anySite ? undefined : active.find(p => p.nextInTurn) ?? active[0];
   const behind = active.filter(p => p.notTestedThisRound && p.id !== callPointId);
   const siteName = (id: number | null) => sites?.find(site => site.id === id)?.name ?? "No specific site";
+  const canAdmin = useCanAdmin();
+  const [listOpen, setListOpen] = useState(false);
+  // Warn when the call point chosen is the one used in the site's last alarm
+  // test; an edited record keeping its own call point is not a repeat.
+  const chosen = callPointId != null ? points.find(p => p.id === callPointId) : undefined;
+  const sameAsLast = chosen?.testedLast && chosen.id !== keepId ? chosen : undefined;
 
   // Suggest the next call point in the rotation when nothing is chosen yet.
   useEffect(() => {
@@ -363,180 +347,41 @@ function CallPointPicker({
         <>
           <Input value={callPoint} onChange={e => onChange({ callPointId: null, callPoint: e.target.value })}
             placeholder='e.g. "CP3 – First floor fire exit"' className="rounded-sm" data-testid="input-call-point" />
-          <p className="text-xs text-muted-foreground">Managers can list this site's call points under Template, Call points.</p>
+          {canAdmin && !anySite ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs text-muted-foreground flex-1 min-w-[12rem]">List this site's call points once and they appear here as a dropdown, with the next one in turn picked for you.</p>
+              <Button type="button" variant="outline" size="sm" onClick={() => setListOpen(true)} data-testid="button-list-call-points">
+                <Plus className="w-3.5 h-3.5 mr-1" /> List call points
+              </Button>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              {canAdmin ? "Choose the site to pick from its call points." : "An Owner can list this site's call points under Template, Call points, so they appear here as a dropdown."}
+            </p>
+          )}
         </>
       )}
+      {sameAsLast && (
+        <div className="flex items-start gap-2 rounded-sm border border-amber-300 bg-amber-50 px-2.5 py-2 text-xs text-amber-900" role="alert" data-testid="call-point-same-as-last">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+          <span>
+            {callPointLabel(sameAsLast)} was used for the last alarm test{sameAsLast.lastTestedDate ? ` (${format(new Date(sameAsLast.lastTestedDate), "dd/MM/yyyy")})` : ""}.
+            Test from a different call point each week{suggested && suggested.id !== sameAsLast.id ? `; next in turn is ${callPointLabel(suggested)}` : ""}.
+          </span>
+        </div>
+      )}
+      <Dialog open={listOpen} onOpenChange={setListOpen}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Call points{siteName(siteId ?? null) && sites?.length ? ` · ${siteName(siteId ?? null)}` : ""}</DialogTitle></DialogHeader>
+          <p className="text-xs text-muted-foreground">List them in the order you want them tested, e.g. "Call point 1" at "Main entrance". Changes save straight away; you can change them later under Template, Call points.</p>
+          <CallPointsEditor siteId={siteId ?? null} enabled={listOpen} />
+          <DialogFooter><Button type="button" onClick={() => setListOpen(false)}>Done</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
       {!anySite && behind.length > 0 && (
         <p className="text-xs text-amber-800" data-testid="call-points-behind">
           Not tested in the last full round: {behind.map(callPointLabel).join(", ")}.
         </p>
-      )}
-    </div>
-  );
-}
-
-/** "Next in turn" and "not tested this round" tags for a call point in use. */
-function RotationTags({ point }: { point: FireCallPoint }) {
-  return (
-    <>
-      {point.nextInTurn && <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-primary/40 text-primary shrink-0">Next in turn</Badge>}
-      {point.notTestedThisRound && point.lastTestedDate && !point.nextInTurn && (
-        <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-amber-300 bg-amber-50 text-amber-800 shrink-0">
-          Not tested this round
-        </Badge>
-      )}
-    </>
-  );
-}
-
-/**
- * A site's call points in test order. Managers add, rename, set the location,
- * move them up or down the rotation, archive or restore them, or upload a list.
- */
-function CallPointsEditor({ siteId, enabled }: { siteId: number | null; enabled: boolean }) {
-  const params = { ...callPointSiteParam(siteId), includeArchived: "true" as const };
-  const { data: points } = useListFireCallPoints(params, { query: { enabled, queryKey: getListFireCallPointsQueryKey(params) } });
-  const createPoint = useCreateFireCallPoint();
-  const updatePoint = useUpdateFireCallPoint();
-  const orderPoints = useOrderFireCallPoints();
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-  const [newName, setNewName] = useState("");
-  const [newLocation, setNewLocation] = useState("");
-  const [editing, setEditing] = useState<Record<number, { name: string; location: string }>>({});
-  const [walkRoundOpen, setWalkRoundOpen] = useState(false);
-  const clientApiFetch = useActiveClientApi();
-  const refresh = () => queryClient.invalidateQueries({ queryKey: getListFireCallPointsQueryKey().slice(0, 1) });
-  const fail = (err: any) => toast({ title: "Call point not saved", description: err.message, variant: "destructive" });
-
-  const add = () => {
-    const name = newName.trim();
-    if (!name) return;
-    createPoint.mutate({ data: { siteId, name, location: newLocation.trim() || null } }, {
-      onSuccess: () => { setNewName(""); setNewLocation(""); refresh(); },
-      onError: fail,
-    });
-  };
-  const save = (point: FireCallPoint, data: { name?: string; location?: string | null; sleepingArea?: boolean; archived?: boolean }) =>
-    updatePoint.mutate({ id: point.id, data }, {
-      onSuccess: () => { setEditing(({ [point.id]: _, ...rest }) => rest); refresh(); },
-      onError: fail,
-    });
-
-  const active = (points ?? []).filter(p => !p.archivedAt);
-  const archived = (points ?? []).filter(p => p.archivedAt);
-  const move = (index: number, by: -1 | 1) => {
-    const ids = active.map(p => p.id);
-    const target = index + by;
-    if (target < 0 || target >= ids.length) return;
-    [ids[index], ids[target]] = [ids[target], ids[index]];
-    // Show the new order straight away; the saved list replaces it.
-    queryClient.setQueryData<FireCallPoint[]>(getListFireCallPointsQueryKey(params), current =>
-      current ? [...ids.map(id => current.find(p => p.id === id)!), ...current.filter(p => p.archivedAt)] : current);
-    orderPoints.mutate({ data: { siteId, ids } }, { onSettled: refresh, onError: fail });
-  };
-  // A walk round is saved like an uploaded list: new call points join the
-  // end of the order as spoken, and ones already listed get the new location.
-  const saveWalkRound = async (walked: WalkRoundPoint[]) => {
-    const response = await clientApiFetch("/imports/fire-call-points", {
-      method: "POST",
-      body: JSON.stringify({ headers: ["Call point", "Location"], rows: walked.map(p => [p.name, p.location]), siteId, preview: false }),
-    });
-    const body = await response.json().catch(() => null) as { error?: string; rows?: Array<{ label: string; action: string; reasons: string[] }> } | null;
-    if (!response.ok) {
-      const bad = body?.rows?.find(row => row.action === "error");
-      return bad ? `${bad.label}: ${bad.reasons.join("; ")}` : body?.error ?? "The call points could not be saved";
-    }
-    await refresh();
-    toast({ title: "Call points saved", description: `${walked.length} from your walk round.` });
-    return null;
-  };
-  const draft = (point: FireCallPoint) => editing[point.id] ?? { name: point.name, location: point.location ?? "" };
-  const changed = (point: FireCallPoint) => {
-    const value = editing[point.id];
-    return !!value && !!value.name.trim() && (value.name.trim() !== point.name || value.location.trim() !== (point.location ?? ""));
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap justify-end gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={() => setWalkRoundOpen(true)} data-testid="button-walk-round-call-points">
-          <Footprints className="mr-1 h-4 w-4" /> Walk round and speak
-        </Button>
-        <ImportCsvButton type="fire-call-points" siteId={siteId} label="Upload a list" onImported={refresh} />
-      </div>
-      <WalkRoundDialog open={walkRoundOpen} onClose={() => setWalkRoundOpen(false)} kind="call_point"
-        title="Walk round and speak: call points" prefix="CP"
-        examples={["This is call point 1, by the front door", "Call point 2, kitchen fire exit"]}
-        existingNames={(points ?? []).map(p => p.name)} onSave={saveWalkRound} />
-      {active.length === 0 && <p className="text-xs text-muted-foreground italic">No call points listed yet. Add them below in the order you want them tested, or upload a list.</p>}
-      {active.length > 0 && <p className="text-[11px] text-muted-foreground">Tested in this order, from the top. Use the arrows to change it.</p>}
-      {active.map((point, index) => (
-        <div key={point.id} className="rounded-sm border border-border p-2 space-y-1.5" data-testid={`call-point-row-${point.id}`}>
-          <div className="flex gap-2 items-center">
-            <span className="text-xs font-medium text-muted-foreground w-5 text-right shrink-0">{index + 1}.</span>
-            <Input value={draft(point).name} className="h-8 text-sm rounded-sm flex-1 min-w-0" aria-label="Call point name"
-              onChange={e => setEditing(current => ({ ...current, [point.id]: { ...draft(point), name: e.target.value } }))} />
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0" title="Move up" aria-label="Move up"
-              disabled={index === 0 || orderPoints.isPending} onClick={() => move(index, -1)}>
-              <ChevronUp className="w-3.5 h-3.5" />
-            </Button>
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0" title="Move down" aria-label="Move down"
-              disabled={index === active.length - 1 || orderPoints.isPending} onClick={() => move(index, 1)}>
-              <ChevronDown className="w-3.5 h-3.5" />
-            </Button>
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0" title="Archive (kept on past tests)" aria-label="Archive"
-              onClick={() => save(point, { archived: true })}>
-              <Archive className="w-3.5 h-3.5 text-muted-foreground" />
-            </Button>
-          </div>
-          <div className="flex gap-2 items-center pl-7">
-            <Input value={draft(point).location} placeholder="Location, e.g. Kitchen fire exit, ground floor" aria-label="Location"
-              className="h-8 text-xs rounded-sm flex-1 min-w-0"
-              onChange={e => setEditing(current => ({ ...current, [point.id]: { ...draft(point), location: e.target.value } }))} />
-            {changed(point) && (
-              <Button variant="outline" size="sm" className="h-8 px-2 text-xs shrink-0" title="Save"
-                onClick={() => save(point, { name: editing[point.id].name.trim(), location: editing[point.id].location.trim() || null })}>
-                <Check className="w-3.5 h-3.5 mr-1 text-emerald-700" /> Save
-              </Button>
-            )}
-          </div>
-          <div className="flex flex-wrap gap-1.5 items-center pl-7 text-[11px] text-muted-foreground">
-            <span>{point.lastTestedDate ? `Tested ${format(new Date(point.lastTestedDate), "dd/MM/yyyy")}` : "Not tested yet"}</span>
-            <RotationTags point={point} />
-            <label className="ml-auto flex items-center gap-1.5 cursor-pointer" title={`The alarm must reach ${SOUND_LEVEL_MIN_DB.bedhead} dB at the bedhead`}>
-              <Checkbox checked={!!point.sleepingArea} disabled={updatePoint.isPending} aria-label="Near a sleeping area"
-                data-testid={`checkbox-sleeping-area-${point.id}`}
-                onCheckedChange={checked => save(point, { sleepingArea: checked === true })} />
-              Sleeping area ({SOUND_LEVEL_MIN_DB.bedhead} dB)
-            </label>
-          </div>
-        </div>
-      ))}
-      <div className="rounded-sm border border-dashed border-border p-2 space-y-1.5">
-        <div className="flex gap-2">
-          <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder='Call point, e.g. "CP1"' aria-label="New call point"
-            className="h-8 text-sm rounded-sm flex-1 min-w-0" onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); add(); } }} />
-          <Button variant="outline" size="sm" onClick={add} disabled={!newName.trim() || createPoint.isPending}>
-            <Plus className="w-3.5 h-3.5 mr-1.5" /> Add
-          </Button>
-        </div>
-        <Input value={newLocation} onChange={e => setNewLocation(e.target.value)} placeholder="Location, e.g. Reception, main entrance" aria-label="New call point location"
-          className="h-8 text-xs rounded-sm" onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); add(); } }} />
-        <p className="text-[11px] text-muted-foreground">New call points go to the end of the order.</p>
-      </div>
-      {archived.length > 0 && (
-        <div className="space-y-1 pt-2 border-t border-border">
-          <p className="text-xs font-medium text-muted-foreground">Archived (kept on past tests)</p>
-          {archived.map(point => (
-            <div key={point.id} className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="flex-1">{callPointLabel(point)}</span>
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => save(point, { archived: false })}>
-                <RotateCcw className="w-3 h-3 mr-1" /> Restore
-              </Button>
-            </div>
-          ))}
-        </div>
       )}
     </div>
   );
