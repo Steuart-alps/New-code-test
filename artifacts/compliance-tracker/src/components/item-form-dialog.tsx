@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { useWorkingSiteId } from "@/hooks/use-working-site";
+import { useCanAdmin } from "@/context/auth-context";
 import { AssigneeField, assigneeFields, emptyAssignee, type AssigneeValue } from "@/components/assignee-field";
 import { format } from "date-fns";
 import { ComplianceItem, useListCategories, useListSites, useListContractors } from "@workspace/api-client-react";
@@ -67,6 +68,8 @@ export function ItemFormDialog({
   focusField?: ItemFormField | null;
 }) {
   const { createItem, updateItem } = useAppMutations();
+  // Copying a check to every site creates new checks, which only Owners and consultants can do.
+  const canAdmin = useCanAdmin();
   const { data: categories = [] } = useListCategories();
   const { data: sites = [] } = useListSites();
   const { data: contractors = [] } = useListContractors();
@@ -243,7 +246,7 @@ export function ItemFormDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">None</SelectItem>
-                  {sites.length > 0 && (
+                  {sites.length > 0 && canAdmin && (
                     <SelectItem value={ALL_SITES}>
                       {item ? "All Sites (copy this check to every site)" : "All Sites (creates one check per site)"}
                     </SelectItem>

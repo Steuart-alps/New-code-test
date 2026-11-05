@@ -23,7 +23,7 @@ import {
   useListCategories,
 } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
-import { useAuth, useCanAdmin, useCanEdit } from "@/context/auth-context";
+import { useAuth, useCanAdmin, useCanChangeChecks, useCanEdit } from "@/context/auth-context";
 import { apiFetch } from "@/lib/api";
 import { LoadError } from "@/components/load-error";
 import { format } from "date-fns";
@@ -134,6 +134,7 @@ export default function ItemDetailPage() {
   const { activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
   const canEdit = useCanEdit();
+  const canChange = useCanChangeChecks();
   const queryClient = useQueryClient();
   const search = useSearch();
   const [, navigate] = useLocation();
@@ -222,8 +223,8 @@ export default function ItemDetailPage() {
   const contractor = contractors.find(c => c.id === item.contractorId);
   const site = sites.find(s => s.id === item.siteId);
   const category = categories.find(c => c.id === item.categoryId);
-  // Only Owners and ALPS consultants can change a check (the server agrees).
-  const change = (field: ItemFormField) => (canAdmin ? () => openEdit(field) : undefined);
+  // Owners, ALPS consultants and Managers can change a check (the server agrees).
+  const change = (field: ItemFormField) => (canChange ? () => openEdit(field) : undefined);
 
   return (
     <AppLayout title={item.title}>
@@ -262,7 +263,7 @@ export default function ItemDetailPage() {
                     <CheckCircle2 className="w-4 h-4 mr-1.5 text-emerald-600" /> Mark done
                   </Button>
                 )}
-                {canAdmin && (
+                {canChange && (
                   <Button variant="outline" size="sm" onClick={() => openEdit()} data-testid="make-changes">
                     <Pencil className="w-4 h-4 mr-1.5" /> Make changes
                   </Button>
@@ -291,12 +292,12 @@ export default function ItemDetailPage() {
               </div>
             )}
 
-            {canAdmin && (
+            {canChange && (
               <p className="pt-4 border-t border-border/50 mb-3 text-xs text-muted-foreground">
                 Tap any box below to change it.
               </p>
             )}
-            <div className={cn("grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4", !canAdmin && "pt-4 border-t border-border/50")}>
+            <div className={cn("grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4", !canChange && "pt-4 border-t border-border/50")}>
               <DetailBox icon={<Calendar className="w-4 h-4 text-muted-foreground" />} label="Due Date" onChange={change("dueDate")}>
                 <p className="text-sm font-medium">{item.dueDate ? fmt(item.dueDate) : "Not set — enter it from your last service date"}</p>
               </DetailBox>
@@ -323,7 +324,7 @@ export default function ItemDetailPage() {
               <DetailBox icon={<MapPin className="w-4 h-4 text-muted-foreground" />} label="Site" onChange={change("item-site")}>
                 <p className="text-sm font-medium">{site?.name ?? "—"}</p>
               </DetailBox>
-              {(item.assignedTo || canAdmin) && (
+              {(item.assignedTo || canChange) && (
                 <DetailBox icon={<User className="w-4 h-4 text-muted-foreground" />} label="Assigned To" onChange={change("item-assignee")}>
                   {item.assignedTo
                     ? <p className="text-sm font-medium">{item.assignedTo}</p>
@@ -337,7 +338,7 @@ export default function ItemDetailPage() {
               )}
             </div>
 
-            {(item.notes || canAdmin) && (
+            {(item.notes || canChange) && (
               <div className="mt-6 pt-4 border-t border-border/50">
                 <DetailBox icon={<ClipboardList className="w-4 h-4 text-muted-foreground" />} label="Notes" onChange={change("notes")}>
                   {item.notes

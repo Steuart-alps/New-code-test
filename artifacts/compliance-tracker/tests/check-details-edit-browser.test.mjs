@@ -10,6 +10,8 @@ import { chromium } from "@playwright/test";
 //     (Due date, Repeats, Contractor...) says "Change" and opens the form with
 //     that box ready to type in; saving sends the new due date;
 //   - the contractor's name still opens the contractor, not the form;
+//   - Managers (and Maintenance managers) can change a check too, but not
+//     delete it or copy it to every site;
 //   - Staff, who can't change a check, see neither the button nor "Change";
 //   - on a phone the button and boxes fit without sideways scrolling.
 // The API is mocked; anything not listed returns an empty list. Set
@@ -136,6 +138,20 @@ try {
     await page.getByRole("link", { name: "Gary Gas — Safe Gas Ltd" }).click();
     await page.waitForURL(/\/contractors\/3$/);
     assert.equal(await page.getByRole("dialog").count(), 0, "the link does not open the form");
+    assert.deepEqual(pageErrors, []);
+    await context.close();
+  }
+
+  // ── Managers change a check too, but don't delete it or copy it to every site ──
+  {
+    const { page, context, pageErrors } = await open("client_manager");
+    await page.getByRole("button", { name: "Make changes" }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Delete check" }).count(), 0, "Managers can't delete a check");
+    await page.getByRole("button", { name: "Change site" }).click();
+    await page.waitForFunction(() => document.activeElement?.id === "item-site");
+    await page.locator("#item-site").click();
+    await page.getByRole("option", { name: "Harbour Hotel" }).waitFor();
+    assert.equal(await page.getByRole("option", { name: /All Sites/ }).count(), 0, "no copying to every site");
     assert.deepEqual(pageErrors, []);
     await context.close();
   }

@@ -190,6 +190,25 @@ async function roles() {
   check("Manager sees their department's sites only",
     siteIds.has(kitchenSite.data?.id) && !siteIds.has(roomsSite.data?.id), JSON.stringify([...siteIds]));
 
+  // Managers (and Maintenance managers) change compliance checks on their own
+  // sites, e.g. the due date; Staff can't, and nobody moves one to a site they can't see.
+  const kitchenCheck = await owner("POST", "/compliance-items", { title: "Gas safety inspection", siteId: kitchenSite.data?.id, clientId: owner.clientId, frequencyMonths: 12 });
+  const roomsCheck = await owner("POST", "/compliance-items", { title: "Lift inspection", siteId: roomsSite.data?.id, clientId: owner.clientId, frequencyMonths: 6 });
+  check("Owner adds compliance checks", kitchenCheck.status === 201 && roomsCheck.status === 201, `${kitchenCheck.status} ${roomsCheck.status}`);
+  const newDue = "2027-03-01T09:00:00.000Z";
+  const managerDue = await head("PUT", `/compliance-items/${kitchenCheck.data?.id}`, { dueDate: newDue });
+  check("Manager changes a check's due date on their site",
+    managerDue.status === 200 && managerDue.data?.dueDate && new Date(managerDue.data.dueDate).toISOString() === newDue, JSON.stringify(managerDue.data));
+  const managerOther = await head("PUT", `/compliance-items/${roomsCheck.data?.id}`, { dueDate: newDue });
+  check("Manager can't change a check on another department's site", managerOther.status === 403, String(managerOther.status));
+  const managerMove = await head("PUT", `/compliance-items/${kitchenCheck.data?.id}`, { siteId: roomsSite.data?.id });
+  check("Manager can't move a check to a site they can't see", managerMove.status === 403, String(managerMove.status));
+  const managerDelete = await head("DELETE", `/compliance-items/${kitchenCheck.data?.id}`);
+  check("Manager still can't delete a check", managerDelete.status === 403, String(managerDelete.status));
+  const staffSession = await signIn("chef");
+  const staffDue = await staffSession("PUT", `/compliance-items/${kitchenCheck.data?.id}`, { dueDate: newDue });
+  check("Staff can't change a check", staffDue.status === 403, String(staffDue.status));
+
   const general = await signIn("general-manager");
   const generalList = await general("GET", "/users");
   const generalIds = new Set((generalList.data ?? []).map((u) => u.id));
