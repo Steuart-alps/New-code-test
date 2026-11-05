@@ -49,6 +49,7 @@ Wednesday 28 October.
 | 30 | KitchenTrack HACCP plan builder from your ALPS template | After launch | None for stage 1; a few pence per AI draft in stage 2 | Your wording of the CCP questions |
 | 31 | Complete risk assessments inside ComplyTrack | After launch | None; a few pence per AI draft if added later | The RiskAssessor Pro layout you want to follow, and which assessments to start with |
 | 32 | Lone worker check in, check out and monitoring | After launch (phone app needed for the full version) | Text messages cost a few pence each; none if alerts are by email and app only | Who gets alerted, and whether texts are wanted |
+| 33 | LegionellaTrack: what to add after the sediment and biofilm questions | After launch | None | Which of the gaps matter most to your clients |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -1284,6 +1285,50 @@ only when an alert goes out. Prices to be checked before building.
 2. Are text message alerts wanted, or are app notifications and email enough?
 3. Which clients have lone workers today, and what do they use now (if
    anything)?
+
+---
+
+## 33. LegionellaTrack: what to add next
+
+**When:** after launch. From your app review notes ("Plan required
+LegionellaTrack? Too simple? Evidence of sediment / biofilm?"), put on the
+roadmap on 5 November.
+
+**Already done (change #268, 30 October):** tank, calorifier, shower and
+outlet checks now ask "What did you find?" (sediment, biofilm, lid, screens
+and so on), and a bad answer forces a Fail with an action. Tanks and
+calorifiers are named, so a site with more than one tank says which tank was
+checked, and outlets and tanks can be uploaded from a spreadsheet. The written
+scheme stays in LegionellaTrack's site plan, and LegionellaTrack already
+covers the main HSG274 checks: sentinel outlet temperatures, little-used
+outlet flushing, TMV servicing, calorifier temperatures and the risk
+assessment review date.
+
+**Gaps that could come next:**
+
+1. **Lab sample results:** record the result of each water sample (Legionella
+   count per litre), with the action level shown, so a high result
+   automatically raises an urgent action and a resample date. Today only the
+   lab's reference number is kept.
+2. **Due dates for each tank:** show each named tank's next inspection or
+   clean on the dashboard and in reminders, not just one date per type of
+   check for the whole site.
+3. **"What did you find?" answers in reports:** show them in the PDF and
+   inspection pack, so an inspector sees the evidence and not just Pass or
+   Fail.
+4. **Phone app:** ask the same questions in the iPhone and Android apps
+   (item 4).
+5. **Risk assessment link:** once risk assessments can be written in
+   ComplyTrack (item 31), link the legionella risk assessment's actions to
+   the checks that prove them.
+
+Each of these is added to the existing check types rather than as new ones,
+so sites don't have to approve their plans again.
+
+**Question for you:** which of these matter most to your clients? Lab sample
+results would be the first suggestion.
+
+**Cost:** none. No extra hosting.
 
 ---
 
