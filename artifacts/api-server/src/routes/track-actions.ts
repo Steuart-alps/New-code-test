@@ -7,6 +7,7 @@ import { denyViewers, getActiveDepartmentId, getClientId, requireAuth, requireCl
 import { isInspectionReportSource, missingEvidenceForAction } from "../lib/trackEvidenceRequirements";
 import { departmentSiteId, sitesTableVisibleTo, siteVisibleToDepartment } from "../lib/departmentSites";
 import { resolveAssigneeChange } from "../lib/assignees";
+import { raiseFixTrackJobForAction, resolveLinkedFixTrackJob } from "../lib/trackActionFixTrack";
 import {
   ObjectContentError, ObjectGenerationError, ObjectNotFoundError, ObjectOwnershipError, ObjectStorageService,
 } from "../lib/objectStorage";
@@ -274,26 +275,13 @@ router.post("/:id/fix-track", requireAuth, denyViewers, async (req, res) => {
     if (!action || !await canAccessSite(action.siteId, clientId, departmentId)) return { status: 404 as const, error: "Action not found" };
     if (action.module === "green") return { status: 400 as const, error: "GreenTrack actions stay within GreenTrack" };
     if (action.status === "resolved") return { status: 409 as const, error: "Resolved actions cannot be sent to FixTrack" };
-    // A failed temperature can still get a repair job, but a manager verifies
-    // and resolves the action in KitchenTrack ("parallel"). The department
-    // check now runs with the lookup above and answers 404 (#105).
-    const keptInTrack = action.module === "kitchen" && !!action.sourceKind?.startsWith("kitchen_temperature_");
     if (!parsed.data.create) {
       const [row] = await tx.update(trackActionsTable).set({ fixTrackDisposition: "not_needed", updatedAt: new Date() }).where(eq(trackActionsTable.id, action.id)).returning();
       return { status: 200 as const, row };
     }
     if (action.fixTrackIssueId) return { status: 200 as const, row: action };
-    const [site] = action.siteId ? await tx.select({ name: sitesTable.name }).from(sitesTable).where(and(eq(sitesTable.id, action.siteId), eq(sitesTable.clientId, clientId))).limit(1) : [];
-    const [issue] = await tx.insert(fixTrackIssuesTable).values({
-      clientId, siteId: action.siteId, title: action.title, issueType: "general",
-      location: site?.name ?? "See originating module action",
-      description: [action.instruction, `Originating module: ${action.module}`, `Module action: ${action.id}`].filter(Boolean).join("\n"),
-      priority: action.severity === "urgent" ? "urgent" : action.severity === "action_required" ? "high" : "medium",
-      status: "reported", reportedBy: req.currentUser!.name, reportedDate: new Date().toISOString().slice(0, 10),
-      targetDate: action.dueDate, assignedTo: action.ownerName, assigneeUserId: action.assigneeUserId, createdBy: req.currentUser!.id,
-    }).returning();
-    await tx.insert(fixTrackIssueActivityTable).values({ clientId, issueId: issue.id, eventType: "status", status: "reported", createdBy: req.currentUser!.id });
-    const [row] = await tx.update(trackActionsTable).set({ fixTrackIssueId: issue.id, fixTrackDisposition: keptInTrack ? "parallel" : "linked", updatedAt: new Date() }).where(and(eq(trackActionsTable.id, action.id), isNull(trackActionsTable.fixTrackIssueId))).returning();
+    // Only ever at the person's choice; the action stays resolvable here (lib/trackActionFixTrack.ts).
+    const row = await raiseFixTrackJobForAction(tx, { action, clientId, userId: req.currentUser!.id, reportedBy: req.currentUser!.name });
     if (!row) return { status: 409 as const, error: "This action was linked by another user" };
     return { status: 201 as const, row };
   });
@@ -404,7 +392,6 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     }
     if (current.status === "resolved") return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
     const nextStatus = parsed.data.status ?? current.status; const filled = (v: string | null | undefined) => !!v?.trim();
-    if (nextStatus === "resolved" && current.fixTrackIssueId && current.fixTrackDisposition !== "parallel") return { status: 409 as const, error: "Resolve the linked FixTrack issue to complete this action" };
     if (nextStatus === "resolved" && (!filled(parsed.data.remedialAction ?? current.remedialAction) || !filled(parsed.data.evidenceReference ?? current.evidenceReference) || !filled(parsed.data.resolutionNotes ?? current.resolutionNotes) || !parsed.data.resolverSignature)) {
       return { status: 400 as const, error: "remedialAction, evidenceReference, resolutionNotes and a drawn signature are required to resolve an action" };
     }
@@ -468,24 +455,10 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     }
     const [row] = await tx.update(trackActionsTable).set(updates as any).where(and(eq(trackActionsTable.id, id), eq(trackActionsTable.clientId, clientId), ne(trackActionsTable.status, "resolved"))).returning();
     if (!row) return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
-    // Signing off an action in its track also finishes its automatically
-    // raised FixTrack job, unless a contractor email is mid-send.
-    if (nextStatus === "resolved" && current.fixTrackIssueId && current.fixTrackDisposition === "parallel") {
-      const [job] = await tx.update(fixTrackIssuesTable).set({
-        status: "resolved",
-        resolvedDate: sql`(now() AT TIME ZONE 'Europe/London')::date` as any,
-        resolvedByName: row.resolvedByName,
-        resolverSignature: row.resolverSignature,
-        solutionNotes: sql`coalesce(nullif(trim(${fixTrackIssuesTable.solutionNotes}), ''), ${`Completed in the originating track: ${row.resolutionNotes ?? row.remedialAction ?? ""}`.trim()})` as any,
-        updatedAt: new Date(),
-      }).where(and(
-        eq(fixTrackIssuesTable.id, current.fixTrackIssueId), eq(fixTrackIssuesTable.clientId, clientId),
-        inArray(fixTrackIssuesTable.status, ["reported", "in_progress"]),
-        or(isNull(fixTrackIssuesTable.emailRequestStatus), ne(fixTrackIssuesTable.emailRequestStatus, "sending")),
-      )).returning({ id: fixTrackIssuesTable.id });
-      if (job) await tx.insert(fixTrackIssueActivityTable).values({
-        clientId, issueId: job.id, eventType: "status", status: "resolved", createdBy: req.currentUser!.id,
-      });
+    // Signing off an action in its own track also finishes its FixTrack job,
+    // so people resolve where they work and the two stay in step.
+    if (nextStatus === "resolved" && current.fixTrackIssueId) {
+      await resolveLinkedFixTrackJob(tx, { clientId, issueId: current.fixTrackIssueId, userId: req.currentUser!.id, action: row });
     }
     if (kitchenFailure) await tx.insert(auditEventsTable).values({
       clientId, actorId: req.currentUser!.id, entityType: "track_action", entityId: id,

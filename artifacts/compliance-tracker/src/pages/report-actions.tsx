@@ -63,7 +63,7 @@ const blankAction = (siteId: number | null): Draft => withKey({
   assignedUserId: null, reportReference: null, draftSource: "manual",
 });
 const stripKey = ({ key: _key, ...action }: Draft): InspectionReportDraftAction => ({
-  ...action, title: action.title.trim(), instruction: action.instruction?.trim() || null, reportReference: action.reportReference?.trim() || null,
+  ...action, sendToFixTrack: action.sendToFixTrack === true && action.module !== "fix" && action.module !== "green", title: action.title.trim(), instruction: action.instruction?.trim() || null, reportReference: action.reportReference?.trim() || null,
 });
 
 function formatDate(value: string | null | undefined) {
@@ -207,6 +207,8 @@ function DraftRow({ action, index, options, onChange, onRemove }: {
 }) {
   const id = `draft-${action.key}`;
   const set = (patch: Partial<Draft>) => onChange({ ...action, ...patch });
+  // Never automatic: the person chooses, per action, whether it becomes a FixTrack job too.
+  const canSendToFixTrack = options.modules.some((module) => module.key === "fix") && action.module !== "fix" && action.module !== "green";
   return (
     <div className="rounded-sm border bg-white p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
@@ -250,9 +252,21 @@ function DraftRow({ action, index, options, onChange, onRemove }: {
           <Label htmlFor={`${id}-track`}>Track</Label>
           <Select value={action.module} onValueChange={(value) => set({ module: value })}>
             <SelectTrigger id={`${id}-track`}><SelectValue /></SelectTrigger>
-            <SelectContent>{sortByLabel(options.modules, (module) => module.label).map((module) => <SelectItem key={module.key} value={module.key}>{module.label}</SelectItem>)}</SelectContent>
+            <SelectContent>{sortByLabel(options.modules.filter((module) => module.key !== "fix" || action.module === "fix"), (module) => module.label).map((module) => <SelectItem key={module.key} value={module.key}>{module.label}</SelectItem>)}</SelectContent>
           </Select>
         </div>
+        {canSendToFixTrack && (
+          <div className="space-y-1.5">
+            <Label htmlFor={`${id}-fixtrack`}>Send to FixTrack?</Label>
+            <Select value={action.sendToFixTrack ? "yes" : "no"} onValueChange={(value) => set({ sendToFixTrack: value === "yes" })}>
+              <SelectTrigger id={`${id}-fixtrack`} data-testid={`select-send-fixtrack-${index + 1}`}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="no">No, keep it in the track</SelectItem>
+                <SelectItem value="yes">Yes, it needs a repair or contractor</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <div className="space-y-1.5">
           <Label htmlFor={`${id}-site`}>Site</Label>
           <Select value={action.siteId ? String(action.siteId) : WHOLE_BUSINESS} onValueChange={(value) => set({ siteId: value === WHOLE_BUSINESS ? null : Number(value) })}>
@@ -430,11 +444,15 @@ function ReportDetail({ reportId, options, focusActionId, onRemoved }: {
     setDirty(false);
     setChecked(false);
     const emailed: string[] = result.emailedTo ?? [];
+    const sentToFixTrack = (result.actions as Array<{ fixTrackIssueId?: number | null }>).filter((action) => action.fixTrackIssueId).length;
     toast({
       title: `${actionsText(result.actions.length)} created`,
-      description: emailed.length
-        ? `The action plan was emailed to ${emailed.join(", ")}, with a button to assign each action.`
-        : "Each one is in its track's action list.",
+      description: [
+        emailed.length
+          ? `The action plan was emailed to ${emailed.join(", ")}, with a button to assign each action.`
+          : "Each one is in its track's action list.",
+        sentToFixTrack ? `${sentToFixTrack} also sent to FixTrack, as you chose.` : null,
+      ].filter(Boolean).join(" "),
     });
     refresh();
     void queryClient.invalidateQueries();

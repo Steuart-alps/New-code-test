@@ -13962,6 +13962,9 @@ components:
         assignedUserId: { type: integer, nullable: true }
         reportReference: { type: string, nullable: true }
         draftSource: { type: string, enum: [ai, manual] }
+        sendToFixTrack:
+          type: boolean
+          description: Raise a FixTrack job for this action when the list is confirmed. Only ever the person's choice; absent means No.
       required: [title, module, severity]
 
     InspectionReportDraftRequest:

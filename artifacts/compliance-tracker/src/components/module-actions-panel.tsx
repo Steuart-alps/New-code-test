@@ -21,6 +21,10 @@ import { PendingMediaPicker } from "@/components/pending-media-picker";
 import { cn } from "@/lib/utils";
 import { AssigneeField, assigneeFields, type AssigneeValue } from "@/components/assignee-field";
 import { RecordSiteField } from "@/components/record-site-field";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 type Severity = "monitor" | "action_required" | "urgent";
 type ActionStatus = "open" | "in_progress" | "resolved";
@@ -110,6 +114,8 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
   const [mediaStatus, setMediaStatus] = useState<string | null>(null);
   const [resolution, setResolution] = useState<Record<string, ResolutionValues>>({});
   const [pendingSignature, setPendingSignature] = useState<{ action: TrackAction; values: ResolutionValues } | null>(null);
+  // "Send to FixTrack" always asks first: a FixTrack job is only ever the person's choice.
+  const [confirmFixTrack, setConfirmFixTrack] = useState<TrackAction | null>(null);
 
   const kitchenManager = user?.role === "client_admin" || user?.role === "consultant";
   const canMutate = user?.role !== "client_viewer" && !!user && (moduleKey !== "kitchen" || kitchenManager);
@@ -300,8 +306,8 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
           <div className="space-y-3" aria-live="polite">
             {loading ? <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading actions…</div> : unresolved.length === 0 ? <p className="rounded-sm border border-dashed py-4 text-center text-sm text-muted-foreground">No unresolved actions for this module.</p> : unresolved.map(action => (
               <div key={action.id}>
-                <ActionRow action={action} sites={sites} siteName={sites.find(site => site.id === action.siteId)?.name} canMutate={canMutate} submitting={submitting} resolution={resolution[String(action.id)]} onResolutionChange={value => setResolution({ ...resolution, [String(action.id)]: value })} onMediaChange={mediaUrls => setActions(current => current.map(item => item.id === action.id ? { ...item, mediaUrls } : item))} onStart={() => updateAction(action, { status: "in_progress" })} onUpdate={patch => updateAction(action, patch)} onResolve={values => action.fixTrackIssueId && action.fixTrackDisposition !== "parallel" ? toast({ title: "Complete this action in FixTrack", description: `Resolve FixTrack issue #${action.fixTrackIssueId} to update this module automatically.` }) : setPendingSignature({ action, values })} />
-                {moduleKey !== "green" && <FixTrackChoice action={action} canMutate={canMutate} submitting={submitting} onDecision={create => decideFixTrack(action, create)} />}
+                <ActionRow action={action} sites={sites} siteName={sites.find(site => site.id === action.siteId)?.name} canMutate={canMutate} submitting={submitting} resolution={resolution[String(action.id)]} onResolutionChange={value => setResolution({ ...resolution, [String(action.id)]: value })} onMediaChange={mediaUrls => setActions(current => current.map(item => item.id === action.id ? { ...item, mediaUrls } : item))} onStart={() => updateAction(action, { status: "in_progress" })} onUpdate={patch => updateAction(action, patch)} onResolve={values => setPendingSignature({ action, values })} />
+                {moduleKey !== "green" && <FixTrackChoice action={action} canMutate={canMutate} submitting={submitting} onDecision={create => create ? setConfirmFixTrack(action) : decideFixTrack(action, false)} />}
               </div>
             ))}
           </div>
@@ -315,6 +321,20 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
          sites={sites}
          canMutate={canMutate}
        />
+      <AlertDialog open={!!confirmFixTrack} onOpenChange={open => { if (!open) setConfirmFixTrack(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Send to FixTrack?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This makes a FixTrack job for &ldquo;{confirmFixTrack?.title}&rdquo;, for a repair or a contractor. The action stays here too: resolving it here or in FixTrack completes both. Only send it if it needs a repair or a contractor.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>No, keep it here</AlertDialogCancel>
+            <AlertDialogAction data-testid="button-confirm-send-fixtrack" onClick={() => { const action = confirmFixTrack; setConfirmFixTrack(null); if (action) void decideFixTrack(action, true); }}>Yes, send to FixTrack</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <DrawnSignatureDialog open={!!pendingSignature} busy={submitting} onCancel={() => setPendingSignature(null)} onConfirm={async resolverSignature => {
         if (!pendingSignature) return;
         await updateAction(pendingSignature.action, { status: "resolved", ...pendingSignature.values, resolverSignature });
@@ -329,9 +349,9 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
 
 function FixTrackChoice({ action, canMutate, submitting, onDecision }: { action: TrackAction; canMutate: boolean; submitting: boolean; onDecision: (create: boolean) => void }) {
   if (action.fixTrackIssueId && action.fixTrackDisposition === "parallel") return <div className="-mt-3 rounded-b-sm border-x border-b bg-blue-50 px-4 pb-3 pt-2 text-xs text-blue-900">Repair work is tracked as <a className="font-semibold underline" href={`/fix-track/${action.fixTrackIssueId}`}>FixTrack issue #{action.fixTrackIssueId}</a>. A manager still verifies and resolves this action here, which also resolves the issue.</div>;
-  if (action.fixTrackIssueId) return <div className="-mt-3 rounded-b-sm border-x border-b bg-blue-50 px-4 pb-3 pt-2 text-xs text-blue-900">Linked to <a className="font-semibold underline" href={`/fix-track/${action.fixTrackIssueId}`}>FixTrack issue #{action.fixTrackIssueId}</a>. Resolving it will complete this action.</div>;
+  if (action.fixTrackIssueId) return <div className="-mt-3 rounded-b-sm border-x border-b bg-blue-50 px-4 pb-3 pt-2 text-xs text-blue-900">Also in <a className="font-semibold underline" href={`/fix-track/${action.fixTrackIssueId}`}>FixTrack issue #{action.fixTrackIssueId}</a>. Resolve it here or in FixTrack: either one completes both.</div>;
   if (!canMutate) return null;
-  return <div className="-mt-3 flex flex-wrap items-center gap-2 rounded-b-sm border-x border-b bg-slate-50 px-4 pb-3 pt-2 text-xs"><span>{action.fixTrackDisposition === "not_needed" ? "Kept in this track. Add it to FixTrack now?" : "Does this need a repair or a contractor?"}</span><Button type="button" size="sm" variant="outline" className="h-7" disabled={submitting} onClick={() => onDecision(true)}>Send to FixTrack</Button>{action.fixTrackDisposition !== "not_needed" && <Button type="button" size="sm" variant="ghost" className="h-7" disabled={submitting} onClick={() => onDecision(false)}>No</Button>}</div>;
+  return <div className="-mt-3 flex flex-wrap items-center gap-2 rounded-b-sm border-x border-b bg-slate-50 px-4 pb-3 pt-2 text-xs"><span>{action.fixTrackDisposition === "not_needed" ? "Kept in this track. Send to FixTrack?" : "Send to FixTrack? Only if it needs a repair or a contractor."}</span><Button type="button" size="sm" variant="outline" className="h-7" disabled={submitting} onClick={() => onDecision(true)}>Send to FixTrack</Button>{action.fixTrackDisposition !== "not_needed" && <Button type="button" size="sm" variant="ghost" className="h-7" disabled={submitting} onClick={() => onDecision(false)}>No</Button>}</div>;
 }
 
 function ActionRow({ action, sites, siteName, canMutate, submitting, resolution, onResolutionChange, onMediaChange, onStart, onUpdate, onResolve }: { action: TrackAction; sites: Site[]; siteName?: string; canMutate: boolean; submitting: boolean; resolution?: { remedialAction: string; evidenceReference: string; resolutionNotes: string }; onResolutionChange?: (value: { remedialAction: string; evidenceReference: string; resolutionNotes: string }) => void; onMediaChange?: (mediaUrls: string[]) => void; onStart?: () => void; onUpdate?: (patch: Record<string, unknown>) => void; onResolve?: (value: { remedialAction: string; evidenceReference: string; resolutionNotes: string }) => void }) {

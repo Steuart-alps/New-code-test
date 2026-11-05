@@ -8671,7 +8671,8 @@ export const CreateInspectionReportResponse = zod.object({
   "dueDate": zod.date().nullish(),
   "assignedUserId": zod.number().nullish(),
   "reportReference": zod.string().nullish(),
-  "draftSource": zod.enum(['ai', 'manual']).optional()
+  "draftSource": zod.enum(['ai', 'manual']).optional(),
+  "sendToFixTrack": zod.boolean().optional().describe('Raise a FixTrack job for this action when the list is confirmed. Only ever the person\'s choice; absent means No.')
 })),
   "aiStatus": zod.string(),
   "aiSummary": zod.string().nullable(),
@@ -8708,7 +8709,8 @@ export const GetInspectionReportResponse = zod.object({
   "dueDate": zod.date().nullish(),
   "assignedUserId": zod.number().nullish(),
   "reportReference": zod.string().nullish(),
-  "draftSource": zod.enum(['ai', 'manual']).optional()
+  "draftSource": zod.enum(['ai', 'manual']).optional(),
+  "sendToFixTrack": zod.boolean().optional().describe('Raise a FixTrack job for this action when the list is confirmed. Only ever the person\'s choice; absent means No.')
 })),
   "aiStatus": zod.string(),
   "aiSummary": zod.string().nullable(),
@@ -8770,7 +8772,8 @@ export const ReadInspectionReportResponse = zod.object({
   "dueDate": zod.date().nullish(),
   "assignedUserId": zod.number().nullish(),
   "reportReference": zod.string().nullish(),
-  "draftSource": zod.enum(['ai', 'manual']).optional()
+  "draftSource": zod.enum(['ai', 'manual']).optional(),
+  "sendToFixTrack": zod.boolean().optional().describe('Raise a FixTrack job for this action when the list is confirmed. Only ever the person\'s choice; absent means No.')
 }))
 })
 
@@ -8792,7 +8795,8 @@ export const SaveInspectionReportDraftBody = zod.object({
   "dueDate": zod.date().nullish(),
   "assignedUserId": zod.number().nullish(),
   "reportReference": zod.string().nullish(),
-  "draftSource": zod.enum(['ai', 'manual']).optional()
+  "draftSource": zod.enum(['ai', 'manual']).optional(),
+  "sendToFixTrack": zod.boolean().optional().describe('Raise a FixTrack job for this action when the list is confirmed. Only ever the person\'s choice; absent means No.')
 }))
 })
 
@@ -8806,7 +8810,8 @@ export const SaveInspectionReportDraftResponse = zod.object({
   "dueDate": zod.date().nullish(),
   "assignedUserId": zod.number().nullish(),
   "reportReference": zod.string().nullish(),
-  "draftSource": zod.enum(['ai', 'manual']).optional()
+  "draftSource": zod.enum(['ai', 'manual']).optional(),
+  "sendToFixTrack": zod.boolean().optional().describe('Raise a FixTrack job for this action when the list is confirmed. Only ever the person\'s choice; absent means No.')
 }))
 })
 
@@ -8828,7 +8833,8 @@ export const ConfirmInspectionReportActionsBody = zod.object({
   "dueDate": zod.date().nullish(),
   "assignedUserId": zod.number().nullish(),
   "reportReference": zod.string().nullish(),
-  "draftSource": zod.enum(['ai', 'manual']).optional()
+  "draftSource": zod.enum(['ai', 'manual']).optional(),
+  "sendToFixTrack": zod.boolean().optional().describe('Raise a FixTrack job for this action when the list is confirmed. Only ever the person\'s choice; absent means No.')
 }))
 })
 
