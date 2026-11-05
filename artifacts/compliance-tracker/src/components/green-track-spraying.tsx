@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import {
@@ -554,6 +555,17 @@ export function GreenStockTab({ q, canAdmin, onRecordSpraying }: {
 
   const shown = products.filter(p => (showArchived || p.active)
     && (p.name.toLowerCase().includes(q) || (p.mappNumber ?? "").toLowerCase().includes(q) || (p.supplier ?? "").toLowerCase().includes(q)));
+  const P_TH = "text-left font-medium px-3 py-2";
+  const productsTable = useListTable(shown, [
+    { key: "product", label: "Product", className: P_TH, value: p => p.name, sort: "text", filter: "search",
+      filterValue: p => `${p.name} ${p.mappNumber ?? ""} ${p.activeIngredient ?? ""}` },
+    { key: "type", label: "Type", className: `${P_TH} hidden md:table-cell`, value: p => PRODUCT_CATEGORY_SHORT[p.category] ?? p.category, sort: "text", filter: "choice" },
+    { key: "stock", label: "In stock", className: "text-right font-medium px-3 py-2", value: p => p.stockOnHand, sort: "number",
+      filter: "choice", filterValue: p => (p.stockOnHand < 0 || p.lowStock ? "Low stock" : "In stock") },
+    { key: "reorder", label: "Re-order at", className: "text-right font-medium px-3 py-2 hidden sm:table-cell", value: p => p.reorderLevel, sort: "number" },
+    { key: "delivery", label: "Last delivery", className: `${P_TH} hidden lg:table-cell`, value: p => p.lastDeliveryDate, sort: "date" },
+    { key: "actions", label: "", className: "w-64" },
+  ] satisfies ListColumn<GreenProduct>[]);
   const archivedCount = products.filter(p => !p.active).length;
 
   const openMovement = (kind: MovementKind, productId?: number) => {
@@ -619,18 +631,10 @@ export function GreenStockTab({ q, canAdmin, onRecordSpraying }: {
       ) : (
         <div className="overflow-x-auto border border-border rounded-sm">
           <table className="w-full text-sm" data-testid="table-products">
-            <thead className="bg-muted/40 border-b border-border">
-              <tr className="text-muted-foreground text-xs">
-                <th className="text-left font-medium px-3 py-2">Product</th>
-                <th className="text-left font-medium px-3 py-2 hidden md:table-cell">Type</th>
-                <th className="text-right font-medium px-3 py-2">In stock</th>
-                <th className="text-right font-medium px-3 py-2 hidden sm:table-cell">Re-order at</th>
-                <th className="text-left font-medium px-3 py-2 hidden lg:table-cell">Last delivery</th>
-                <th className="w-64" />
-              </tr>
-            </thead>
+            <thead className="bg-muted/40 border-b border-border"><tr className="text-muted-foreground text-xs"><ListTableHeadings table={productsTable} /></tr></thead>
             <tbody className="divide-y divide-border">
-              {shown.map(p => (
+              <ListTableNoMatches table={productsTable} colSpan={6} />
+              {productsTable.rows.map(p => (
                 <tr key={p.id} className={cn(!p.active && "opacity-60")} data-testid={`product-row-${p.id}`}>
                   <td className="px-3 py-2">
                     <p className="font-medium">{p.name}{!p.active && <Badge variant="outline" className="ml-2 text-[10px]">Archived</Badge>}</p>
@@ -1050,6 +1054,16 @@ export function GreenSprayingTab({ q, canAdmin, machines, openNew, onOpenNewHand
     || areaText(a).toLowerCase().includes(q)
     || a.products.some(p => p.productName.toLowerCase().includes(q) || (p.mappNumber ?? "").toLowerCase().includes(q)),
   ), [applications, q]);
+  const A_TH = "text-left font-medium px-3 py-2";
+  const applicationsTable = useListTable(shown, [
+    { key: "date", label: "Date", className: A_TH, value: a => `${a.applicationDate} ${a.startTime ?? ""}`, sort: "date", filter: "date",
+      moreFilters: [{ key: "method", label: "Method", value: a => METHOD_LABELS[a.method] ?? a.method }] },
+    { key: "where", label: "Where", className: A_TH, value: a => areaText(a), sort: "text", filter: "search" },
+    { key: "products", label: "Products", className: A_TH, value: a => a.products.map(p => p.productName).join(", "), sort: "text", filter: "search" },
+    { key: "operator", label: "Operator", className: `${A_TH} hidden md:table-cell`, value: a => a.operatorName, sort: "text", filter: "choice" },
+    { key: "reason", label: "Reason", className: `${A_TH} hidden lg:table-cell`, value: a => a.reason, sort: "text", filter: "search" },
+    { key: "actions", label: "", className: "w-16" },
+  ] satisfies ListColumn<GreenApplication>[]);
 
   const remove = async () => {
     if (!deleting) return;
@@ -1089,18 +1103,10 @@ export function GreenSprayingTab({ q, canAdmin, machines, openNew, onOpenNewHand
       ) : (
         <div className="overflow-x-auto border border-border rounded-sm">
           <table className="w-full text-sm" data-testid="table-applications">
-            <thead className="bg-muted/40 border-b border-border">
-              <tr className="text-muted-foreground text-xs">
-                <th className="text-left font-medium px-3 py-2">Date</th>
-                <th className="text-left font-medium px-3 py-2">Where</th>
-                <th className="text-left font-medium px-3 py-2">Products</th>
-                <th className="text-left font-medium px-3 py-2 hidden md:table-cell">Operator</th>
-                <th className="text-left font-medium px-3 py-2 hidden lg:table-cell">Reason</th>
-                <th className="w-16" />
-              </tr>
-            </thead>
+            <thead className="bg-muted/40 border-b border-border"><tr className="text-muted-foreground text-xs"><ListTableHeadings table={applicationsTable} /></tr></thead>
             <tbody className="divide-y divide-border">
-              {shown.map(a => (
+              <ListTableNoMatches table={applicationsTable} colSpan={6} />
+              {applicationsTable.rows.map(a => (
                 <tr key={a.id} data-testid={`application-row-${a.id}`}>
                   <td className="px-3 py-2 whitespace-nowrap align-top">
                     <p className="tabular-nums">{fmt(a.applicationDate)}</p>

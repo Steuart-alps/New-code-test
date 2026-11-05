@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { ListTableHeadings, ListTableNoMatches, useListTable, type ListColumn } from "@/components/list-table";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
@@ -309,6 +310,17 @@ export function DocumentLibrary({ categories, emptyText }: {
       d.name.toLowerCase().includes(search.toLowerCase()) ||
       (d.description?.toLowerCase().includes(search.toLowerCase()) ?? false),
   );
+  const D_TH = "text-left px-5 py-3 text-sm font-medium text-muted-foreground";
+  const docsTable = useListTable(filtered, [
+    { key: "name", label: "Document", className: D_TH, value: d => d.name, sort: "text", filter: "search", filterValue: d => `${d.name} ${d.description ?? ""}` },
+    ...(categories && categories.length > 1
+      ? [{ key: "type", label: "Type", className: `${D_TH} hidden sm:table-cell`, value: (d: Doc) => categoryLabel(d.category), sort: "text", filter: "choice" } satisfies ListColumn<Doc>]
+      : []),
+    { key: "by", label: "Uploaded by", className: `${D_TH} hidden md:table-cell`, value: d => d.uploadedByName, sort: "text", filter: "choice" },
+    { key: "date", label: "Date", className: `${D_TH} hidden sm:table-cell`, value: d => d.createdAt, sort: "date", filter: "date" },
+    { key: "size", label: "Size", className: `${D_TH} hidden sm:table-cell`, value: d => d.fileSize, sort: ["Smallest first", "Largest first"] },
+    { key: "actions", label: "", className: "px-3 py-3 w-10" },
+  ] satisfies ListColumn<Doc>[]);
 
   async function handleDelete(id: number) {
     if (!confirm("Delete this document? This cannot be undone.")) return;
@@ -389,18 +401,10 @@ export function DocumentLibrary({ categories, emptyText }: {
         ) : (
           <div className="bg-card border border-border rounded-xl overflow-hidden">
             <table className="w-full">
-              <thead className="bg-muted/40 border-b border-border">
-                <tr>
-                  <th className="text-left px-5 py-3 text-sm font-medium text-muted-foreground">Document</th>
-                  {categories && categories.length > 1 && <th className="text-left px-5 py-3 text-sm font-medium text-muted-foreground hidden sm:table-cell">Type</th>}
-                  <th className="text-left px-5 py-3 text-sm font-medium text-muted-foreground hidden md:table-cell">Uploaded by</th>
-                  <th className="text-left px-5 py-3 text-sm font-medium text-muted-foreground hidden sm:table-cell">Date</th>
-                  <th className="text-left px-5 py-3 text-sm font-medium text-muted-foreground hidden sm:table-cell">Size</th>
-                  <th className="px-3 py-3 w-10" />
-                </tr>
-              </thead>
+              <thead className="bg-muted/40 border-b border-border"><tr><ListTableHeadings table={docsTable} /></tr></thead>
               <tbody className="divide-y divide-border">
-                {filtered.map((doc) => (
+                <ListTableNoMatches table={docsTable} colSpan={docsTable.columns.length} />
+                {docsTable.rows.map((doc) => (
                   <tr key={doc.id} className="hover:bg-muted/20 transition-colors group">
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-3">
