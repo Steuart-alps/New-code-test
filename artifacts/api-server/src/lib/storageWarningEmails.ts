@@ -1,7 +1,9 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { logger } from "./logger";
-import { escapeHtml, getPublicAppUrl, sendSystemEmail } from "./email";
+import {
+  escapeHtml, getPublicAppUrl, sendSystemEmail, renderEmailLayout, emailHeadline, emailPanel, emailButtonRow, EMAIL_SIGN_OFF,
+} from "./email";
 import { claimEmailDelivery, emailDeliveryIdempotencyKey, settleEmailDelivery } from "./emailDeliveryClaims";
 import {
   formatStorageGb,
@@ -76,19 +78,17 @@ export function buildStorageWarningEmail(opts: {
       ? `Nothing has been deleted. Your storage is ${capacity}; when it is full we will add 10 GB automatically (£1 a month), as set in Settings, and email you when we do.`
       : `Nothing has been deleted. Your storage is ${capacity}; when it is full, new uploads will stop until more storage is added.`;
   const subject = `${opts.companyName} has reached its ComplyTrack storage warning level`;
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #1e293b;">Storage warning level reached</h2>
-      <p>Hi ${escapeHtml(opts.recipientName)},</p>
+  const html = renderEmailLayout({
+    subtitle: "File storage",
+    bodyHtml: `
+      <p style="margin:0 0 16px;">Hi ${escapeHtml(opts.recipientName)},</p>
+      ${emailHeadline("Storage warning level reached")}
       <p><strong>${escapeHtml(opts.companyName)}</strong> is now storing about <strong>${used}</strong> of files in ComplyTrack, past the warning level of <strong>${level}</strong>.</p>
       <p>${escapeHtml(whatNext)}</p>
-      <div style="background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
-        <p style="margin: 0 0 16px; color: #475569; font-size: 14px;">If you need more room, buy extra storage in the File Storage section of Settings. You can also raise the warning level there.</p>
-        <a href="${escapeHtml(opts.storageUrl)}" style="display: inline-block; background: #2563eb; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Manage storage</a>
-      </div>
-      <p>Best regards,<br><strong>ComplyTrack</strong></p>
-    </div>
-  `;
+      ${emailPanel(`<p style="margin:0;color:#475569;">If you need more room, buy extra storage in the File Storage section of Settings. You can also raise the warning level there.</p>`)}
+      ${emailButtonRow(escapeHtml(opts.storageUrl), "Manage storage")}
+      ${EMAIL_SIGN_OFF}`,
+  });
   const text = `
 Storage warning level reached
 

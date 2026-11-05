@@ -219,6 +219,24 @@ export function emailButton(href: string, label: string): string {
   return `<a href="${href}" style="display:inline-block;background:${EMAIL_BRAND.button};color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:10px;font-size:16px;font-weight:700;">${label}</a>`;
 }
 
+/** The bold line that opens a message, under the greeting. `html` is escaped by the caller. */
+export function emailHeadline(html: string): string {
+  return `<p style="margin:0 0 12px;font-size:19px;font-weight:700;color:#0f172a;">${html}</p>`;
+}
+
+/** A soft grey box for the part of a message the reader must not miss. */
+export function emailPanel(html: string): string {
+  return `<div style="background:#f8fafc;border-radius:12px;padding:20px 24px;margin:24px 0;">${html}</div>`;
+}
+
+/** The shared button, centred on its own line. */
+export function emailButtonRow(href: string, label: string): string {
+  return `<div style="text-align:center;margin:28px 0;">${emailButton(href, label)}</div>`;
+}
+
+/** Closing line used by every message. */
+export const EMAIL_SIGN_OFF = `<p style="margin:24px 0 0;">Best regards,<br><strong>ComplyTrack</strong></p>`;
+
 /** Smallest text size in an email body; the main text is 16px. */
 const MIN_BODY_FONT_PX = 13;
 

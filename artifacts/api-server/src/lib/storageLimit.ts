@@ -34,7 +34,7 @@ import {
 import { readStorageUsageSnapshot } from "./storageUsageSnapshot";
 import { roundUpToStoragePacks, STORAGE_PACK_GIB, STORAGE_PACK_PRICE_PENCE } from "./storagePricing";
 import { randomUUID } from "crypto";
-import { emailButton, escapeHtml, getPublicAppUrl, sendSystemEmail } from "./email";
+import { emailButton, emailHeadline, EMAIL_SIGN_OFF, escapeHtml, getPublicAppUrl, sendSystemEmail } from "./email";
 import { claimEmailDelivery, emailDeliveryIdempotencyKey, settleEmailDelivery } from "./emailDeliveryClaims";
 import { logger as defaultLogger } from "./logger";
 import { STORAGE_AUTO_TOP_UP_SETTING, StorageFullError } from "./storageFull";
@@ -300,11 +300,11 @@ export function buildStorageLimitEmail(opts: {
     },
   }[opts.kind];
   const html = `
-    <h2 style="color: #1e293b; margin-top: 0;">${copy.heading}</h2>
-    <p>Hi ${escapeHtml(opts.recipientName)},</p>
+    <p style="margin:0 0 16px;">Hi ${escapeHtml(opts.recipientName)},</p>
+    ${emailHeadline(copy.heading)}
     ${copy.lines.map((line) => `<p>${line}</p>`).join("\n    ")}
     <p style="margin: 24px 0; text-align: center;">${emailButton(escapeHtml(opts.storageUrl), copy.button)}</p>
-    <p>Best regards,<br><strong>ComplyTrack</strong></p>`;
+    ${EMAIL_SIGN_OFF}`;
   const text = [
     copy.heading,
     "",
