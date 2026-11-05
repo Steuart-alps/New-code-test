@@ -18,6 +18,8 @@ android/
 *.p12
 *.key
 *.mobileprovision
+# EAS local signing credentials (written by the TestFlight workflow)
+credentials.json
 
 # Metro
 .metro-health-check*
