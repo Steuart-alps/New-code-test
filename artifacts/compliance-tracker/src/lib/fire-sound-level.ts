@@ -59,24 +59,43 @@ export interface PhoneMeasurement {
   db: number;
   /** The microphone hit its limit, so the real level may be higher. */
   maxedOut: boolean;
+  /** How long it actually listened (less than asked when stopped early). */
+  seconds: number;
 }
 
+/** How long a measurement listens for, unless stopped early. */
+export const PHONE_MEASURE_SECONDS = 10;
+
 /**
- * Listen for `seconds` and return the average (energy-averaged) level. Low
- * rumble (ventilation, traffic) is filtered out, roughly as a sound meter's
- * A-weighting does; alarm sounders are well above it. `onLevel` gets the
- * level about ten times a second while listening.
+ * Listen for `seconds`, stop on its own and return the average
+ * (energy-averaged) level. Low rumble (ventilation, traffic) is filtered out,
+ * roughly as a sound meter's A-weighting does; alarm sounders are well above
+ * it. `onLevel` gets the level and the seconds left about ten times a second.
+ * Aborting `signal` stops early and still returns the average so far, once
+ * there is at least a second of it.
+ *
+ * Call this straight from a button press: the audio is started before the
+ * microphone prompt, because Safari on iPhone only lets sound start during a
+ * tap and otherwise leaves it silent, so no reading ever arrived.
  */
 export async function measureWithPhone(
-  { seconds = 5, onLevel, signal }: { seconds?: number; onLevel?: (db: number) => void; signal?: AbortSignal } = {},
+  { seconds = PHONE_MEASURE_SECONDS, onLevel, signal }: {
+    seconds?: number; onLevel?: (db: number, secondsLeft: number) => void; signal?: AbortSignal;
+  } = {},
 ): Promise<PhoneMeasurement> {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-  });
   const Context = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
   const context = new Context();
+  // Started inside the tap (no await before this line), finished below.
+  const resuming = context.state === "suspended" ? context.resume().catch(() => undefined) : Promise.resolve();
+  let stream: MediaStream | null = null;
   try {
-    if (context.state === "suspended") await context.resume();
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
+    await Promise.race([resuming, new Promise(resolve => setTimeout(resolve, 2000))]);
+    if (context.state !== "running") {
+      throw new DOMException("The phone didn't start listening", "NotReadableError");
+    }
     const source = context.createMediaStreamSource(stream);
     const rumble = context.createBiquadFilter();
     rumble.type = "highpass";
@@ -95,10 +114,11 @@ export async function measureWithPhone(
     let energy = 0;
     let blocks = 0;
     let maxedOut = false;
-    const end = Date.now() + seconds * 1000;
+    const start = Date.now();
+    const end = start + seconds * 1000;
     while (Date.now() < end) {
-      if (signal?.aborted) throw new DOMException("Stopped", "AbortError");
       await new Promise(resolve => setTimeout(resolve, 100));
+      if (signal?.aborted) break;
       analyser.getFloatTimeDomainData(samples);
       raw.getFloatTimeDomainData(rawSamples);
       let sum = 0;
@@ -107,11 +127,13 @@ export async function measureWithPhone(
       const meanSquare = sum / samples.length;
       energy += meanSquare;
       blocks += 1;
-      onLevel?.(toDb(meanSquare));
+      onLevel?.(toDb(meanSquare), Math.max(0, Math.ceil((end - Date.now()) / 1000)));
     }
-    return { db: Math.round(toDb(energy / Math.max(blocks, 1))), maxedOut };
+    const listened = (Date.now() - start) / 1000;
+    if (signal?.aborted && (blocks < 10 || listened < 1)) throw new DOMException("Stopped", "AbortError");
+    return { db: Math.round(toDb(energy / Math.max(blocks, 1))), maxedOut, seconds: Math.min(seconds, Math.round(listened)) };
   } finally {
-    stream.getTracks().forEach(track => track.stop());
+    stream?.getTracks().forEach(track => track.stop());
     void context.close();
   }
 }
