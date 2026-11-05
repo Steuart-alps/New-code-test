@@ -33,7 +33,10 @@ const count = (html, needle) => html.split(needle).length - 1;
 function assertBranded(html, label) {
   assert.equal(count(html, MARKER), 1, `${label}: one layout`);
   assert.equal(count(html, "<html"), 1, `${label}: one HTML document`);
-  assert.match(html, /🛡️ ComplyTrack/, `${label}: ComplyTrack header`);
+  assert.match(html, />ComplyTrack<\/div>/, `${label}: ComplyTrack header`);
+  assert.match(html, /by ALPS Consultancy/, `${label}: "by ALPS Consultancy" under the name`);
+  assert.doesNotMatch(html, /🛡/, `${label}: no shield emoji`);
+  assert.doesNotMatch(html, /#2563eb/i, `${label}: no bright blue, the website navy instead`);
   assert.match(html, /src="https:\/\/app\.example\.test\/email-assets\/alps-logo\.png"/, `${label}: ALPS logo from the site`);
   assert.match(html, /alt="ALPS Consultancy"/, `${label}: logo has a text alternative`);
   assert.match(html, /ALPS Consulting Ltd t\/as ALPS Consultancy/, `${label}: legal name in the footer`);
@@ -74,7 +77,7 @@ assert.equal(lib.applyEmailLayout(reminder), reminder, "check reminder sent as b
 assert.match(reminder, /Safety Check Reminders/);
 assert.match(reminder, /2 days overdue/, "an overdue check reads as overdue, not as due later");
 assert.match(reminder, /You are receiving this as an account manager\./);
-assert.match(reminder, /<a href="https:\/\/app\.example\.test" style="display:inline-block;background:#2563eb;/, "blue button");
+assert.match(reminder, /<a href="https:\/\/app\.example\.test" style="display:inline-block;background:#162D42;/, "navy button");
 
 // The same-day alert lists its items in the reminder email's table, with a badge each.
 const urgent = lib.buildUrgentAlertEmail("Red Lion <Ltd>", [
@@ -88,7 +91,7 @@ assert.match(urgent.html, /Hello Ann,/);
 assert.match(urgent.html, /2 items need action today at Red Lion &lt;Ltd&gt;\./, "business name escaped");
 assert.match(urgent.html, /<table[\s\S]*Fire risk assessment[\s\S]*>Critical<\/span>[\s\S]*Dripping tap[\s\S]*New FixTrack issue · Bar[\s\S]*>New<\/span>/, "items with badges in a table");
 assert.match(urgent.html, /href="https:\/\/app\.example\.test\/fix-track\/2"/, "each item links to it");
-assert.match(urgent.html, /style="display:inline-block;background:#2563eb;[^"]*font-size:16px;font-weight:700;">Open ComplyTrack/, "blue button");
+assert.match(urgent.html, /style="display:inline-block;background:#162D42;[^"]*font-size:16px;font-weight:700;">Open ComplyTrack/, "navy button");
 
 // Business text in subtitles and notes is escaped by the caller; the layout adds none.
 const named = lib.renderEmailLayout({ bodyHtml: "<p>Hi</p>", subtitle: "SafeTrack", footerNote: "Sent on behalf of A &amp; B." });

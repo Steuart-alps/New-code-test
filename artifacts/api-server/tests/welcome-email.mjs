@@ -155,7 +155,7 @@ async function main() {
     check(
       "the resent email has the same branded layout as the welcome email",
       /<h2[^>]*>Verify your ComplyTrack email address<\/h2>/.test(resent?.html ?? "")
-        && /<a href="[^"]+verify-email\?token=[0-9a-f]{64}" style="background: #2563eb/.test(resent?.html ?? "")
+        && /<a href="[^"]+verify-email\?token=[0-9a-f]{64}" style="background: #162D42/.test(resent?.html ?? "")
         && /<strong>ComplyTrack<\/strong>/.test(resent?.html ?? ""),
       resent?.html,
     );
