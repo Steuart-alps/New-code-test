@@ -11,6 +11,7 @@ import { getAiStatus } from "../lib/aiAllowance";
 import { escapeHtml, getPublicAppUrl, sendSystemEmail } from "../lib/email";
 import { BUSINESS_TYPES } from "./auth";
 import { findLiveSubscription } from "../lib/billing";
+import { PICKED_MODULES_SETTING, getPickedModules, parsePickedModules as parsePicked } from "../lib/pickedModules";
 import { SETUP_ASSIST_SETTING, SETUP_SERVICE_FEE, SETUP_SERVICE_PAID_SETTING } from "../lib/setupService";
 
 // First-run setup wizard (web /setup): business type and nation, first site
@@ -23,7 +24,6 @@ import { SETUP_ASSIST_SETTING, SETUP_SERVICE_FEE, SETUP_SERVICE_PAID_SETTING } f
 const router = Router();
 
 const NATIONS = ["england", "wales", "scotland", "northern_ireland", "multi_nation"] as const;
-const PICKED_MODULES_SETTING = "setup_modules";
 const DEFERRED_SETTING = "setup_deferred_at";
 const TEAM_ALONE_SETTING = "setup_team_alone_at";
 const ASSIST_SETTING = SETUP_ASSIST_SETTING;
@@ -84,15 +84,6 @@ async function availableModules(clientId: number): Promise<string[]> {
   return keys.filter((k) => !LEGACY_MODULES.has(k));
 }
 
-function parsePicked(raw: string | null): string[] {
-  try {
-    const value = JSON.parse(raw ?? "[]");
-    return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
 /**
  * The team step: Managers and Staff are the people who record checks (Viewers
  * only sign their own training), so one of them, or the Owner saying only
@@ -118,9 +109,7 @@ function parseAssist(raw: string | null): AssistRequest | null {
 }
 
 /** Modules picked in the setup wizard; empty when none were picked. */
-export async function getPickedModules(clientId: number): Promise<string[]> {
-  return parsePicked(await setting(clientId, PICKED_MODULES_SETTING));
-}
+export { getPickedModules };
 
 router.get("/setup/state", requireAuth, async (req, res) => {
   const clientId = getClientId(req);

@@ -364,6 +364,36 @@ try {
     ok("FireTrack checks due today or tomorrow remind the owner the day before");
   }
 
+  // ── Tracks picked in setup: daily checklists reminded from day one ──────
+  {
+    // A new business that picked FireTrack and KitchenTrack in setup and has
+    // recorded nothing yet.
+    const ownerC = await register("owner-c");
+    const C = ownerC.clientId;
+    const [siteC] = await q(`INSERT INTO sites (client_id, name) VALUES ($1, 'Glasgow Test') RETURNING id`, [C]);
+    const runC = (iso) => runTrackReminderJob({ now: at(iso), clientIds: [C], sendPush, skipPurge: true });
+    const kindsC = async (day) => (await q(
+      `SELECT DISTINCT kind FROM user_notifications WHERE client_id = $1 AND dedupe_key LIKE $2 ORDER BY kind`,
+      [C, `%:${day}`])).map((row) => row.kind);
+    const runDay = async (day) => {
+      for (const time of ["08:10", "10:30", "20:15"]) assert.equal((await runC(`${day}T${time}:00Z`)).errors, 0);
+    };
+
+    await runDay("2026-10-20");
+    assert.deepEqual(await kindsC("2026-10-20"), [], "nothing picked and nothing recorded: quiet");
+
+    await q(`INSERT INTO app_settings (client_id, key, value, updated_at) VALUES ($1, 'setup_modules', $2, now())`,
+      [C, JSON.stringify(["firetrack", "kitchentrack"])]);
+    await runDay("2026-10-21");
+    assert.deepEqual(await kindsC("2026-10-21"), ["daily_am", "daily_pm", "kitchen_diary"],
+      "picked: opening, closing and kitchen diary; checks never recorded stay quiet");
+    const [am] = await q(`SELECT * FROM user_notifications WHERE client_id = $1 AND kind = 'daily_am'`, [C]);
+    assert.equal(am.user_id, ownerC.userId, "to the Owner when no owner is set");
+    assert.equal(am.site_id, siteC.id);
+    assert.equal((await runC("2026-10-21T10:40:00Z")).notificationsCreated, 0, "once a day");
+    ok("tracks picked in setup get checklist reminders from day one, without never-recorded check reminders");
+  }
+
   // ── Notification API: scoped to the user and the active business ─────────
   {
     const staffList = await asStaff("GET", "/notifications");

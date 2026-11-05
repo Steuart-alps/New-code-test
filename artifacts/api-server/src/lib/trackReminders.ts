@@ -23,9 +23,12 @@
  * the site's greenkeeping team's Managers, else GreenTrack's owner
  * (lib/greenkeepingChecks.ts).
  * Daily checklists and the kitchen diary are only chased at sites that have
- * used them in the last 30 days, or once an owner has been set for the track,
- * so a business trialling every module is not reminded about tracks it does
- * not use.
+ * used them in the last 30 days, once an owner has been set for the track, or
+ * when the business picked the track in setup ("Modules to start with"), so a
+ * business trialling every module is not reminded about tracks it does not
+ * use. Periodic checks (FireTrack, LegionellaTrack, AquaTrack, TubTrack) are
+ * only chased once overdue, so a check never recorded stays quiet and a new
+ * business is not deluged.
  */
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
@@ -43,6 +46,7 @@ import { candidateCanSeeSite, hasExplicitOwner, loadOwnerContext, resolveOwnersF
 import {
   GREENKEEPING_CHECKLIST_NAMES, getGreenkeepingShedDay, greenDailyChecksPath, greenkeepingShedSites, loadGreenkeepingTeams,
 } from "./greenkeepingChecks";
+import { getPickedModules, pickedTrackModuleKeys } from "./pickedModules";
 import { createUserNotifications, purgeOldUserNotifications, type NewUserNotification } from "./userNotifications";
 
 /** Opening and closing checklists follow each site's reminder times instead (lib/checklistDueTimes.ts). */
@@ -96,7 +100,12 @@ function summarise(items: string[]): string {
 
 class ReminderBatch {
   readonly items: NewUserNotification[] = [];
-  constructor(private ctx: OwnerContext, private today: string) {}
+  constructor(private ctx: OwnerContext, private today: string, private picked: ReadonlySet<string> = new Set()) {}
+
+  /** Whether the business uses the track at the site: picked in setup, or an owner set for it. */
+  usesTrack(module: string, siteId: number | null): boolean {
+    return this.picked.has(module) || hasExplicitOwner(this.ctx, module, siteId);
+  }
 
   /** Queue one notification per resolved owner of the module at the site, or per given recipient. */
   add(input: { module: string; siteId: number | null; kind: string; title: string; body: string; linkPath: string; userIds?: number[] }) {
@@ -135,7 +144,7 @@ async function dailyChecklistReminders(
   const inUse = new Set(rowsOf<{ site_id: number; used: unknown }>(recent)
     .filter((row) => row.used === true || row.used === "true")
     .map((row) => Number(row.site_id)));
-  const candidates = sites.filter((site) => inUse.has(site.id) || hasExplicitOwner(ctx, module, site.id));
+  const candidates = sites.filter((site) => inUse.has(site.id) || batch.usesTrack(module, site.id));
   if (candidates.length === 0) return;
   const completion = await getDailyChecklistCompletionBySite(clientId, today, candidates.map((site) => site.id));
   const label = period === "am" ? "AM" : "PM";
@@ -206,7 +215,7 @@ async function kitchenDiaryReminders(
   const bySite = new Map(rows.map((row) => [key(row.site_id == null ? null : Number(row.site_id)), row]));
   for (const unit of units) {
     const row = bySite.get(key(unit.id));
-    const inUse = Boolean(row) || hasExplicitOwner(ctx, "kitchen", unit.id);
+    const inUse = Boolean(row) || batch.usesTrack("kitchen", unit.id);
     if (!inUse) continue;
     if (row && (row.done === true || row.done === "true")) continue;
     batch.add({
@@ -391,13 +400,14 @@ export async function collectTrackReminders(clientId: number, now: Date): Promis
   if (await isClientBillingLocked(clientId).catch(() => false)) return [];
 
   const today = localDateIn(timeZone, now);
-  const [services, ctx, clientResult] = await Promise.all([
+  const [services, ctx, clientResult, picked] = await Promise.all([
     getEntitledServices(clientId),
     loadOwnerContext(clientId),
     db.execute(sql`SELECT name FROM clients WHERE id = ${clientId}`),
+    getPickedModules(clientId).catch(() => [] as string[]),
   ]);
   const businessName = rowsOf<{ name: string }>(clientResult)[0]?.name ?? "your business";
-  const batch = new ReminderBatch(ctx, today);
+  const batch = new ReminderBatch(ctx, today, pickedTrackModuleKeys(picked));
 
   if (phases.overdue) await overdueReminders(batch, clientId, services, businessName, today, now);
   if (entitledTo(services, "daily_am")) await dailyChecklistReminders(batch, ctx, clientId, openingDue, today, "am");
