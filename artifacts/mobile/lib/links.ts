@@ -16,6 +16,10 @@ export const privacyPolicyUrl = () => `${siteUrl()}/privacy`;
 export const termsUrl = () => `${siteUrl()}/terms`;
 /** Web settings, where owners manage billing and the business account. */
 export const webSettingsUrl = () => `${siteUrl()}/settings`;
+/** Web page where a user turns on two-step sign-in for their own account. */
+export const webAccountSecurityUrl = () => `${siteUrl()}/account-security`;
+/** Web settings section where owners can require two-step sign-in. */
+export const webSignInSecuritySettingsUrl = () => `${siteUrl()}/settings#security`;
 /** ALPS Consultancy's website (the contact address the privacy policy gives). */
 export const CONTACT_URL = 'https://www.alpsconsultancy.co.uk';
 
