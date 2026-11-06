@@ -4,7 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { collectAddonFirstMonthInvoice, findLiveSubscription, type AddonPaymentResult } from "./billing";
 import { AI_ADDON_CURRENCY, AI_ADDON_LABEL, isAiSubscriptionItem } from "./aiAddonItem";
 import { getUncachableStripeClient } from "./stripeClient";
-import { emailButton, escapeHtml, getPublicAppUrl, sendSystemEmail } from "./email";
+import { emailButton, emailHeadline, EMAIL_SIGN_OFF, escapeHtml, getPublicAppUrl, sendSystemEmail } from "./email";
 import { logger } from "./logger";
 import { aiCostUsdMicros, type AiCallUsage } from "./aiPricing";
 import { addMonthsUtc, replayAiCredit, type AiCreditBalance } from "./aiCredit";
@@ -506,11 +506,11 @@ export async function warnIfAllowanceNearlyUsed(clientId: number): Promise<boole
     for (const person of people.rows as Array<{ id: number; name: string | null; email: string }>) {
       const name = person.name ?? "";
       const html = `
-    <h2 style="color: #1e293b; margin-top: 0;">AI allowance ${percent}% used</h2>
-    <p>Hi ${escapeHtml(name)},</p>
+    <p style="margin:0 0 16px;">Hi ${escapeHtml(name)},</p>
+    ${emailHeadline(`AI allowance ${percent}% used`)}
     ${lines.map((line) => `<p>${line}</p>`).join("\n    ")}
     <p style="margin: 24px 0; text-align: center;">${emailButton(escapeHtml(url), "Open AI settings")}</p>
-    <p>Best regards,<br><strong>ComplyTrack</strong></p>`;
+    ${EMAIL_SIGN_OFF}`;
       const text = [`AI allowance ${percent}% used`, "", `Hi ${name},`, "", ...lines.map((line) => line.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&")), "", url, "", "Best regards,", "ComplyTrack"].join("\n");
       await sendSystemEmail({ to: person.email, subject, html, text, idempotencyKey: emailDeliveryIdempotencyKey(claim, person.id) });
     }
@@ -681,9 +681,9 @@ async function emailInvoicedTopUp(clientId: number, userId: number | null): Prom
   ];
   const subject = `${company}: AI top-up agreed, add ${price} + VAT to their invoice`;
   const html = `
-    <h2 style="color: #1e293b; margin-top: 0;">AI top-up to invoice</h2>
+    ${emailHeadline(`AI top-up to invoice`)}
     ${lines.map((line) => `<p>${line}</p>`).join("\n    ")}
-    <p>Best regards,<br><strong>ComplyTrack</strong></p>`;
+    ${EMAIL_SIGN_OFF}`;
   const text = ["AI top-up to invoice", "", ...lines.map((line) => line.replace(/<[^>]+>/g, "")), "", "Best regards,", "ComplyTrack"].join("\n");
   for (const to of recipients) await sendSystemEmail({ to, subject, html, text });
 }
@@ -765,11 +765,11 @@ async function emailAutoTopUp(clientId: number, kind: "paid" | "failed"): Promis
   for (const owner of owners.rows as Array<{ id: number; name: string | null; email: string }>) {
     const name = owner.name ?? "";
     const html = `
-    <h2 style="color: #1e293b; margin-top: 0;">${copy.heading}</h2>
-    <p>Hi ${escapeHtml(name)},</p>
+    <p style="margin:0 0 16px;">Hi ${escapeHtml(name)},</p>
+    ${emailHeadline(copy.heading)}
     ${copy.lines.map((line) => `<p>${line}</p>`).join("\n    ")}
     <p style="margin: 24px 0; text-align: center;">${emailButton(escapeHtml(url), "Open AI settings")}</p>
-    <p>Best regards,<br><strong>ComplyTrack</strong></p>`;
+    ${EMAIL_SIGN_OFF}`;
     const text = [copy.heading, "", `Hi ${name},`, "", ...copy.lines.map((line) => line.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#x27;|&#039;/g, "'").replace(/&amp;/g, "&")), "", url, "", "Best regards,", "ComplyTrack"].join("\n");
     await sendSystemEmail({ to: owner.email, subject: copy.subject, html, text });
   }

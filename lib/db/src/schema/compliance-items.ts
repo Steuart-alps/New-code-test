@@ -39,6 +39,13 @@ export const complianceItemsTable = pgTable("compliance_items", {
    *  a contractor (e.g. an annual emergency lighting test). Such a completion
    *  needs no contractor certificate. Null = a contractor, or not said. */
   completedInHouseBy: text("completed_in_house_by"),
+  /** Set when an Owner or consultant marks the check "Not required" (N/A),
+   *  for example a contractor check a track lists that this business does
+   *  not need. The check is kept (and its history) but sends no reminders,
+   *  is not counted as overdue or in the compliance figures, and can be put
+   *  back. Null = required. */
+  notRequiredAt: timestamp("not_required_at"),
+  notRequiredBy: integer("not_required_by").references(() => usersTable.id, { onDelete: "set null" }),
   notes: text("notes"),
   /** Legacy raw scheduling token. Always NULL once runtime migrations have
    *  moved it to scheduleTokenHash; kept so older rows can be migrated. */
@@ -67,6 +74,9 @@ export const insertComplianceItemSchema = createInsertSchema(complianceItemsTabl
   completedAt: true,
   completedInHouseBy: true,
   notificationSentAt: true,
+  // Set only through PUT /compliance-items/:id/not-required.
+  notRequiredAt: true,
+  notRequiredBy: true,
   // Set only through the equipment list, which checks the item's business.
   equipmentId: true,
   equipmentPart: true,

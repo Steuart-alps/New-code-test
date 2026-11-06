@@ -39,6 +39,8 @@ export interface ComplianceItem {
   completedAt?: Date | null;
   /** The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it). */
   completedInHouseBy?: string | null;
+  /** When an Owner or consultant marked the check "Not required" (N/A). Such a check is kept but sends no reminders and is left out of overdue counts and compliance figures; null when it is required. Set with PUT /compliance-items/{id}/not-required. */
+  notRequiredAt?: Date | null;
   /** Set when this check is the replacement date of a part of an equipment list item (a defibrillator's pads or battery); its due date is the part's expiry date. Marking it done asks for the new part's expiry date (nextDueDate). */
   equipmentPart?: ComplianceItemEquipmentPart;
   notes?: string | null;

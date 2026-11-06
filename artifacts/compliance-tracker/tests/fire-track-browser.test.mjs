@@ -99,6 +99,7 @@ function withRotation(point) {
   return {
     ...point, nextInTurn: !point.archivedAt && next?.id === point.id,
     notTestedThisRound: !point.archivedAt && (daysAgo === null || daysAgo > roundDays),
+    testedLast: point.id === lastTestedPointId,
   };
 }
 // Staff roster for ticking who was present at a drill (Cat has no site).
@@ -183,6 +184,7 @@ async function routeApi(route) {
         services: ["firetrack"],
       });
       case `/api/clients/${CLIENT_ID}`: return json(route, { id: CLIENT_ID, name: "Harbour Hotel Group" });
+      case `/api/clients/${HOME_CLIENT_ID}`: return json(route, { id: HOME_CLIENT_ID, name: "ALPS Consultancy" });
       case "/api/billing/cancellation-status": return json(route, { accessEndsAt: null });
       case "/api/notifications": return json(route, { notifications: [], unreadCount: 0 });
       case "/api/managed-by": return json(route, null);
@@ -367,12 +369,17 @@ try {
   await callPointSelect.waitFor();
   await page.waitForFunction(() => document.querySelector('[data-testid="select-call-point"]')?.textContent?.includes("CP2"));
   assert.match(await callPointSelect.innerText(), /CP2 – Kitchen · not tested yet · next in turn/);
+  assert.equal(await dialog.getByTestId("call-point-same-as-last").count(), 0, "no warning for the next one in turn");
   await callPointSelect.click();
   const options = await page.getByRole("option").allInnerTexts();
   assert.equal(options.length, 2, `archived call points are not offered: ${options}`);
   assert.match(options[0], /CP1 – Reception · last tested/);
   await shot(page, "2-alarm-call-point");
   await page.getByRole("option", { name: /CP1 – Reception/ }).click();
+  const sameAsLast = dialog.getByTestId("call-point-same-as-last");
+  await sameAsLast.waitFor();
+  assert.match(await sameAsLast.innerText(), /CP1 – Reception was used for the last alarm test .*next in turn is CP2 – Kitchen/s);
+  await shot(page, "2a-alarm-same-call-point-warning");
 
   // Performed by: a Manager with a login but no roster entry can be chosen.
   const performer = dialog.getByTestId("select-performed-by");
@@ -473,12 +480,12 @@ try {
   const rowFor = (label) => contractorRows.filter({ hasText: label });
   assert.equal(await rowFor("Fire alarm service").getAttribute("data-rag"), "red");
   assert.match(await rowFor("Fire alarm service").innerText(), /Certificate outstanding[\s\S]*Contractor: Alarm Co/);
-  assert.equal(await rowFor("Fire alarm service").getAttribute("href"), "/items/61");
+  assert.equal(await rowFor("Fire alarm service").getByRole("link").getAttribute("href"), "/items/61");
   assert.equal(await rowFor("Fire extinguisher service").getAttribute("data-rag"), "amber", "a business-wide check counts at the site");
   assert.equal(await rowFor("Emergency lighting 3-hour test").getAttribute("data-rag"), "green");
   assert.match(await rowFor("Emergency lighting 3-hour test").innerText(), /in house by Sam Patel/);
   assert.equal(await rowFor("Fire risk assessment review").count(), 0, "a line marked N/A on the Contractors page is hidden");
-  assert.match(await contractorCard.getByTestId("contractor-checks-hidden").innerText(), /1 marked N\/A[\s\S]*Add back on the Contractors page/);
+  assert.match(await contractorCard.getByTestId("contractor-checks-hidden").innerText(), /1 marked N\/A \(not required here\)/);
   await contractorCard.scrollIntoViewIfNeeded();
   await shot(page, "7-contractor-checks");
   console.log("ok - FireTrack shows its contractor services red, amber or green from their compliance checks, each opening the check");
@@ -564,6 +571,27 @@ try {
   assert.equal(posts.at(-1).body.callPointId, null);
   console.log("ok - without a list the call point is typed in, and is required");
 
+  // ── An Owner can list call points straight from the alarm test ───────────
+  dialog = await openRecordDialog(page, "Weekly fire alarm test");
+  await dialog.getByTestId("input-call-point").waitFor();
+  await dialog.getByTestId("button-list-call-points").click();
+  const lister = page.getByRole("dialog").filter({ hasText: "List them in the order you want them tested" });
+  await lister.getByPlaceholder('Call point, e.g. "CP1"').fill("Call point 1");
+  await lister.getByPlaceholder("Location, e.g. Reception, main entrance").fill("Main entrance");
+  await lister.getByRole("button", { name: "Add" }).click();
+  await lister.locator('[data-testid^="call-point-row-"] input[value="Call point 1"]').waitFor();
+  await shot(page, "4a-list-call-points-from-alarm-test");
+  await lister.getByRole("button", { name: "Done" }).click();
+  await page.waitForFunction(() => document.querySelector('[data-testid="select-call-point"]')?.textContent?.includes("Call point 1 – Main entrance"));
+  assert.equal(await dialog.getByTestId("input-call-point").count(), 0, "the typed box becomes the dropdown");
+  await shot(page, "4b-dropdown-after-listing");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await dialog.waitFor({ state: "hidden" });
+  callPoints.splice(0, callPoints.length);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByText("Monthly emergency lighting flick test").first().waitFor();
+  console.log("ok - an Owner lists call points from the alarm test, and they become the dropdown");
+
   // ── Managers add call points under Template ──────────────────────────────
   await page.getByRole("button", { name: "Template" }).click();
   const template = page.getByRole("dialog");
@@ -572,11 +600,11 @@ try {
   await template.getByPlaceholder('Call point, e.g. "CP1"').fill("CP4");
   await template.getByPlaceholder("Location, e.g. Reception, main entrance").fill("Bar");
   await template.getByRole("button", { name: "Add" }).click();
-  await template.locator('input[value="CP4"]').waitFor();
+  await template.locator('[data-testid^="call-point-row-"] input[value="CP4"]').waitFor();
   assert.deepEqual(posts.at(-1), { path: "/api/fire-safety/call-points", body: { siteId: 1, name: "CP4", location: "Bar" } });
   await template.getByPlaceholder('Call point, e.g. "CP1"').fill("CP5");
   await template.getByRole("button", { name: "Add" }).click();
-  await template.locator('input[value="CP5"]').waitFor();
+  await template.locator('[data-testid^="call-point-row-"] input[value="CP5"]').waitFor();
   console.log("ok - managers add a site's call points with their location under Template");
 
   // ── The order changes with the arrows ────────────────────────────────────

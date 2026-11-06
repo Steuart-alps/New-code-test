@@ -439,7 +439,7 @@ router.post("/contractors/:id/reminders/:itemId/resend", requireAuth, requireCli
     const items = await tx.execute(sql`SELECT ci.id, COALESCE(ci.department_id, s.department_id) AS department_id FROM compliance_items ci
       LEFT JOIN sites s ON s.id=ci.site_id AND s.client_id=ci.client_id
       WHERE ci.id=${itemId} AND ci.client_id=${clientId} AND ci.contractor_id=${contractorId}
-        AND ci.status <> 'completed'
+        AND ci.status <> 'completed' AND ci.not_required_at IS NULL
         AND (${departmentId}::integer IS NULL OR ci.department_id IS NULL OR ci.department_id=${departmentId})
         AND (${departmentId}::integer IS NULL OR ci.site_id IS NULL
           OR ${departmentId === null ? sql`TRUE` : siteVisibleSql(sql`ci.site_id`, sql`s.department_id`, departmentId)})

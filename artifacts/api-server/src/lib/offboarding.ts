@@ -19,7 +19,9 @@ import { clientsTable } from "@workspace/db/schema";
 import { and, isNull, isNotNull, inArray, lt } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { logger } from "./logger";
-import { sendSystemEmail, getPublicAppUrl, escapeHtml } from "./email";
+import {
+  sendSystemEmail, getPublicAppUrl, escapeHtml, renderEmailLayout, emailHeadline, emailPanel, emailButtonRow, EMAIL_SIGN_OFF,
+} from "./email";
 import { findLiveSubscription } from "./billing";
 import { claimEmailDelivery, emailDeliveryIdempotencyKey, markEmailDeliverySent, settleEmailDelivery } from "./emailDeliveryClaims";
 import { randomUUID } from "crypto";
@@ -109,31 +111,27 @@ function buildOffboardingEmail(opts: {
     : "The subscription for COMPANY has been cancelled.";
   const resubscribe = opts.reason === "trial_ended" ? "subscribe" : "resubscribe";
 
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #1e293b;">${heading}</h2>
-      <p>Hi ${safeName},</p>
+  const html = renderEmailLayout({
+    subtitle: "Your account",
+    bodyHtml: `
+      <p style="margin:0 0 16px;">Hi ${safeName},</p>
+      ${emailHeadline(heading)}
       <p>${endedLine.replace("COMPANY", `<strong>${safeCompany}</strong>`)}</p>
       <p>In line with our data retention policy, all compliance records, documents and logs
          associated with this account will be <strong>permanently deleted on ${deletionStr}</strong>
-         — ${RETENTION_MONTHS} months after it ended.</p>
-      <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:20px;margin:20px 0;">
-        <p style="margin:0 0 12px;color:#92400e;font-weight:600;">⬇ Export your records before this date</p>
-        <p style="margin:0 0 16px;color:#78350f;font-size:14px;">
-          Download a full export of all your data — food safety logs, fire safety checks,
-          training records, contractor files and more — as a ZIP file from your account settings.
-        </p>
-        <a href="${opts.settingsUrl}"
-           style="display:inline-block;background:#ea580c;color:white;text-decoration:none;
-                  padding:12px 24px;border-radius:6px;font-weight:600;">
-          Download your data
-        </a>
-      </div>
-      <p style="color:#64748b;font-size:13px;">
+         (${RETENTION_MONTHS} months after it ended).</p>
+      ${emailPanel(`
+        <p style="margin:0 0 8px;font-weight:700;color:#0f172a;">Export your records before this date</p>
+        <p style="margin:0;color:#475569;">
+          Download a full export of all your data (food safety logs, fire safety checks,
+          training records, contractor files and more) as a ZIP file from your account settings.
+        </p>`)}
+      ${emailButtonRow(opts.settingsUrl, "Download your data")}
+      <p style="color:#64748b;font-size:14px;">
         If you ${resubscribe} before ${deletionStr} your data will be preserved and no deletion will occur.
       </p>
-      <p>Best regards,<br><strong>ComplyTrack</strong></p>
-    </div>`;
+      ${EMAIL_SIGN_OFF}`,
+  });
 
   const text = `
 ${heading}
@@ -307,49 +305,37 @@ export async function sendCancellationWarningEmail(opts: {
     const delivery = (claim.rows ?? [])[0] as { id: number; lease_token: string } | undefined;
     if (!delivery) continue;
     const safeName = escapeHtml(recipient.name ?? recipient.email);
-    const html = alreadyEnded ? `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #1e293b;">Your ComplyTrack subscription has ended</h2>
-        <p>Hi ${safeName},</p>
+    const html = renderEmailLayout({
+      subtitle: "Billing",
+      bodyHtml: alreadyEnded ? `
+        <p style="margin:0 0 16px;">Hi ${safeName},</p>
+        ${emailHeadline("Your ComplyTrack subscription has ended")}
         <p>The ComplyTrack subscription for <strong>${safeCompany}</strong> ended on
            <strong>${escapeHtml(accessEndsStr)}</strong>, so the account no longer has access to its compliance records.</p>
         <p>Your records are kept for ${RETENTION_MONTHS} months. You can
            <a href="${billingUrl}" style="color:#2563eb;">reactivate your subscription</a> at any time to restore access,
            and export your records from your account settings.</p>
-        <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:20px;margin:20px 0;">
-          <a href="${settingsUrl}"
-             style="display:inline-block;background:#ea580c;color:white;text-decoration:none;
-                    padding:12px 24px;border-radius:6px;font-weight:600;">
-            Go to Settings &amp; Export
-          </a>
-        </div>
-        <p>Best regards,<br><strong>ComplyTrack</strong></p>
-      </div>` : `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #1e293b;">Your ComplyTrack subscription is being cancelled</h2>
-        <p>Hi ${safeName},</p>
+        ${emailButtonRow(settingsUrl, "Go to Settings &amp; Export")}
+        ${EMAIL_SIGN_OFF}` : `
+        <p style="margin:0 0 16px;">Hi ${safeName},</p>
+        ${emailHeadline("Your ComplyTrack subscription is being cancelled")}
         <p>This is to let you know that the ComplyTrack subscription for <strong>${safeCompany}</strong>
            has been cancelled.</p>
         <p>Your access will continue until <strong>${escapeHtml(accessEndsStr)}</strong>.
            After that date you will no longer be able to log in or view your compliance records.</p>
-        <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:20px;margin:20px 0;">
-          <p style="margin:0 0 12px;color:#92400e;font-weight:600;">⬇ Export your records before access ends</p>
-          <p style="margin:0 0 16px;color:#78350f;font-size:14px;">
-            Download a full export of all your data — food safety logs, fire safety checks,
-            training records, contractor files and more — as a ZIP file from your account settings.
-          </p>
-          <a href="${settingsUrl}"
-             style="display:inline-block;background:#ea580c;color:white;text-decoration:none;
-                    padding:12px 24px;border-radius:6px;font-weight:600;">
-            Go to Settings &amp; Export
-          </a>
-        </div>
+        ${emailPanel(`
+          <p style="margin:0 0 8px;font-weight:700;color:#0f172a;">Export your records before access ends</p>
+          <p style="margin:0;color:#475569;">
+            Download a full export of all your data (food safety logs, fire safety checks,
+            training records, contractor files and more) as a ZIP file from your account settings.
+          </p>`)}
+        ${emailButtonRow(settingsUrl, "Go to Settings &amp; Export")}
         <p style="color:#64748b;font-size:14px;">
            Changed your mind? You can <a href="${billingUrl}" style="color:#2563eb;">reactivate your subscription</a>
            at any time and your data will be preserved.
         </p>
-        <p>Best regards,<br><strong>ComplyTrack</strong></p>
-      </div>`;
+        ${EMAIL_SIGN_OFF}`,
+    });
 
     const text = alreadyEnded ? `
 Your ComplyTrack subscription has ended
@@ -542,17 +528,19 @@ export async function sendPaymentFailedEmail(opts: {
     const payLink = opts.hostedInvoiceUrl && /^https:\/\//.test(opts.hostedInvoiceUrl) ? opts.hostedInvoiceUrl : billingUrl;
     for (const recipient of recipients) {
       const safeName = escapeHtml(recipient.name ?? recipient.email);
-      const html = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #1e293b;">We couldn't take your ComplyTrack payment</h2>
-          <p>Hi ${safeName},</p>
+      const html = renderEmailLayout({
+        subtitle: "Billing",
+        bodyHtml: `
+          <p style="margin:0 0 16px;">Hi ${safeName},</p>
+          ${emailHeadline("We couldn't take your ComplyTrack payment")}
           <p>A payment${amount ? ` of <strong>${escapeHtml(amount)}</strong>` : ""} for the ComplyTrack subscription for
              <strong>${escapeHtml(client.name)}</strong> failed. Stripe will retry it automatically, but if it keeps failing
              the subscription will be cancelled and access will end.</p>
-          <p><a href="${escapeHtml(payLink)}" style="display:inline-block;background:#2563eb;color:white;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600;">Update payment details</a></p>
-          <p style="color:#64748b;font-size:13px;">You can also manage your payment method from Settings → Billing: ${escapeHtml(billingUrl)}</p>
-          <p>Best regards,<br><strong>ComplyTrack</strong></p>
-        </div>`;
+          ${emailButtonRow(escapeHtml(payLink), "Update payment details")}
+          <p style="color:#64748b;font-size:14px;">You can also manage your payment method in ComplyTrack under
+             <a href="${escapeHtml(billingUrl)}" style="color:#2563eb;">Settings → Billing</a>.</p>
+          ${EMAIL_SIGN_OFF}`,
+      });
       const text = `We couldn't take your ComplyTrack payment
 
 Hi ${recipient.name ?? recipient.email},
@@ -785,20 +773,19 @@ function buildDeletionReminderEmail(opts: {
   const safeName = escapeHtml(opts.recipientName);
   const safeCompany = escapeHtml(opts.companyName);
   const subject = `Reminder: your ComplyTrack data will be deleted on ${deletionStr}`;
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #1e293b;">Your records will be deleted soon</h2>
-      <p>Hi ${safeName},</p>
+  const html = renderEmailLayout({
+    subtitle: "Your account",
+    bodyHtml: `
+      <p style="margin:0 0 16px;">Hi ${safeName},</p>
+      ${emailHeadline("Your records will be deleted soon")}
       <p>We have kept the compliance records for <strong>${safeCompany}</strong> for the ${RETENTION_MONTHS} months
          since the account ended. They will be <strong>permanently deleted on ${deletionStr}</strong>.</p>
       <p>We recommend downloading a copy before then, as you may need these records for inspections,
          insurance claims or legal enquiries.</p>
-      <p><a href="${opts.settingsUrl}"
-            style="display:inline-block;background:#ea580c;color:white;text-decoration:none;
-                   padding:12px 24px;border-radius:6px;font-weight:600;">Download your data</a></p>
-      <p style="color:#64748b;font-size:13px;">If you resubscribe before ${deletionStr}, nothing will be deleted.</p>
-      <p>Best regards,<br><strong>ComplyTrack</strong></p>
-    </div>`;
+      ${emailButtonRow(opts.settingsUrl, "Download your data")}
+      <p style="color:#64748b;font-size:14px;">If you resubscribe before ${deletionStr}, nothing will be deleted.</p>
+      ${EMAIL_SIGN_OFF}`,
+  });
   const text = `
 Your records will be deleted soon
 

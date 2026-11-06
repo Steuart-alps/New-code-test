@@ -238,6 +238,8 @@ import type {
   MyCoshhSignOffs,
   MyDocumentSignOffs,
   NightFireWalks,
+  NotRequiredRequest,
+  NotRequiredResponse,
   OkResponse,
   OrderFireCallPointsRequest,
   OwnTrainingRecord,
@@ -6365,6 +6367,79 @@ export const useUpdateComplianceItemStatus = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getUpdateComplianceItemStatusMutationOptions(options));
+    }
+
+export const getSetComplianceItemNotRequiredUrl = (id: number,) => {
+
+
+
+
+  return `/api/compliance-items/${id}/not-required`
+}
+
+/**
+ * Owners and consultants only. A check marked not required is kept, with its history and certificates, but sends no reminders and is left out of overdue counts and compliance figures until it is put back. Audited.
+ * @summary Mark a compliance check "Not required" (N/A), or put it back
+ */
+export const setComplianceItemNotRequired = async (id: number,
+    notRequiredRequest: NotRequiredRequest, options?: RequestInit): Promise<NotRequiredResponse> => {
+
+  return customFetch<NotRequiredResponse>(getSetComplianceItemNotRequiredUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(notRequiredRequest)
+  }
+);}
+
+
+
+
+
+export const getSetComplianceItemNotRequiredMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setComplianceItemNotRequired>>, TError,{id: number;data: BodyType<NotRequiredRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setComplianceItemNotRequired>>, TError,{id: number;data: BodyType<NotRequiredRequest>}, TContext> => {
+
+const mutationKey = ['setComplianceItemNotRequired'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setComplianceItemNotRequired>>, {id: number;data: BodyType<NotRequiredRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  setComplianceItemNotRequired(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetComplianceItemNotRequiredMutationResult = NonNullable<Awaited<ReturnType<typeof setComplianceItemNotRequired>>>
+    export type SetComplianceItemNotRequiredMutationBody = BodyType<NotRequiredRequest>
+    export type SetComplianceItemNotRequiredMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Mark a compliance check "Not required" (N/A), or put it back
+ */
+export const useSetComplianceItemNotRequired = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setComplianceItemNotRequired>>, TError,{id: number;data: BodyType<NotRequiredRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setComplianceItemNotRequired>>,
+        TError,
+        {id: number;data: BodyType<NotRequiredRequest>},
+        TContext
+      > => {
+      return useMutation(getSetComplianceItemNotRequiredMutationOptions(options));
     }
 
 export const getGetDashboardStatsUrl = () => {

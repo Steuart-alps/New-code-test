@@ -67,7 +67,7 @@ function buildItemResponse(
   action: ItemActionState = NO_ACTION,
 ) {
   // Scheduling-link credentials (raw legacy token or digest) never leave the server.
-  const { scheduleToken: _token, scheduleTokenHash: _digest, ...visible } = item;
+  const { scheduleToken: _token, scheduleTokenHash: _digest, notRequiredBy: _notRequiredBy, ...visible } = item;
   return {
     ...visible,
     // Certificate outcome state (lib/certificateOutcomes.ts): an unsatisfactory
@@ -681,7 +681,8 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
   const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
   const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-  const itemConditions = [eq(complianceItemsTable.clientId, clientId)];
+  // A check marked "Not required" (N/A) counts nowhere in the figures.
+  const itemConditions = [eq(complianceItemsTable.clientId, clientId), isNull(complianceItemsTable.notRequiredAt)];
 
   // Department scoping: consistent with GET /compliance-items — filter by
   // the site's department rather than the item's own departmentId column.

@@ -77,6 +77,7 @@ router.get("/calendar", requireAuth, async (req, res) => {
       LEFT JOIN contractors c ON c.id = ci.contractor_id AND c.client_id = ci.client_id
       LEFT JOIN categories cat ON cat.id = ci.category_id
       WHERE ci.client_id = ${clientId} AND ci.due_date::date BETWEEN ${from} AND ${to}
+        AND ci.not_required_at IS NULL
         AND ${siteScopeSql(scope, sql`ci.site_id`)}
     `),
     rowsOf(sql`
@@ -86,6 +87,7 @@ router.get("/calendar", requireAuth, async (req, res) => {
       LEFT JOIN sites s ON s.id = ci.site_id AND s.client_id = ci.client_id
       LEFT JOIN contractors c ON c.id = ci.contractor_id AND c.client_id = ci.client_id
       WHERE ci.client_id = ${clientId} AND ci.visit_scheduled_at::date BETWEEN ${from} AND ${to}
+        AND ci.not_required_at IS NULL
         AND ${siteScopeSql(scope, sql`ci.site_id`)}
     `),
     // Contractors work across the business, so they appear for every site.

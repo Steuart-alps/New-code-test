@@ -1977,6 +1977,41 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /compliance-items/{id}/not-required:
+    put:
+      operationId: setComplianceItemNotRequired
+      tags: [compliance-items]
+      summary: Mark a compliance check "Not required" (N/A), or put it back
+      description: >
+        Owners and consultants only. A check marked not required is kept, with
+        its history and certificates, but sends no reminders and is left out of
+        overdue counts and compliance figures until it is put back. Audited.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotRequiredRequest"
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotRequiredResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /dashboard/stats:
     get:
       operationId: getDashboardStats
@@ -9627,6 +9662,23 @@ components:
       required:
         - name
 
+    NotRequiredRequest:
+      type: object
+      required: [notRequired]
+      properties:
+        notRequired:
+          type: boolean
+          description: true marks the check not required (N/A); false puts it back.
+    NotRequiredResponse:
+      type: object
+      required: [ok, notRequiredAt]
+      properties:
+        ok:
+          type: boolean
+        notRequiredAt:
+          type: string
+          format: date-time
+          nullable: true
     ComplianceItem:
       type: object
       properties:
@@ -9699,6 +9751,11 @@ components:
           type: string
           nullable: true
           description: The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).
+        notRequiredAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When an Owner or consultant marked the check "Not required" (N/A). Such a check is kept but sends no reminders and is left out of overdue counts and compliance figures; null when it is required. Set with PUT /compliance-items/{id}/not-required.
         equipmentPart:
           type: string
           nullable: true
@@ -11405,6 +11462,9 @@ components:
         notTestedThisRound:
           type: boolean
           description: In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).
+        testedLast:
+          type: boolean
+          description: The call point used in its site's most recent alarm test, so choosing it again would test the same call point twice in a row.
       required:
         - id
         - siteId

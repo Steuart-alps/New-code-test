@@ -171,7 +171,7 @@ export async function collectDueItems(clientId: number, today: string, now: Date
   }>(await db.execute(sql`
     SELECT id, title, site_id, due_date::date::text AS due, assignee_user_id, assigned_to
     FROM compliance_items
-    WHERE client_id = ${clientId} AND status <> 'completed'
+    WHERE client_id = ${clientId} AND status <> 'completed' AND not_required_at IS NULL
       AND due_date IS NOT NULL AND due_date::date <= ${horizon}::date
   `)))) {
     const siteId = num(row.site_id);
@@ -465,6 +465,7 @@ export async function collectDueItems(clientId: number, today: string, now: Date
     UNION ALL
     SELECT 'compliance', id, 'compliance', title, site_id, created_at::date::text, assignee_user_id
     FROM compliance_items WHERE client_id = ${clientId} AND priority = 'critical' AND status <> 'completed'
+      AND not_required_at IS NULL
   `)))) {
     if (!getTrackModule(row.module) || !entitledTo(services, row.module)) continue;
     const siteId = num(row.site_id);
