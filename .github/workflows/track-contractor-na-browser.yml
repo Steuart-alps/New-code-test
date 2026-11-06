@@ -1,0 +1,51 @@
+name: N/A on track contractor checks
+
+# Runs only when the track Contractor checks box, its test or dependencies
+# change, so ordinary PRs spend no extra CI minutes on it.
+on:
+  pull_request:
+    paths:
+      - "artifacts/compliance-tracker/src/components/track-contractor-checks.tsx"
+      - "artifacts/compliance-tracker/tests/track-contractor-na-browser.test.mjs"
+      - "artifacts/compliance-tracker/tests/track-contractor-na-harness.tsx"
+      - "artifacts/compliance-tracker/tests/track-contractor-na-harness.html"
+      - "artifacts/compliance-tracker/package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/track-contractor-na-browser.yml"
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/compliance-tracker/src/components/track-contractor-checks.tsx"
+      - "artifacts/compliance-tracker/tests/track-contractor-na-browser.test.mjs"
+      - "artifacts/compliance-tracker/tests/track-contractor-na-harness.tsx"
+      - "artifacts/compliance-tracker/tests/track-contractor-na-harness.html"
+      - ".github/workflows/track-contractor-na-browser.yml"
+  workflow_dispatch:
+
+jobs:
+  track-contractor-na:
+    name: Chromium N/A and Add back
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run N/A checks
+        run: pnpm --filter @workspace/compliance-tracker run test:track-contractor-na-browser

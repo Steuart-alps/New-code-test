@@ -1,17 +1,19 @@
 import { Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { HardHat } from "lucide-react";
 import { useListComplianceItems, useListSites, type ComplianceItem } from "@workspace/api-client-react";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { needsActionLabel } from "@/components/badges";
-import { useAuth } from "@/context/auth-context";
+import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
+import { useToast } from "@/hooks/use-toast";
 import { complianceCheckDueState } from "@/lib/compliance-check-state";
 import { formatDay } from "@/lib/onboarding";
 import { cn } from "@/lib/utils";
 
 interface VisitType { key: string; module: string; trackLabel: string; title: string; label: string }
-interface Visit { visitKey: string; siteId: number; notNeeded?: boolean }
+interface Visit { visitKey: string; siteId: number; contractorId?: number | null; notNeeded?: boolean }
 
 type Rag = "red" | "amber" | "green" | "grey";
 
@@ -44,6 +46,13 @@ function describe(item: ComplianceItem, now: number): { rag: Rag; text: string }
  * (contractor, certificate, done in house), so each row opens it; the track
  * itself records nothing here. The checks come from the business's contractor
  * visits (lib/contractorVisits.ts on the server), matched by title.
+ *
+ * Owners and consultants can press N/A on any line that is not required
+ * here. A line with a compliance check marks that check "Not required": it
+ * is kept, with its history, but sends no reminders and leaves the figures
+ * (PUT /compliance-items/:id/not-required). A line with no check yet is
+ * marked "No contractor needed", as on the Contractors page. Either way the
+ * line moves to the folded N/A list below, where "Add back" undoes it.
  */
 export function TrackContractorChecks({ module, siteId }: { module: string; siteId?: number }) {
   const { activeClientId } = useAuth();
@@ -59,6 +68,24 @@ export function TrackContractorChecks({ module, siteId }: { module: string; site
   });
   const { data: items, isError: itemsError } = useListComplianceItems({});
   const { data: sites } = useListSites();
+  const canAdmin = useCanAdmin();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const save = useMutation({
+    mutationFn: async (requests: { path: string; body: Record<string, unknown> }[]) => {
+      for (const { path, body } of requests) {
+        const response = await clientApiFetch(path, { method: "PUT", body: JSON.stringify(body) });
+        if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? "Could not save");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["contractor-visits", activeClientId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/compliance-items"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/today-by-department"] });
+    },
+    onError: (err: Error) => toast({ title: "Could not save", description: err.message, variant: "destructive" }),
+  });
 
   if (visitsError || itemsError) {
     return <p role="alert" className="text-destructive text-sm">Contractor checks could not be loaded.</p>;
@@ -78,13 +105,39 @@ export function TrackContractorChecks({ module, siteId }: { module: string; site
       const visits = (visitData?.visits ?? []).filter((visit) => visit.visitKey === type.key
         && (siteId === undefined || visit.siteId === siteId));
       const notNeeded = visits.length > 0 && visits.every((visit) => visit.notNeeded);
-      return [{ type, item: null as ComplianceItem | null, notNeeded }];
+      return [{ type, item: null as ComplianceItem | null, notNeeded, visits }];
     }
-    return checks.map((item) => ({ type, item, notNeeded: false }));
+    return checks.map((item) => ({ type, item, notNeeded: item.notRequiredAt != null, visits: [] as Visit[] }));
   });
-  // Lines marked N/A on the Contractors page are hidden until added back there.
+  type Row = (typeof allRows)[number];
+  // Lines marked N/A are folded away until added back.
   const rows = allRows.filter((row) => !row.notNeeded);
-  const hidden = allRows.length - rows.length;
+  const hidden = allRows.filter((row) => row.notNeeded);
+  const rowKey = (row: Row) => (row.item ? `${row.type.key}:${row.item.id}` : row.type.key);
+  const rowLabel = (row: Row) => {
+    const site = showSite && row.item ? (row.item.siteId == null ? "All sites" : siteName.get(row.item.siteId) ?? row.item.siteName) : null;
+    return site ? `${row.type.label} (${site})` : row.type.label;
+  };
+  const setNa = (row: Row, na: boolean) => {
+    const requests = row.item
+      ? [{ path: `/compliance-items/${row.item.id}/not-required`, body: { notRequired: na } }]
+      // No check yet: "No contractor needed" at each site the line covers (a
+      // site whose contractor is already chosen is left alone).
+      : row.visits.filter((visit) => visit.contractorId == null && !!visit.notNeeded !== na)
+        .map((visit) => ({ path: "/contractor-visits", body: { visitKey: visit.visitKey, siteId: visit.siteId, contractorId: null, notNeeded: na } }));
+    save.mutate(requests, {
+      onSuccess: () => toast(na
+        ? { title: `${row.type.label}: marked N/A`, description: row.item ? "Not required here. It sends no reminders; Add back is in the N/A list below." : "Not required here. Add back is in the N/A list below." }
+        : { title: `${row.type.label}: added back` }),
+    });
+  };
+  const naButton = (row: Row) => canAdmin && (
+    <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs"
+      disabled={save.isPending} onClick={() => setNa(row, true)}
+      aria-label={`N/A, not required: ${rowLabel(row)}`} data-testid="contractor-check-na">
+      N/A
+    </Button>
+  );
   const setUpLink = (key: string) =>
     `/contractors?${new URLSearchParams({ track: module, visit: key, ...(siteId !== undefined ? { site: String(siteId) } : {}) })}`;
 
@@ -100,7 +153,8 @@ export function TrackContractorChecks({ module, siteId }: { module: string; site
         </div>
       </div>
       <ul className="space-y-2">
-        {rows.map(({ type, item }) => {
+        {rows.map((row) => {
+          const { type, item } = row;
           if (!item) {
             const style = RAG_STYLES.grey;
             return (
@@ -110,7 +164,10 @@ export function TrackContractorChecks({ module, siteId }: { module: string; site
                   <p className="text-sm font-medium">{type.label}</p>
                   <p className={cn("text-xs", style.word)}>Not set up yet: choose a contractor, or N/A if none is needed</p>
                 </div>
-                <Link href={setUpLink(type.key)} className="text-xs text-primary font-medium hover:underline">Set it up →</Link>
+                <div className="flex items-center gap-3">
+                  <Link href={setUpLink(type.key)} className="text-xs text-primary font-medium hover:underline">Set it up →</Link>
+                  {naButton(row)}
+                </div>
               </li>
             );
           }
@@ -123,10 +180,11 @@ export function TrackContractorChecks({ module, siteId }: { module: string; site
             item.contractorName ? `Contractor: ${item.contractorName}` : null,
           ].filter(Boolean).join(" · ");
           return (
-            <li key={`${type.key}:${item.id}`}>
+            <li key={`${type.key}:${item.id}`}
+              className={cn("border-l-4 rounded-sm flex items-center gap-2 pr-3 hover:shadow-sm transition-shadow", style.row)}
+              data-testid="contractor-check-row" data-rag={rag}>
               <Link href={`/items/${item.id}`}
-                className={cn("border-l-4 rounded-sm p-3 flex flex-wrap items-center justify-between gap-2 hover:shadow-sm transition-shadow", style.row)}
-                data-testid="contractor-check-row" data-rag={rag}>
+                className="flex-1 min-w-0 p-3 flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-sm font-medium flex items-center gap-2">
                     <span aria-hidden="true" className={cn("inline-block w-2 h-2 rounded-full", style.dot)} />
@@ -139,16 +197,39 @@ export function TrackContractorChecks({ module, siteId }: { module: string; site
                 </div>
                 <span className="text-xs text-primary font-medium">Open check →</span>
               </Link>
+              {naButton(row)}
             </li>
           );
         })}
       </ul>
       {rows.length === 0 && <p className="text-sm text-muted-foreground">No contractor checks needed here.</p>}
-      {hidden > 0 && (
-        <p className="text-xs text-muted-foreground mt-2" data-testid="contractor-checks-hidden">
-          {hidden} marked N/A (no contractor needed) and hidden.{" "}
-          <Link href={`/contractors?track=${encodeURIComponent(module)}`} className="text-primary font-medium hover:underline">Add back on the Contractors page</Link>
-        </p>
+      {hidden.length > 0 && (
+        <details className="mt-2" data-testid="contractor-checks-hidden">
+          <summary className="text-xs text-muted-foreground cursor-pointer">
+            {hidden.length} marked N/A (not required here){canAdmin ? ": show to add back" : ""}
+          </summary>
+          <ul className="mt-2 divide-y divide-border/60 rounded-sm border border-border/60">
+            {hidden.map((row) => (
+              <li key={rowKey(row)} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+                data-testid="contractor-check-na-row">
+                <div className="min-w-0">
+                  <p className="text-sm text-muted-foreground">{rowLabel(row)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {row.item ? "Not required: kept with its history, no reminders" : "No contractor needed"}
+                    {row.item && <> · <Link href={`/items/${row.item.id}`} className="text-primary hover:underline">Open check</Link></>}
+                  </p>
+                </div>
+                {canAdmin && (
+                  <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs"
+                    disabled={save.isPending} onClick={() => setNa(row, false)}
+                    aria-label={`Add back: ${rowLabel(row)}`} data-testid="contractor-check-add-back">
+                    Add back
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
       <p className="text-xs mt-3">
         <Link href={`/contractors?track=${encodeURIComponent(module)}`} className="text-primary font-medium hover:underline"

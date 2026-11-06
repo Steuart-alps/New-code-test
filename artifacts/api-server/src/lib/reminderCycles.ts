@@ -32,17 +32,22 @@ export async function lockReminderItem(
   clientId: number,
   itemId: number,
   mode: "update" | "share",
-): Promise<{ status: string; cycle: string | null; contractorId: number | null } | null> {
-  const rows = await tx.execute(sql`SELECT status, to_char(due_date, 'YYYY-MM-DD') AS cycle, contractor_id
+): Promise<{ status: string; cycle: string | null; contractorId: number | null; notRequired: boolean } | null> {
+  const rows = await tx.execute(sql`SELECT status, to_char(due_date, 'YYYY-MM-DD') AS cycle, contractor_id,
+      (not_required_at IS NOT NULL) AS not_required
     FROM compliance_items WHERE id=${itemId} AND client_id=${clientId}
     ${mode === "update" ? sql`FOR UPDATE` : sql`FOR SHARE`}`);
   const row = (rows.rows as any[])[0];
-  return row ? { status: String(row.status), cycle: row.cycle ?? null, contractorId: row.contractor_id ?? null } : null;
+  return row ? {
+    status: String(row.status), cycle: row.cycle ?? null, contractorId: row.contractor_id ?? null,
+    notRequired: row.not_required === true,
+  } : null;
 }
 
 /**
  * Supersede every pending reminder-cycle draft of an item that no longer
- * matches its current state (deleted, completed, contractor changed, due
+ * matches its current state (deleted, completed, marked not required,
+ * contractor changed, due
  * date changed or removed). Pass `exceptCycle` from the scheduler to also
  * retire pending drafts of any other cycle before it queues that one.
  * Returns the ids superseded.
@@ -59,6 +64,7 @@ export async function supersedeStaleReminderCycles(
       superseded_reason = CASE
         WHEN ci.id IS NULL THEN 'Compliance check deleted'
         WHEN ci.status = 'completed' THEN 'Compliance check completed'
+        WHEN ci.not_required_at IS NOT NULL THEN 'Compliance check marked not required'
         WHEN ci.contractor_id IS DISTINCT FROM q.contractor_id THEN 'Contractor changed'
         WHEN ci.due_date IS NULL THEN 'Due date removed'
         WHEN to_char(ci.due_date, 'YYYY-MM-DD') <> q.reminder_cycle THEN 'Due date changed'
@@ -70,7 +76,7 @@ export async function supersedeStaleReminderCycles(
       AND q.client_id=${clientId} AND q.entity_type='compliance' AND q.entity_id=${itemId}
       AND q.status='pending' AND q.reminder_cycle IS NOT NULL
       AND (
-        ci.id IS NULL OR ci.status = 'completed' OR ci.due_date IS NULL
+        ci.id IS NULL OR ci.status = 'completed' OR ci.not_required_at IS NOT NULL OR ci.due_date IS NULL
         OR ci.contractor_id IS DISTINCT FROM q.contractor_id
         OR to_char(ci.due_date, 'YYYY-MM-DD') <> q.reminder_cycle
         ${options.exceptCycle === undefined ? sql`` : sql`OR q.reminder_cycle <> ${options.exceptCycle}`}

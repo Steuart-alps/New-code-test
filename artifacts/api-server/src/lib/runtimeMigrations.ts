@@ -2360,6 +2360,11 @@ async function runRuntimeMigrationsOnce() {
     // Mirrors lib/db/src/schema/compliance-items.ts completedInHouseBy.
     await db.execute(sql`ALTER TABLE "compliance_items" ADD COLUMN IF NOT EXISTS "completed_in_house_by" text`);
 
+    // ---- A compliance check marked "Not required" (N/A) (Nov 2026) ----
+    // Mirrors lib/db/src/schema/compliance-items.ts notRequiredAt / notRequiredBy.
+    await db.execute(sql`ALTER TABLE "compliance_items" ADD COLUMN IF NOT EXISTS "not_required_at" timestamp`);
+    await db.execute(sql`ALTER TABLE "compliance_items" ADD COLUMN IF NOT EXISTS "not_required_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
+
     // ---- The person responsible for an action, issue or check (Oct 2026) ----
     await migrateAssignees();
 

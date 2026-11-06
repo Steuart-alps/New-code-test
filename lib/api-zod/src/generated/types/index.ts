@@ -430,6 +430,8 @@ export * from './nightFireWalks';
 export * from './nightFireWalkSite';
 export * from './nightFireWalkStatus';
 export * from './nightFireWalkTime';
+export * from './notRequiredRequest';
+export * from './notRequiredResponse';
 export * from './okResponse';
 export * from './orderFireCallPointsRequest';
 export * from './ownerBusinesses';

@@ -599,6 +599,7 @@ export async function getTodayByDepartment(scope: TodayScope, now: Date = new Da
     FROM compliance_items
     WHERE client_id = ${clientId}
       AND ${siteOrNone(sql`site_id`)}
+      AND not_required_at IS NULL
       AND (
         (status <> 'completed' AND due_date IS NOT NULL AND due_date::date <= ${today})
         OR (completed_at >= ${dayStart} AND completed_at < ${dayEnd})

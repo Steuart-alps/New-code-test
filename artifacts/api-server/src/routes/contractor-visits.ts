@@ -261,4 +261,44 @@ router.put("/contractor-visits/checks/:checkId", requireAuth, requireClientAdmin
   res.json({ ok: true });
 });
 
+const NotRequiredBody = z.object({ notRequired: z.boolean() });
+
+/**
+ * Mark a compliance check "Not required" (N/A), from the Contractor checks
+ * box on a track, or put it back. The check is never deleted: it keeps its
+ * history, but sends no reminders and is left out of overdue counts and the
+ * compliance figures while it is marked (every reminder query skips
+ * not_required_at). Its open reminder cycles are closed.
+ */
+router.put("/compliance-items/:id/not-required", requireAuth, requireClientAdmin, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  const body = NotRequiredBody.safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.flatten() });
+
+  const [existing] = await db.select().from(complianceItemsTable)
+    .where(and(eq(complianceItemsTable.id, id), eq(complianceItemsTable.clientId, clientId))).limit(1);
+  if (!existing) return res.status(404).json({ error: "Check not found" });
+  if ((existing.notRequiredAt != null) === body.data.notRequired) {
+    return res.json({ ok: true, notRequiredAt: existing.notRequiredAt ? new Date(existing.notRequiredAt).toISOString() : null });
+  }
+  const changes = body.data.notRequired
+    ? { notRequiredAt: new Date(), notRequiredBy: req.currentUser?.id ?? null, updatedAt: new Date() }
+    // Put back: reminders start afresh from its due date.
+    : { notRequiredAt: null, notRequiredBy: null, notificationSentAt: null, updatedAt: new Date() };
+  let after: typeof existing | undefined;
+  await db.transaction(async (tx) => {
+    [after] = await tx.update(complianceItemsTable).set(changes)
+      .where(and(eq(complianceItemsTable.id, id), eq(complianceItemsTable.clientId, clientId))).returning();
+    await supersedeStaleReminderCycles(tx, clientId, id);
+  });
+  await appendAuditEvent(req, {
+    clientId, entityType: "compliance_item", entityId: id, action: "updated",
+    before: existing, after, metadata: { notRequired: body.data.notRequired },
+  });
+  res.json({ ok: true, notRequiredAt: after?.notRequiredAt ? new Date(after.notRequiredAt).toISOString() : null });
+});
+
 export default router;

@@ -480,12 +480,12 @@ try {
   const rowFor = (label) => contractorRows.filter({ hasText: label });
   assert.equal(await rowFor("Fire alarm service").getAttribute("data-rag"), "red");
   assert.match(await rowFor("Fire alarm service").innerText(), /Certificate outstanding[\s\S]*Contractor: Alarm Co/);
-  assert.equal(await rowFor("Fire alarm service").getAttribute("href"), "/items/61");
+  assert.equal(await rowFor("Fire alarm service").getByRole("link").getAttribute("href"), "/items/61");
   assert.equal(await rowFor("Fire extinguisher service").getAttribute("data-rag"), "amber", "a business-wide check counts at the site");
   assert.equal(await rowFor("Emergency lighting 3-hour test").getAttribute("data-rag"), "green");
   assert.match(await rowFor("Emergency lighting 3-hour test").innerText(), /in house by Sam Patel/);
   assert.equal(await rowFor("Fire risk assessment review").count(), 0, "a line marked N/A on the Contractors page is hidden");
-  assert.match(await contractorCard.getByTestId("contractor-checks-hidden").innerText(), /1 marked N\/A[\s\S]*Add back on the Contractors page/);
+  assert.match(await contractorCard.getByTestId("contractor-checks-hidden").innerText(), /1 marked N\/A \(not required here\)/);
   await contractorCard.scrollIntoViewIfNeeded();
   await shot(page, "7-contractor-checks");
   console.log("ok - FireTrack shows its contractor services red, amber or green from their compliance checks, each opening the check");

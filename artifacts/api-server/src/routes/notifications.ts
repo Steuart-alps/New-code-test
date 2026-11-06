@@ -122,7 +122,7 @@ async function sendReminderForItem(opts: {
     // Recheck the item under lock before claiming this cycle: the caller's
     // snapshot may predate an edit, completion or contractor change.
     const current = await lockReminderItem(tx, item.clientId, item.id, "update");
-    if (!current || current.status === "completed" || current.cycle !== cycleDate
+    if (!current || current.status === "completed" || current.notRequired || current.cycle !== cycleDate
       || current.contractorId !== contractor.id) return false;
     // Retire pending drafts of any other (obsolete) cycle; a draft already
     // being sent is left alone and blocks this run until it settles.
@@ -192,7 +192,7 @@ export async function runReminderJob(): Promise<{ queued: number; sent: number; 
   let errors = 0;
 
   for (const { item, contractor, siteDepartmentId } of items) {
-    if (!contractor?.email || !item.dueDate || item.status === "completed" || item.notificationSentAt) { skipped++; continue; }
+    if (!contractor?.email || !item.dueDate || item.status === "completed" || item.notRequiredAt || item.notificationSentAt) { skipped++; continue; }
 
     if (!settingsCache[item.clientId]) {
       settingsCache[item.clientId] = await getClientSettings(item.clientId);
@@ -281,6 +281,10 @@ router.post("/notifications/send-reminders", requireAuth, requireClientAdmin, as
       results.push({ itemId: item.id, title: item.title, contractorEmail: contractor.email, status: "skipped", reason: "Item completed" });
       skipped++; continue;
     }
+    if (item.notRequiredAt) {
+      results.push({ itemId: item.id, title: item.title, contractorEmail: contractor.email, status: "skipped", reason: "Marked not required (N/A)" });
+      skipped++; continue;
+    }
 
     if (!settingsCache[item.clientId]) {
       settingsCache[item.clientId] = await getClientSettings(item.clientId);
@@ -351,6 +355,7 @@ router.post("/notifications/send-reminder/:itemId", requireAuth, requireClientAd
   if (!row) return void res.status(404).json({ error: "This scheduling link is no longer valid." });
   const { item, contractor } = row;
   if (!contractor?.email) return void res.status(400).json({ error: "Contractor record is missing — please contact the business directly." });
+  if (item.notRequiredAt) return void res.status(400).json({ error: "This check is marked not required (N/A). Put it back to send a reminder." });
 
   const settings = await getClientSettings(row.item.clientId);
   const companyName = settings["companyName"] ?? "ComplyTrack";

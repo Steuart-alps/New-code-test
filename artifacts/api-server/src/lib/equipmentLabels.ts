@@ -820,6 +820,7 @@ export async function buildScanSummary(code: string, clientId: number, target: L
           (SELECT max(c.expiry_date) FROM certificates c WHERE c.item_id = ci.id AND c.outcome <> 'unsatisfactory') AS certificate_expiry
         FROM compliance_items ci
         WHERE ci.client_id = ${clientId} AND ci.equipment_id = ${id}
+          AND ci.not_required_at IS NULL
         ORDER BY ci.due_date NULLS LAST, ci.id`));
       for (const item of items) {
         const due = isoDay(item.due_date) ?? isoDay(item.certificate_expiry);
