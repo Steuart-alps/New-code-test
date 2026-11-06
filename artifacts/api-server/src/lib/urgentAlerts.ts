@@ -141,6 +141,7 @@ async function candidates(clientId: number, since: Date): Promise<Candidate[]> {
            c.assignee_user_id, c.assigned_to, NULL
     FROM compliance_items c LEFT JOIN sites s ON s.id = c.site_id AND s.client_id = c.client_id
     WHERE c.client_id = ${clientId} AND c.priority = 'critical' AND c.status <> 'completed'
+      AND c.not_required_at IS NULL
       AND GREATEST(c.created_at, c.updated_at) >= ${from}::timestamptz
       -- A starter check a new business was given (lib/seedStarterContent.ts)
       -- is an example until someone gives it a due date; a brand-new

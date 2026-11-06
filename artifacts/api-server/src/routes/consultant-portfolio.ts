@@ -82,7 +82,8 @@ router.get("/portfolio", requireAuth, requireConsultant, async (req, res) => {
     // Same rule as the dashboard stats: past due and not completed counts as overdue.
     db.execute(sql`
       SELECT client_id, count(*) AS n FROM compliance_items
-      WHERE client_id IN (${idList}) AND status <> 'completed' AND (status = 'overdue' OR due_date < now())
+      WHERE client_id IN (${idList}) AND status <> 'completed' AND not_required_at IS NULL
+        AND (status = 'overdue' OR due_date < now())
       GROUP BY client_id
     `),
     // Failed track checks open remediation actions, so open actions cover them.

@@ -10,12 +10,14 @@ export type ComplianceCheckDueState = "action" | "overdue" | "due_soon";
  * Where a compliance check stands: "action" when its newest certificate is
  * unsatisfactory, has open remedial defects or is still outstanding after a
  * contractor visit (whatever the due date, and even when completed);
- * "overdue"; "due_soon" within DUE_SOON_DAYS; null when it is in date.
+ * "overdue"; "due_soon" within DUE_SOON_DAYS; null when it is in date, or
+ * marked "Not required" (N/A).
  */
 export function complianceCheckDueState(
-  item: Pick<ComplianceItem, "needsAction" | "status" | "dueDate">,
+  item: Pick<ComplianceItem, "needsAction" | "status" | "dueDate"> & Partial<Pick<ComplianceItem, "notRequiredAt">>,
   now: number,
 ): ComplianceCheckDueState | null {
+  if (item.notRequiredAt) return null;
   if (item.needsAction) return "action";
   if (item.status === "completed") return null;
   const due = item.dueDate ? new Date(item.dueDate).getTime() : null;

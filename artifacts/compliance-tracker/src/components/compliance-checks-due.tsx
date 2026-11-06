@@ -37,7 +37,7 @@ export function ComplianceChecksDue({ siteId = null }: { siteId?: number | null 
   const actionNeeded = flagged.filter((row) => row.state === "action").length;
   const overdue = flagged.filter((row) => row.state === "overdue").length;
   const dueSoon = flagged.length - overdue - actionNeeded;
-  const noDueDate = items.filter((item) => item.status !== "completed" && item.status !== "overdue" && !item.dueDate).length;
+  const noDueDate = items.filter((item) => !item.notRequiredAt && item.status !== "completed" && item.status !== "overdue" && !item.dueDate).length;
 
   if (flagged.length === 0 && noDueDate === 0) return null;
   const hasOverdue = overdue > 0 || actionNeeded > 0;

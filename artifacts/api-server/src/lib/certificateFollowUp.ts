@@ -107,6 +107,8 @@ export async function getVisitsAwaitingCertificate(
       LEFT JOIN sites s ON s.id = ci.site_id AND s.client_id = ci.client_id
       WHERE ${clientId == null ? sql`TRUE` : sql`ci.client_id = ${clientId}`}
         AND (ci.completed_at IS NOT NULL OR ci.visit_scheduled_at IS NOT NULL)
+        -- Marked "Not required" (N/A): no certificate is chased.
+        AND ci.not_required_at IS NULL
     ) v
     WHERE v.visit_day IS NOT NULL
       -- Done in house by a competent person (lib/certificateOutcomes.ts).

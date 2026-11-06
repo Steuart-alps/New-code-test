@@ -248,6 +248,48 @@ try {
   assert.equal((await staff.request('PUT', `/contractor-visits/checks/${gas.id}`, { contractorId: null, notNeeded: true })).status, 403);
   console.log('ok - register checks take a contractor or no contractor needed too');
 
+  // ── N/A on a track's Contractor checks box: the check is kept, not reminded ─
+  const naCheck = ok(await owner.request('POST', '/compliance-items', {
+    title: 'Not needed here check', siteId: siteA.id, contractorId: waterCo.id, priority: 'high',
+    dueDate: `${isoDay(5)}T00:00:00.000Z`, frequencyMonths: 12,
+  }), 201);
+  const statsTotal = async () => ok(await owner.request('GET', '/dashboard/stats')).total;
+  const totalBefore = await statsTotal();
+  await runReminderJob();
+  assert.deepEqual((await drafts(naCheck.id)).map(d => d.status), ['pending'], 'reminded while required');
+  assert.equal((await staff.request('PUT', `/compliance-items/${naCheck.id}/not-required`, { notRequired: true })).status, 403,
+    'staff cannot mark a check not required');
+  const otherNa = await createTenant('contractor-visits-na-other');
+  assert.equal((await otherNa.request('PUT', `/compliance-items/${naCheck.id}/not-required`, { notRequired: true })).status, 404,
+    "another business cannot mark this business's check");
+  const marked = ok(await owner.request('PUT', `/compliance-items/${naCheck.id}/not-required`, { notRequired: true }));
+  assert.ok(marked.notRequiredAt, 'marked not required');
+  const kept = await check(naCheck.id);
+  assert.ok(kept.notRequiredAt, 'the check is kept and shows it is not required');
+  assert.equal(kept.notRequiredBy, undefined, 'who marked it stays in the audit log, not the response');
+  assert.ok((ok(await owner.request('GET', '/compliance-items'))).some(item => item.id === naCheck.id), 'still listed');
+  assert.deepEqual((await drafts(naCheck.id)).map(d => [d.status, d.superseded_reason]),
+    [['superseded', 'Compliance check marked not required']], 'its pending reminder is withdrawn');
+  await runReminderJob();
+  assert.equal((await drafts(naCheck.id)).length, 1, 'and no new reminder is drafted');
+  assert.equal((await owner.request('POST', `/notifications/send-reminder/${naCheck.id}`)).status, 400, 'nor sent by hand');
+  assert.equal(await statsTotal(), totalBefore - 1, 'it leaves the dashboard figures');
+  const naAudit = (await pool.query(
+    `SELECT metadata FROM audit_events WHERE client_id = $1 AND entity_type = 'compliance_item' AND entity_id = $2
+     AND metadata ? 'notRequired' ORDER BY id`, [owner.clientId, naCheck.id])).rows;
+  assert.deepEqual(naAudit.map(r => r.metadata.notRequired), [true], 'marking it is audited');
+
+  const back = ok(await owner.request('PUT', `/compliance-items/${naCheck.id}/not-required`, { notRequired: false }));
+  assert.equal(back.notRequiredAt, null, 'added back');
+  assert.equal((await check(naCheck.id)).notRequiredAt, null);
+  assert.equal(await statsTotal(), totalBefore, 'back in the figures');
+  // A withdrawn reminder holds its due date's slot (one reminder per check
+  // and date, as when the contractor changes); the next date is reminded.
+  ok(await owner.request('PUT', `/compliance-items/${naCheck.id}`, { dueDate: `${isoDay(6)}T00:00:00.000Z` }));
+  await runReminderJob();
+  assert.deepEqual((await drafts(naCheck.id)).map(d => d.status), ['superseded', 'pending'], 'and reminded again');
+  console.log('ok - N/A keeps a check but stops its reminders and figures, and Add back undoes it');
+
   // ── Only managers choose, and only their own business's contractors ────────
   const other = await createTenant('contractor-visits-other');
   const otherContractor = ok(await other.request('POST', '/contractors', { name: 'Other Co', email: 'other@contractor.test' }), 201);
