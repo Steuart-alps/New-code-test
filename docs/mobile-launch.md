@@ -287,3 +287,23 @@ App Store Connect needs 3 to 10 screenshots per size. iPad screenshots aren't ne
 - [ ] **Open passkey/scanning PRs:** decide whether **#77** (native passkeys) and **#68** (PAT tag scanning) go into 1.0. Both are still waiting for device testing. If included, merge them before the production build and resolve the conflicts listed in section 1. Then set the four `MOBILE_*` variables on Render and confirm `/.well-known/apple-app-site-association` and `/.well-known/assetlinks.json` return 200. Otherwise, ship 1.0 without them and add them in 1.1.
 - [ ] App Store: export compliance is answered automatically by `ITSAppUsesNonExemptEncryption`. Content rights: no third-party content. Sign in with Apple isn't required, because there's no third-party login.
 - [ ] Play: App content is complete (privacy policy, app access, ads, content rating, target audience, data safety, government app: no, financial features: none, health apps declaration: not a health app).
+- [ ] App Store payments: nothing in the app or its listing points users to a purchase route (section 10).
+
+## 10. App Store fees: web-only sign-up and billing
+
+ComplyTrack can avoid App Store commission by selling only on the web (checked November 2026; Apple's rules change often, so re-read the current App Review Guidelines before each submission). Apple allows this under Guideline 3.1.3(b), multiplatform services. The iOS app is for using the service, and accounts and payment live on the web. Business-to-business tools like this are the usual case.
+
+What keeps it compliant:
+
+- **Sign-up and payment on the web only.** Customers are set up by ALPS or their consultant, billed by invoice or direct debit, and sign in to the app with those credentials.
+- **No pricing, plans, upgrade or "buy" screens** in the app.
+- **No sign-up in the app, and no link or button to a web purchase or pricing page.** The relaxed US rules (external links without commission) apply only to the US storefront. ComplyTrack is a UK launch, so treat any such link as a 3.1.1 violation.
+- **Don't add in-app purchase** unless the model changes; if it does, Apple's 15 to 30% commission applies to those sales.
+
+Things to check in this repo before submitting:
+
+- The App Store description ends with "Businesses can start at complytrack.alpsconsultancy.co.uk." Apple can read that as a call to action to another way of buying. Consider rewording it to "ComplyTrack needs an account from your employer or health and safety consultant." only (the Google Play listing can keep the website).
+- Section 5: owners on a paid plan are told to cancel on the web, with a link to web Settings. Make sure this is plain text or a contact route (for example ALPS's email) rather than a link to a billing or purchase page on iOS.
+- Marketing URL (section 2) is fine as an informational site, but the page it opens shouldn't be a pricing or checkout page.
+
+If a reviewer rejects the app under 3.1.1 because they see no purchase route, reply in Resolution Center citing 3.1.3(b): accounts are provided by the employer or consultant, the service is used on both web and mobile, and there is no purchase or sign-up in the app. Add the same line to the App Review notes (section 6).
