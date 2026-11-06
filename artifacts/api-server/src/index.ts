@@ -54,6 +54,7 @@ import { runUrgentAlertJob } from "./lib/urgentAlerts";
 import { runNightFireWalkChaseJob } from "./lib/nightFireWalks";
 import { runFrostWarningJob } from "./lib/frostWarnings";
 import { runTrackReminderJob } from "./lib/trackReminders";
+import { runKitchenColdRecheckJob } from "./lib/kitchenColdRechecks";
 import { runScheduledServicePriceAudit, SERVICE_PRICE_AUDIT_CRON } from "./lib/servicePriceAudit";
 import { runStripeTaxCheck, STRIPE_TAX_CHECK_CRON } from "./lib/stripeTaxCheck";
 import { runScheduledStoragePriceAudit, STORAGE_PRICE_AUDIT_CRON } from "./lib/storagePriceAudit";
@@ -482,6 +483,13 @@ function startScheduler() {
     (result) => result.notificationsCreated === 0 && result.errors === 0,
   ), { daily: true });
   logger.info("Track owner reminder scheduler started (hourly at :05)");
+
+  // A failed fridge or freezer reading asks for a re-check an hour later:
+  // one in-app reminder per failed reading still without a re-check.
+  schedule("*/5 * * * *", "kitchen-cold-rechecks", logged(
+    "Kitchen cold re-check reminders complete", () => runKitchenColdRecheckJob(),
+    (result) => result.notificationsCreated === 0 && result.errors === 0,
+  ));
 
   // Storage add-on price vs provider rate plus margin. Purchases pause on
   // drift; this alerts operators once per finding and reports recovery.

@@ -12,6 +12,7 @@
     "test:kitchen-mobile-replay": "bash tests/run-fresh-schema.sh tests/kitchen-mobile-replay.mjs",
     "test:mobile-check-replay": "bash tests/run-fresh-schema.sh tests/mobile-check-replay.mjs",
     "test:kitchen-temperature-actions": "bash tests/run-fresh-schema.sh tests/kitchen-temperature-actions.mjs",
+    "test:kitchen-cold-rechecks": "bash tests/run-fresh-schema.sh tests/kitchen-cold-rechecks.mjs",
     "test:checklist-results-fixtrack": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/checklist-results-fixtrack.mjs",
     "test:owner-late-edit-reason": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/owner-late-edit-reason.mjs",
     "test:own-site-records": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/own-site-records.mjs",

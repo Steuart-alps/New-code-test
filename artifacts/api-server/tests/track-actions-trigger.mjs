@@ -97,64 +97,11 @@ async function main() {
   const fireActions = sourceAction(await actions("fire"), "fire_safety_checks", fireFailure.data?.id);
   assert("FireTrack failure creates one linked action", fireActions.length === 1);
   const fireAction = fireActions[0];
-  const fireRequirements = await request("GET", `/track-evidence/requirements?module=fire&actionId=${fireAction?.id}`);
-  assert("load FireTrack evidence profile", fireRequirements.status === 200 && fireRequirements.data?.length === 5);
-  const fireMissing = await request("PATCH", `/track-actions/${fireAction?.id}`, resolutionPayload("Fire closure evidence"));
-  assert("FireTrack sign-off lists missing profile evidence", fireMissing.status === 400
-    && fireMissing.data?.missingEvidence?.length === 5);
-
-  const responsiblePerson = (fireRequirements.data ?? []).find(item => item.requirementKey === "responsible_person");
-  const rejectedResponsible = await request("POST", "/track-evidence", {
-    module: "fire", siteId, actionId: fireAction?.id,
-    requirementKey: responsiblePerson?.requirementKey, evidenceType: responsiblePerson?.evidenceType,
-    title: "Rejected responsible person evidence", details: "The named role could not be confirmed.",
-  });
-  assert("record FireTrack responsible-person evidence", rejectedResponsible.status === 201);
-  assert("reject unsupported FireTrack evidence", (await staffRequest("POST", `/track-evidence/${rejectedResponsible.data?.id}/review`, {
-    status: "rejected", reviewNotes: "The named role could not be confirmed.",
-  })).status === 200);
-  const rejectedProgress = await request("GET", `/track-evidence/requirements?module=fire&actionId=${fireAction?.id}`);
-  const rejectedRequirement = rejectedProgress.data?.find(item => item.requirementKey === "responsible_person");
-  assert("report rejected FireTrack evidence as missing", rejectedRequirement?.recordedCount === 0
-    && rejectedRequirement?.rejectedCount === 1 && rejectedRequirement?.missingCount === 1
-    && rejectedRequirement?.satisfied === false);
-  const rejectedEvidenceAttempt = await request("PATCH", `/track-actions/${fireAction?.id}`, resolutionPayload("Rejected evidence"));
-  assert("rejected evidence does not satisfy a FireTrack requirement", rejectedEvidenceAttempt.status === 400
-    && rejectedEvidenceAttempt.data?.missingEvidence?.some(item => item.requirementKey === "responsible_person"));
-
-  const fireEvidenceIds = [];
-  for (const requirement of fireRequirements.data ?? []) {
-    const evidence = await request("POST", "/track-evidence", {
-      module: "fire",
-      siteId,
-      actionId: fireAction?.id,
-      requirementKey: requirement.requirementKey,
-      evidenceType: requirement.evidenceType,
-      title: requirement.title,
-      details: `Evidence recorded for ${requirement.title}.`,
-    });
-    assert(`record FireTrack ${requirement.requirementKey}`, evidence.status === 201);
-    if (evidence.status === 201) fireEvidenceIds.push({ id: evidence.data?.id, requirement });
-  }
-  const recordedProgress = await request("GET", `/track-evidence/requirements?module=fire&actionId=${fireAction?.id}`);
-  const recordedReviewRequirement = recordedProgress.data?.find(item => item.requirementKey === "risk_assessment");
-  assert("report recorded FireTrack evidence awaiting review", recordedReviewRequirement?.recordedCount === 1
-    && recordedReviewRequirement?.verifiedCount === 0 && recordedReviewRequirement?.satisfied === false);
-  const firePendingReview = await request("PATCH", `/track-actions/${fireAction?.id}`, resolutionPayload("Fire profile evidence"));
-  assert("FireTrack sign-off waits for independent verification", firePendingReview.status === 400
-    && firePendingReview.data?.missingEvidence?.some(item => item.reviewRequired));
-  for (const item of fireEvidenceIds.filter(row => row.requirement.reviewRequired)) {
-    assert(`independently verify FireTrack ${item.requirement.requirementKey}`, (await staffRequest("POST", `/track-evidence/${item.id}/review`, {
-      status: "verified",
-      reviewNotes: "Independently checked against the source record.",
-    })).status === 200);
-  }
-  const verifiedProgress = await request("GET", `/track-evidence/requirements?module=fire&actionId=${fireAction?.id}`);
-  const verifiedRequirement = verifiedProgress.data?.find(item => item.requirementKey === "risk_assessment");
-  assert("report independently verified FireTrack evidence", verifiedRequirement?.verifiedCount === 1
-    && verifiedRequirement?.recordedCount === 0 && verifiedRequirement?.satisfied === true);
-  assert("FireTrack action resolves after required evidence is verified",
-    (await request("PATCH", `/track-actions/${fireAction?.id}`, resolutionPayload("Fire profile evidence"))).status === 200);
+  // Sign-off needs only the resolve form and signature: no separate evidence profile.
+  assert("FireTrack action still needs an evidence reference",
+    (await request("PATCH", `/track-actions/${fireAction?.id}`, resolutionPayload(""))).status === 400);
+  assert("FireTrack action resolves with the resolve form and signature",
+    (await request("PATCH", `/track-actions/${fireAction?.id}`, resolutionPayload("Fire closure evidence"))).status === 200);
 
   const pass = await request("POST", "/legionella", {
     checkType: "cold_tank_temp", checkDate: date, temperature: 20, result: "pass", siteId,
@@ -182,36 +129,8 @@ async function main() {
   assert("open action fields are immutable", JSON.stringify({
     title: legActions[0]?.title, severity: legActions[0]?.severity, dueDate: legActions[0]?.dueDate,
   }) === JSON.stringify(initialActionFields));
-  const requirements = await request("GET", `/track-evidence/requirements?module=legionella&actionId=${action?.id}`);
-  assert("load Legionella evidence requirements", requirements.status === 200 && requirements.data?.length === 8);
-  const legionellaMissing = await request("PATCH", `/track-actions/${action?.id}`, resolutionPayload("Legionella closure evidence"));
-  assert("Legionella sign-off lists missing profile evidence", legionellaMissing.status === 400
-    && legionellaMissing.data?.missingEvidence?.length === 8);
-  let pendingReviewGateChecked = false;
-  for (const requirement of requirements.data ?? []) {
-    const evidence = await request("POST", "/track-evidence", {
-      module: "legionella",
-      siteId,
-      actionId: action?.id,
-      requirementKey: requirement.requirementKey,
-      evidenceType: requirement.evidenceType,
-      title: requirement.title,
-      details: `Evidence recorded for ${requirement.title}.`,
-    });
-    assert(`record ${requirement.requirementKey}`, evidence.status === 201);
-    if (requirement.reviewRequired) {
-      if (!pendingReviewGateChecked && evidence.status === 201) {
-        const pendingReview = await request("PATCH", `/track-actions/${action?.id}`, resolutionPayload("Legionella closure evidence"));
-        assert("Legionella sign-off waits for independent verification", pendingReview.status === 400
-          && pendingReview.data?.missingEvidence?.some(item => item.requirementKey === requirement.requirementKey));
-        pendingReviewGateChecked = true;
-      }
-      assert(`review ${requirement.requirementKey}`, (await staffRequest("POST", `/track-evidence/${evidence.data?.id}/review`, {
-        status: "verified",
-        reviewNotes: "Independently checked against the source record.",
-      })).status === 200);
-    }
-  }
+  const legionellaUnsigned = await request("PATCH", `/track-actions/${action?.id}`, { ...resolutionPayload("Legionella closure evidence"), resolverSignature: undefined });
+  assert("Legionella sign-off still needs a drawn signature", legionellaUnsigned.status === 400);
   assert("resolve action", (await request("PATCH", `/track-actions/${action?.id}`, resolutionPayload("Legionella closure evidence"))).status === 200);
   assert("source update after resolution", (await request("PUT", `/legionella/${failed.data?.id}`, { result: "fail", notes: "new source evidence" })).status === 200);
   const resolved = sourceAction(await actions("legionella"), "legionella_checks", failed.data?.id);
@@ -224,20 +143,7 @@ async function main() {
     module: "fire", title: "Urgent evidence gate", severity: "urgent", siteId,
   });
   assert("create urgent action", urgent.status === 201);
-  const urgentEvidence = await request("POST", "/track-evidence", {
-    module: "fire", siteId, actionId: urgent.data?.id,
-    evidenceType: "verification", title: "Urgent closure evidence",
-    details: "Independent closure evidence for the urgent action.",
-  });
-  assert("record urgent evidence", urgentEvidence.status === 201);
-  assert("urgent action rejects unsigned evidence", (await request("PATCH", `/track-actions/${urgent.data?.id}`, {
-    status: "resolved", remedialAction: "Fixed", evidenceReference: "Urgent evidence",
-    resolutionNotes: "Closed", resolverSignature: SIGNATURE,
-  })).status === 400);
-  assert("review urgent evidence independently", (await staffRequest("POST", `/track-evidence/${urgentEvidence.data?.id}/review`, {
-    status: "verified", reviewNotes: "Independently checked.",
-  })).status === 200);
-  assert("urgent action resolves after evidence review", (await request("PATCH", `/track-actions/${urgent.data?.id}`, {
+  assert("urgent action resolves with the resolve form and signature", (await request("PATCH", `/track-actions/${urgent.data?.id}`, {
     status: "resolved", remedialAction: "Fixed", evidenceReference: "Urgent evidence",
     resolutionNotes: "Closed", resolverSignature: SIGNATURE,
   })).status === 200);

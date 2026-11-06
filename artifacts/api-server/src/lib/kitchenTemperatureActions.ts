@@ -40,7 +40,9 @@ export async function recordKitchenTemperatureActions(
       title: `Failed temperature: ${failure.label} · ${after.recordDate}`,
       instruction: `Diary ${after.recordDate}. ${failure.label} · ${failure.field}: ${kitchenFailureValue(failure)}. `
         + `Required range: ${failure.limit.min === null ? '' : `minimum ${failure.limit.min}; `}${failure.limit.max === null ? '' : `maximum ${failure.limit.max}; `}${failure.unit}. `
-        + `Initial action taken: ${failure.actionTaken}. Keep the failed observation as historical evidence; attach verification evidence before manager sign-off.`,
+        + `Initial action taken: ${failure.actionTaken}. `
+        + (failure.section === 'coldFood' && failure.field !== 'recheckTemp' ? 'Re-check this unit in one hour and record it in the Re-check box on the diary line. ' : '')
+        + `Keep the failed observation as historical evidence; a manager signs off the action once the temperature is back under control.`,
       remedialAction: failure.actionTaken, createdBy: actorId,
     }).returning();
     await tx.insert(auditEventsTable).values({

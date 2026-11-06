@@ -1,6 +1,6 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@workspace/db";
-import { trackEvidenceRequirementsTable, trackEvidenceTable } from "@workspace/db/schema";
+import { trackEvidenceRequirementsTable } from "@workspace/db/schema";
 
 type ProfileRequirement = {
   requirementKey: string;
@@ -69,37 +69,3 @@ export async function ensureDefaultTrackEvidenceRequirements(clientId: number, m
 export const INSPECTION_REPORT_SOURCE_PREFIX = "inspection_report:";
 export const isInspectionReportSource = (sourceKind: string | null | undefined) =>
   !!sourceKind?.startsWith(INSPECTION_REPORT_SOURCE_PREFIX);
-
-export async function missingEvidenceForAction(clientId: number, action: {
-  id: number;
-  module: string;
-  sourceKind: string | null;
-}) {
-  // Manual actions, and those confirmed from an uploaded report, retain the
-  // existing resolution contract. Product-generated FireTrack/LegionellaTrack
-  // actions use the structured profile.
-  if (!action.sourceKind || isInspectionReportSource(action.sourceKind) || !DEFAULT_TRACK_EVIDENCE_REQUIREMENTS[action.module]) return [];
-  if (action.module === "kitchen" && !action.sourceKind.startsWith("kitchen_temperature_")) return [];
-  const requirements = await ensureDefaultTrackEvidenceRequirements(clientId, action.module);
-  if (!requirements.length) return [];
-  const keys = requirements.map(item => item.requirementKey);
-  const evidence = await db.select({
-    requirementKey: trackEvidenceTable.requirementKey,
-    evidenceType: trackEvidenceTable.evidenceType,
-    reviewStatus: trackEvidenceTable.reviewStatus,
-  }).from(trackEvidenceTable).where(and(
-    eq(trackEvidenceTable.clientId, clientId),
-    eq(trackEvidenceTable.module, action.module),
-    eq(trackEvidenceTable.actionId, action.id),
-    inArray(trackEvidenceTable.requirementKey, keys),
-  ));
-  return requirements.filter(requirement => {
-    const matching = evidence.filter(item =>
-      item.requirementKey === requirement.requirementKey && item.evidenceType === requirement.evidenceType,
-    );
-    const usable = requirement.reviewRequired
-      ? matching.filter(item => item.reviewStatus === "verified")
-      : matching.filter(item => item.reviewStatus !== "rejected");
-    return usable.length < requirement.minimumCount;
-  });
-}
